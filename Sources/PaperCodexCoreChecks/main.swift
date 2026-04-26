@@ -169,6 +169,139 @@ func runRepositoryChecks() throws {
     try check(fetchedMessages == [message], "messages should round-trip")
 }
 
+func runCitationChecks() throws {
+    let parsed = CitationParser.parse("Answer [[cite:paper:paper-a:p5:b17]] and [[cite:paper:paper-a:p5:asel1]].")
+    try check(parsed.citations.map(\.id) == ["paper:paper-a:p5:b17", "paper:paper-a:p5:asel1"], "citation parser should preserve citation IDs")
+    try check(parsed.displayText == "Answer [1] and [2].", "citation parser should replace markers with display indices")
+
+    let malformed = CitationParser.parse("Broken [[cite:not-a-paper]] marker.")
+    try check(malformed.citations.isEmpty, "malformed markers should not become citations")
+    try check(malformed.brokenMarkers == ["[[cite:not-a-paper]]"], "malformed markers should be reported")
+}
+
+func runPromptChecks() throws {
+    let now = Date(timeIntervalSince1970: 1_777_220_000)
+    let paper = Paper(
+        id: "paper-a",
+        filePath: "/tmp/paper.pdf",
+        fileHash: "hash-a",
+        title: "Paper A",
+        authors: ["Alice"],
+        year: 2026,
+        sourceURL: "https://example.com/paper",
+        importedAt: now,
+        updatedAt: now
+    )
+    let span = Span(
+        id: Span.makeID(paperID: "paper-a", page: 5, blockIndex: 17),
+        paperID: "paper-a",
+        page: 5,
+        bbox: BoundingBox(x: 1, y: 2, width: 3, height: 4),
+        text: "The selected mechanism controls latent trajectories.",
+        charRange: TextRange(location: 0, length: 52),
+        sectionHint: "Method",
+        confidence: 0.9
+    )
+    let anchor = Anchor(
+        id: Anchor.makeID(paperID: "paper-a", page: 5, suffix: "sel1"),
+        paperID: "paper-a",
+        page: 5,
+        selectedText: "controls latent trajectories",
+        bboxList: [span.bbox],
+        matchedSpanIDs: [span.id],
+        beforeContext: "The selected mechanism",
+        afterContext: "with a decoder.",
+        createdSessionID: "session-a",
+        createdAt: now,
+        confidence: 0.87
+    )
+    let prompt = PromptBuilder().buildPrompt(
+        request: PromptRequest(
+            userMessage: "Compare this selection with Paper B.",
+            workspacePath: "/tmp/session-a",
+            papers: [paper],
+            selectedAnchors: [anchor],
+            relevantSpans: [span]
+        )
+    )
+
+    try check(prompt.contains("Compare this selection with Paper B."), "prompt should include the user message")
+    try check(prompt.contains("anchor_id: paper:paper-a:p5:asel1"), "prompt should include selected anchor ID")
+    try check(prompt.contains("span_id: paper:paper-a:p5:b17"), "prompt should include relevant span ID")
+    try check(prompt.contains("workspace: /tmp/session-a"), "prompt should include workspace guidance")
+    try check(prompt.contains("[[cite:paper:{paper_id}:p{page}:b{block_index}]]"), "prompt should include citation contract")
+}
+
+func runWorkspaceChecks() throws {
+    let tempRoot = FileManager.default.temporaryDirectory
+        .appendingPathComponent("paper-codex-workspace-\(UUID().uuidString)", isDirectory: true)
+    let now = Date(timeIntervalSince1970: 1_777_220_000)
+    let paper = Paper(
+        id: "paper-a",
+        filePath: "/tmp/paper.pdf",
+        fileHash: "hash-a",
+        title: "Paper A",
+        authors: ["Alice"],
+        year: 2026,
+        sourceURL: nil,
+        importedAt: now,
+        updatedAt: now
+    )
+    let session = PaperSession(
+        id: "session-a",
+        title: "Mechanism Notes",
+        paperIDs: ["paper-a"],
+        codexSessionID: nil,
+        workspacePath: tempRoot.path,
+        createdAt: now,
+        updatedAt: now
+    )
+    let page = PageIndex(paperID: "paper-a", page: 1, text: "Page text", confidence: 0.95)
+    let span = Span(
+        id: Span.makeID(paperID: "paper-a", page: 1, blockIndex: 1),
+        paperID: "paper-a",
+        page: 1,
+        bbox: BoundingBox(x: 1, y: 2, width: 3, height: 4),
+        text: "Page text",
+        charRange: TextRange(location: 0, length: 9),
+        sectionHint: nil,
+        confidence: 0.95
+    )
+    let anchor = Anchor(
+        id: Anchor.makeID(paperID: "paper-a", page: 1, suffix: "sel1"),
+        paperID: "paper-a",
+        page: 1,
+        selectedText: "Page text",
+        bboxList: [span.bbox],
+        matchedSpanIDs: [span.id],
+        beforeContext: "",
+        afterContext: "",
+        createdSessionID: "session-a",
+        createdAt: now,
+        confidence: 0.95
+    )
+
+    try SessionWorkspaceManager().writeWorkspace(
+        session: session,
+        papers: [paper],
+        pagesByPaperID: ["paper-a": [page]],
+        spansByPaperID: ["paper-a": [span]],
+        anchorsByPaperID: ["paper-a": [anchor]]
+    )
+
+    let paperDir = tempRoot.appendingPathComponent("papers/paper-a", isDirectory: true)
+    try check(FileManager.default.fileExists(atPath: tempRoot.appendingPathComponent("session.json").path), "workspace should contain session.json")
+    try check(FileManager.default.fileExists(atPath: tempRoot.appendingPathComponent("prompt_contract.md").path), "workspace should contain prompt contract")
+    try check(FileManager.default.fileExists(atPath: tempRoot.appendingPathComponent("turns", isDirectory: true).path), "workspace should contain turns directory")
+    try check(FileManager.default.fileExists(atPath: paperDir.appendingPathComponent("metadata.json").path), "workspace should contain paper metadata")
+    try check(FileManager.default.fileExists(atPath: paperDir.appendingPathComponent("pages.jsonl").path), "workspace should contain pages jsonl")
+    try check(FileManager.default.fileExists(atPath: paperDir.appendingPathComponent("spans.jsonl").path), "workspace should contain spans jsonl")
+    try check(FileManager.default.fileExists(atPath: paperDir.appendingPathComponent("anchors.jsonl").path), "workspace should contain anchors jsonl")
+
+    let spans = try String(contentsOf: paperDir.appendingPathComponent("spans.jsonl"), encoding: .utf8)
+    try check(spans.contains("paper:paper-a:p1:b1"), "spans jsonl should include span ID")
+}
+
 let selectedChecks = Set(CommandLine.arguments.dropFirst())
 
 do {
@@ -179,6 +312,18 @@ do {
     if selectedChecks.isEmpty || selectedChecks.contains("repository") {
         try runRepositoryChecks()
         print("repository: pass")
+    }
+    if selectedChecks.isEmpty || selectedChecks.contains("citations") {
+        try runCitationChecks()
+        print("citations: pass")
+    }
+    if selectedChecks.isEmpty || selectedChecks.contains("prompt") {
+        try runPromptChecks()
+        print("prompt: pass")
+    }
+    if selectedChecks.isEmpty || selectedChecks.contains("workspace") {
+        try runWorkspaceChecks()
+        print("workspace: pass")
     }
 } catch {
     fputs("check failed: \(error)\n", stderr)
