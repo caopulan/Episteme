@@ -100,6 +100,12 @@ func runRepositoryChecks() throws {
     let category = Category(id: "cat-methods", parentID: nil, name: "Methods", sortOrder: 1)
     let childCategory = Category(id: "cat-vae", parentID: "cat-methods", name: "VAE", sortOrder: 2)
     let tag = PaperTag(id: "tag-control", name: "control")
+    let page = PageIndex(
+        paperID: "paper-a",
+        page: 2,
+        text: "Full text for page two.",
+        confidence: 0.93
+    )
     let span = Span(
         id: Span.makeID(paperID: "paper-a", page: 2, blockIndex: 3),
         paperID: "paper-a",
@@ -146,6 +152,7 @@ func runRepositoryChecks() throws {
     try repository.upsertTag(tag)
     try repository.assignPaper("paper-a", toCategory: "cat-vae")
     try repository.assignPaper("paper-a", toTag: "tag-control")
+    try repository.upsertPage(page)
     try repository.upsertSpan(span)
     try repository.upsertAnchor(anchor)
     try repository.upsertSession(session)
@@ -155,6 +162,7 @@ func runRepositoryChecks() throws {
     let fetchedCategories = try repository.fetchCategories()
     let fetchedTags = try repository.fetchTags(forPaperID: "paper-a")
     let fetchedCategoryIDs = try repository.fetchCategoryIDs(forPaperID: "paper-a")
+    let fetchedPages = try repository.fetchPages(paperID: "paper-a")
     let fetchedSpans = try repository.fetchSpans(paperID: "paper-a")
     let fetchedAnchors = try repository.fetchAnchors(paperID: "paper-a")
     let fetchedSessions = try repository.fetchSessions(paperID: "paper-a")
@@ -164,6 +172,7 @@ func runRepositoryChecks() throws {
     try check(fetchedCategories == [category, childCategory], "categories should preserve hierarchy and sort order")
     try check(fetchedTags == [tag], "paper tags should round-trip")
     try check(fetchedCategoryIDs == ["cat-vae"], "paper category links should round-trip")
+    try check(fetchedPages == [page], "page indexes should round-trip")
     try check(fetchedSpans == [span], "spans should round-trip")
     try check(fetchedAnchors == [anchor], "anchors should round-trip")
     try check(fetchedSessions == [session], "sessions should round-trip")

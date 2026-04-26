@@ -94,6 +94,9 @@ final class AppModel: ObservableObject {
             try repository.upsertPaper(paper)
 
             let index = try PDFIndexExtractor().extract(paperID: paperID, pdfURL: destination)
+            for page in index.pages {
+                try repository.upsertPage(page)
+            }
             for span in index.spans {
                 try repository.upsertSpan(span)
             }
@@ -145,12 +148,13 @@ final class AppModel: ObservableObject {
             updatedAt: now
         )
         try repository.upsertSession(session)
+        let pages = try repository.fetchPages(paperID: paper.id)
         let spans = try repository.fetchSpans(paperID: paper.id)
         let anchors = try repository.fetchAnchors(paperID: paper.id)
         try workspaceManager.writeWorkspace(
             session: session,
             papers: [paper],
-            pagesByPaperID: [paper.id: []],
+            pagesByPaperID: [paper.id: pages],
             spansByPaperID: [paper.id: spans],
             anchorsByPaperID: [paper.id: anchors]
         )
@@ -247,12 +251,13 @@ final class AppModel: ObservableObject {
             sessions = try repository.fetchSessions(paperID: paper.id)
             messages = try repository.fetchMessages(sessionID: session.id)
 
+            let pages = try repository.fetchPages(paperID: paper.id)
             let spans = try repository.fetchSpans(paperID: paper.id)
             let anchors = try repository.fetchAnchors(paperID: paper.id)
             try workspaceManager.writeWorkspace(
                 session: session,
                 papers: [paper],
-                pagesByPaperID: [paper.id: []],
+                pagesByPaperID: [paper.id: pages],
                 spansByPaperID: [paper.id: spans],
                 anchorsByPaperID: [paper.id: anchors]
             )

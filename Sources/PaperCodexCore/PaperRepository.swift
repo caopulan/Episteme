@@ -64,6 +64,14 @@ public final class PaperRepository {
           PRIMARY KEY (paper_id, tag_id)
         );
 
+        CREATE TABLE IF NOT EXISTS pages (
+          paper_id TEXT NOT NULL REFERENCES papers(id) ON DELETE CASCADE,
+          page INTEGER NOT NULL,
+          text TEXT NOT NULL,
+          confidence REAL NOT NULL,
+          PRIMARY KEY (paper_id, page)
+        );
+
         CREATE TABLE IF NOT EXISTS spans (
           id TEXT PRIMARY KEY,
           paper_id TEXT NOT NULL REFERENCES papers(id) ON DELETE CASCADE,
@@ -222,6 +230,35 @@ public final class PaperRepository {
         SELECT category_id FROM paper_categories WHERE paper_id = ? ORDER BY category_id;
         """, bindings: [.text(paperID)]) { row in
             try row.text(0)
+        }
+    }
+
+    public func upsertPage(_ page: PageIndex) throws {
+        try database.run("""
+        INSERT INTO pages (paper_id, page, text, confidence)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(paper_id, page) DO UPDATE SET
+          text = excluded.text,
+          confidence = excluded.confidence;
+        """, bindings: [
+            .text(page.paperID),
+            .int(page.page),
+            .text(page.text),
+            .double(page.confidence)
+        ])
+    }
+
+    public func fetchPages(paperID: String) throws -> [PageIndex] {
+        try database.query("""
+        SELECT paper_id, page, text, confidence
+        FROM pages WHERE paper_id = ? ORDER BY page;
+        """, bindings: [.text(paperID)]) { row in
+            PageIndex(
+                paperID: try row.text(0),
+                page: row.int(1),
+                text: try row.text(2),
+                confidence: row.double(3)
+            )
         }
     }
 
