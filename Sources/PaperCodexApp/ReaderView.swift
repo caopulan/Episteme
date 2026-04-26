@@ -43,7 +43,7 @@ struct ReaderView: View {
     private var pdfPane: some View {
         ZStack {
             if let paper = model.selectedPaper {
-                PDFKitView(filePath: paper.filePath) { selection in
+                PDFKitView(filePath: paper.filePath, jumpTarget: model.pdfJumpTarget) { selection in
                     model.updateSelection(selection)
                 }
             } else {

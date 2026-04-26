@@ -167,7 +167,9 @@ func runRepositoryChecks() throws {
     let fetchedCategoryIDs = try repository.fetchCategoryIDs(forPaperID: "paper-a")
     let fetchedPages = try repository.fetchPages(paperID: "paper-a")
     let fetchedSpans = try repository.fetchSpans(paperID: "paper-a")
+    let fetchedSpanByID = try repository.fetchSpan(id: span.id)
     let fetchedAnchors = try repository.fetchAnchors(paperID: "paper-a")
+    let fetchedAnchorByID = try repository.fetchAnchor(id: anchor.id)
     let fetchedSessions = try repository.fetchSessions(paperID: "paper-a")
     let fetchedMessages = try repository.fetchMessages(sessionID: "session-a")
 
@@ -178,7 +180,9 @@ func runRepositoryChecks() throws {
     try check(fetchedCategoryIDs == ["cat-vae"], "paper category links should round-trip")
     try check(fetchedPages == [page], "page indexes should round-trip")
     try check(fetchedSpans == [span], "spans should round-trip")
+    try check(fetchedSpanByID == span, "spans should be fetchable by citation ID")
     try check(fetchedAnchors == [anchor], "anchors should round-trip")
+    try check(fetchedAnchorByID == anchor, "anchors should be fetchable by citation ID")
     try check(fetchedSessions == [session], "sessions should round-trip")
     try check(fetchedMessages == [message], "messages should round-trip")
 

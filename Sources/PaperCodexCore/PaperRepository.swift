@@ -308,17 +308,17 @@ public final class PaperRepository {
         SELECT id, paper_id, page, bbox_json, text, char_range_json, section_hint, confidence
         FROM spans WHERE paper_id = ? ORDER BY page, id;
         """, bindings: [.text(paperID)]) { row in
-            Span(
-                id: try row.text(0),
-                paperID: try row.text(1),
-                page: row.int(2),
-                bbox: try decode(BoundingBox.self, from: try row.text(3)),
-                text: try row.text(4),
-                charRange: try decode(TextRange.self, from: try row.text(5)),
-                sectionHint: row.optionalText(6),
-                confidence: row.double(7)
-            )
+            try span(from: row)
         }
+    }
+
+    public func fetchSpan(id: String) throws -> Span? {
+        try database.query("""
+        SELECT id, paper_id, page, bbox_json, text, char_range_json, section_hint, confidence
+        FROM spans WHERE id = ? LIMIT 1;
+        """, bindings: [.text(id)]) { row in
+            try span(from: row)
+        }.first
     }
 
     public func upsertAnchor(_ anchor: Anchor) throws {
@@ -352,20 +352,17 @@ public final class PaperRepository {
         SELECT id, paper_id, page, selected_text, bbox_list_json, matched_span_ids_json, before_context, after_context, created_session_id, created_at, confidence
         FROM anchors WHERE paper_id = ? ORDER BY created_at, id;
         """, bindings: [.text(paperID)]) { row in
-            Anchor(
-                id: try row.text(0),
-                paperID: try row.text(1),
-                page: row.int(2),
-                selectedText: try row.text(3),
-                bboxList: try decode([BoundingBox].self, from: try row.text(4)),
-                matchedSpanIDs: try decode([String].self, from: try row.text(5)),
-                beforeContext: try row.text(6),
-                afterContext: try row.text(7),
-                createdSessionID: try row.text(8),
-                createdAt: try date(from: try row.text(9)),
-                confidence: row.double(10)
-            )
+            try anchor(from: row)
         }
+    }
+
+    public func fetchAnchor(id: String) throws -> Anchor? {
+        try database.query("""
+        SELECT id, paper_id, page, selected_text, bbox_list_json, matched_span_ids_json, before_context, after_context, created_session_id, created_at, confidence
+        FROM anchors WHERE id = ? LIMIT 1;
+        """, bindings: [.text(id)]) { row in
+            try anchor(from: row)
+        }.first
     }
 
     public func upsertSession(_ session: PaperSession) throws {
@@ -455,6 +452,35 @@ public final class PaperRepository {
             workspacePath: try row.text(3),
             createdAt: try date(from: try row.text(4)),
             updatedAt: try date(from: try row.text(5))
+        )
+    }
+
+    private func span(from row: SQLiteRow) throws -> Span {
+        Span(
+            id: try row.text(0),
+            paperID: try row.text(1),
+            page: row.int(2),
+            bbox: try decode(BoundingBox.self, from: try row.text(3)),
+            text: try row.text(4),
+            charRange: try decode(TextRange.self, from: try row.text(5)),
+            sectionHint: row.optionalText(6),
+            confidence: row.double(7)
+        )
+    }
+
+    private func anchor(from row: SQLiteRow) throws -> Anchor {
+        Anchor(
+            id: try row.text(0),
+            paperID: try row.text(1),
+            page: row.int(2),
+            selectedText: try row.text(3),
+            bboxList: try decode([BoundingBox].self, from: try row.text(4)),
+            matchedSpanIDs: try decode([String].self, from: try row.text(5)),
+            beforeContext: try row.text(6),
+            afterContext: try row.text(7),
+            createdSessionID: try row.text(8),
+            createdAt: try date(from: try row.text(9)),
+            confidence: row.double(10)
         )
     }
 

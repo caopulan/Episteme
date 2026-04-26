@@ -14,6 +14,14 @@ struct PDFSelectionInfo: Equatable {
     var bbox: BoundingBox
 }
 
+struct PDFJumpTarget: Equatable {
+    var id: String
+    var paperID: String
+    var page: Int
+    var bboxList: [BoundingBox]
+    var label: String
+}
+
 @MainActor
 final class AppModel: ObservableObject {
     @Published var route: AppRoute = .library
@@ -28,6 +36,7 @@ final class AppModel: ObservableObject {
     @Published var sessions: [PaperSession] = []
     @Published var messages: [ChatMessage] = []
     @Published var currentSelection: PDFSelectionInfo?
+    @Published var pdfJumpTarget: PDFJumpTarget?
     @Published var errorMessage: String?
     @Published var isSending = false
 
@@ -206,6 +215,7 @@ final class AppModel: ObservableObject {
             selectedLibraryPaper = paper
             selectedPaper = paper
             currentSelection = nil
+            pdfJumpTarget = nil
             guard let repository else {
                 throw AppModelError.repositoryUnavailable
             }
@@ -282,6 +292,43 @@ final class AppModel: ObservableObject {
 
     func updateSelection(_ selection: PDFSelectionInfo?) {
         currentSelection = selection
+    }
+
+    func jumpToCitation(_ citationID: String) {
+        do {
+            guard let repository else {
+                throw AppModelError.repositoryUnavailable
+            }
+            if let span = try repository.fetchSpan(id: citationID) {
+                if selectedPaper?.id != span.paperID, let paper = papers.first(where: { $0.id == span.paperID }) {
+                    selectedPaper = paper
+                }
+                pdfJumpTarget = PDFJumpTarget(
+                    id: span.id,
+                    paperID: span.paperID,
+                    page: span.page,
+                    bboxList: [span.bbox],
+                    label: span.text
+                )
+                return
+            }
+            if let anchor = try repository.fetchAnchor(id: citationID) {
+                if selectedPaper?.id != anchor.paperID, let paper = papers.first(where: { $0.id == anchor.paperID }) {
+                    selectedPaper = paper
+                }
+                pdfJumpTarget = PDFJumpTarget(
+                    id: anchor.id,
+                    paperID: anchor.paperID,
+                    page: anchor.page,
+                    bboxList: anchor.bboxList,
+                    label: anchor.selectedText
+                )
+                return
+            }
+            throw AppModelError.sourceNotFound(citationID)
+        } catch {
+            errorMessage = String(describing: error)
+        }
     }
 
     func sendMessage(_ text: String) async {
@@ -396,6 +443,7 @@ final class AppModel: ObservableObject {
         sessions = []
         messages = []
         currentSelection = nil
+        pdfJumpTarget = nil
     }
 
     private func makeManualID(prefix: String, name: String) -> String {
@@ -477,6 +525,7 @@ enum AppModelError: Error, CustomStringConvertible {
     case noSelectedPaper
     case noSelectedSession
     case emptyName
+    case sourceNotFound(String)
 
     var description: String {
         switch self {
@@ -488,6 +537,8 @@ enum AppModelError: Error, CustomStringConvertible {
             "No Codex session is selected."
         case .emptyName:
             "Name cannot be empty."
+        case let .sourceNotFound(id):
+            "No source was found for citation \(id)."
         }
     }
 }

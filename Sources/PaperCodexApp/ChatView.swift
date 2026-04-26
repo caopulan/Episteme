@@ -20,7 +20,9 @@ struct ChatView: View {
                         .padding(.top, 80)
                     } else {
                         ForEach(model.messages) { message in
-                            MessageBubble(message: message)
+                            MessageBubble(message: message) { citationID in
+                                model.jumpToCitation(citationID)
+                            }
                         }
                     }
                 }
@@ -94,9 +96,14 @@ struct ChatView: View {
 
 private struct MessageBubble: View {
     var message: ChatMessage
+    var onCitation: (String) -> Void
 
     private var isUser: Bool {
         message.role == .user
+    }
+
+    private var parsed: ParsedCitationText {
+        CitationParser.parse(message.content)
     }
 
     var body: some View {
@@ -108,9 +115,25 @@ private struct MessageBubble: View {
                 Text(isUser ? "You" : "Codex")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Text(message.content)
+                Text(parsed.displayText)
                     .font(.system(size: 14))
                     .textSelection(.enabled)
+                if !parsed.citations.isEmpty {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 72), spacing: 6)], alignment: .leading, spacing: 6) {
+                        ForEach(parsed.citations) { citation in
+                            Button {
+                                onCitation(citation.id)
+                            } label: {
+                                Label("[\(citation.displayIndex)]", systemImage: "scope")
+                                    .labelStyle(.titleAndIcon)
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .help(citation.id)
+                        }
+                    }
+                    .padding(.top, 2)
+                }
             }
             .padding(12)
             .background(isUser ? Color.blue.opacity(0.12) : Color(nsColor: .textBackgroundColor))
