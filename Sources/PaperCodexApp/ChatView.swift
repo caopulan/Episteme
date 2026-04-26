@@ -68,6 +68,12 @@ struct ChatView: View {
                 .foregroundStyle(.secondary)
             }
 
+            CodexStatusLine(diagnostic: model.codexDiagnostic) {
+                Task {
+                    await model.refreshCodexDiagnostic()
+                }
+            }
+
             HStack(alignment: .bottom, spacing: 8) {
                 TextEditor(text: $draft)
                     .font(.system(size: 14))
@@ -91,6 +97,72 @@ struct ChatView: View {
             }
         }
         .padding(14)
+    }
+}
+
+private struct CodexStatusLine: View {
+    var diagnostic: CodexDiagnostic?
+    var onRefresh: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: iconName)
+                .foregroundStyle(tint)
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            Spacer()
+            Button(action: onRefresh) {
+                Image(systemName: "arrow.clockwise")
+            }
+            .buttonStyle(.borderless)
+            .controlSize(.small)
+            .help("Refresh Codex Status")
+        }
+        .help(detail)
+    }
+
+    private var title: String {
+        guard let diagnostic else {
+            return "Checking Codex"
+        }
+        if let version = diagnostic.version {
+            return "\(diagnostic.title) · \(version)"
+        }
+        return diagnostic.title
+    }
+
+    private var detail: String {
+        diagnostic?.detail ?? "Checking local Codex CLI."
+    }
+
+    private var iconName: String {
+        guard let diagnostic else {
+            return "circle.dotted"
+        }
+        switch diagnostic.severity {
+        case .ready:
+            return "checkmark.circle.fill"
+        case .warning:
+            return "exclamationmark.triangle.fill"
+        case .blocked:
+            return "xmark.circle.fill"
+        }
+    }
+
+    private var tint: Color {
+        guard let diagnostic else {
+            return .secondary
+        }
+        switch diagnostic.severity {
+        case .ready:
+            return .green
+        case .warning:
+            return .orange
+        case .blocked:
+            return .red
+        }
     }
 }
 

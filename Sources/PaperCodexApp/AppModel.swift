@@ -48,6 +48,7 @@ final class AppModel: ObservableObject {
     @Published var messages: [ChatMessage] = []
     @Published var currentSelection: PDFSelectionInfo?
     @Published var pdfJumpTarget: PDFJumpTarget?
+    @Published var codexDiagnostic: CodexDiagnostic?
     @Published var errorMessage: String?
     @Published var isSending = false
 
@@ -66,6 +67,9 @@ final class AppModel: ObservableObject {
             try store.migrate()
             repository = store
             try reloadLibrary()
+            Task {
+                await refreshCodexDiagnostic()
+            }
         } catch {
             errorMessage = String(describing: error)
         }
@@ -364,6 +368,14 @@ final class AppModel: ObservableObject {
 
     func updateSelection(_ selection: PDFSelectionInfo?) {
         currentSelection = selection
+    }
+
+    func refreshCodexDiagnostic() async {
+        codexDiagnostic = nil
+        let diagnostic = await Task.detached(priority: .utility) {
+            CodexCLI.diagnose()
+        }.value
+        codexDiagnostic = diagnostic
     }
 
     func jumpToCitation(_ citationID: String) {

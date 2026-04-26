@@ -14,6 +14,71 @@ public enum CodexCLIError: Error, CustomStringConvertible, Equatable {
     }
 }
 
+public struct CodexCapabilities: Equatable, Sendable {
+    public var supportsJSONOutput: Bool
+    public var supportsOutputLastMessage: Bool
+    public var supportsResume: Bool
+
+    public init(supportsJSONOutput: Bool, supportsOutputLastMessage: Bool, supportsResume: Bool) {
+        self.supportsJSONOutput = supportsJSONOutput
+        self.supportsOutputLastMessage = supportsOutputLastMessage
+        self.supportsResume = supportsResume
+    }
+}
+
+public enum CodexDiagnosticSeverity: String, Codable, Equatable, Sendable {
+    case ready
+    case warning
+    case blocked
+}
+
+public struct CodexDiagnostic: Equatable, Sendable {
+    public var severity: CodexDiagnosticSeverity
+    public var title: String
+    public var detail: String
+    public var executablePath: String?
+    public var version: String?
+    public var capabilities: CodexCapabilities?
+
+    public static func ready(executablePath: String, version: String?, capabilities: CodexCapabilities) -> CodexDiagnostic {
+        CodexDiagnostic(
+            severity: .ready,
+            title: "Codex ready",
+            detail: "CLI \(version ?? "unknown version") supports Paper Codex sessions.",
+            executablePath: executablePath,
+            version: version,
+            capabilities: capabilities
+        )
+    }
+
+    public static func warning(
+        executablePath: String,
+        version: String?,
+        capabilities: CodexCapabilities,
+        missing: [String]
+    ) -> CodexDiagnostic {
+        CodexDiagnostic(
+            severity: .warning,
+            title: "Codex needs attention",
+            detail: "CLI \(version ?? "unknown version") is missing: \(missing.joined(separator: ", ")).",
+            executablePath: executablePath,
+            version: version,
+            capabilities: capabilities
+        )
+    }
+
+    public static func blocked(_ detail: String) -> CodexDiagnostic {
+        CodexDiagnostic(
+            severity: .blocked,
+            title: "Codex unavailable",
+            detail: detail,
+            executablePath: nil,
+            version: nil,
+            capabilities: nil
+        )
+    }
+}
+
 public struct CodexCLI: Sendable {
     public var executablePath: String
 
@@ -54,6 +119,39 @@ public struct CodexCLI: Sendable {
         return arguments
     }
 
+    public func version() throws -> String? {
+        try Self.parseVersion(from: run(arguments: ["--version"]))
+    }
+
+    public func capabilities() throws -> CodexCapabilities {
+        try Self.parseCapabilities(fromExecHelp: run(arguments: ["exec", "--help"]))
+    }
+
+    public static func diagnose(environment: [String: String] = ProcessInfo.processInfo.environment) -> CodexDiagnostic {
+        do {
+            let executable = try findCodexExecutable(environment: environment)
+            let cli = CodexCLI(executablePath: executable)
+            let version = try cli.version()
+            let capabilities = try cli.capabilities()
+            var missing: [String] = []
+            if !capabilities.supportsJSONOutput {
+                missing.append("--json")
+            }
+            if !capabilities.supportsOutputLastMessage {
+                missing.append("--output-last-message")
+            }
+            if !capabilities.supportsResume {
+                missing.append("exec resume")
+            }
+            if missing.isEmpty {
+                return .ready(executablePath: executable, version: version, capabilities: capabilities)
+            }
+            return .warning(executablePath: executable, version: version, capabilities: capabilities, missing: missing)
+        } catch {
+            return .blocked(String(describing: error))
+        }
+    }
+
     public func run(arguments: [String]) throws -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executablePath)
@@ -85,6 +183,22 @@ public struct CodexCLI: Sendable {
             }
         }
         return nil
+    }
+
+    public static func parseVersion(from output: String) -> String? {
+        let tokens = output
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .split(separator: " ")
+            .map(String.init)
+        return tokens.last
+    }
+
+    public static func parseCapabilities(fromExecHelp output: String) -> CodexCapabilities {
+        CodexCapabilities(
+            supportsJSONOutput: output.contains("--json"),
+            supportsOutputLastMessage: output.contains("--output-last-message"),
+            supportsResume: output.contains("resume")
+        )
     }
 
     private static func extractJSONStringValue(named key: String, from line: String) -> String? {

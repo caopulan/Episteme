@@ -444,6 +444,21 @@ func runCodexCLIChecks() throws {
     try check(resume == ["exec", "resume", "--json", "session-a", "continue"], "resume args should use codex exec resume with JSON output")
     let parsedThreadID = CodexCLI.parseThreadID(from: #"{"type":"thread.started","thread_id":"019dcaf6-01d5-7060-bc43-40401e3693c3"}"#)
     try check(parsedThreadID == "019dcaf6-01d5-7060-bc43-40401e3693c3", "Codex thread ID should be parsed from JSONL output")
+
+    let parsedVersion = CodexCLI.parseVersion(from: "codex-cli 0.114.0\n")
+    try check(parsedVersion == "0.114.0", "Codex version parser should read codex-cli output")
+    let help = "Usage: codex exec [OPTIONS]\n      --json\n  -o, --output-last-message <FILE>\nCommands:\n  resume\n"
+    let capabilities = CodexCLI.parseCapabilities(fromExecHelp: help)
+    try check(capabilities.supportsJSONOutput, "Codex help parser should detect JSON output support")
+    try check(capabilities.supportsOutputLastMessage, "Codex help parser should detect last-message output support")
+    try check(capabilities.supportsResume, "Codex help parser should detect resume support")
+    let diagnostic = CodexDiagnostic.ready(
+        executablePath: "/opt/homebrew/bin/codex",
+        version: "0.114.0",
+        capabilities: capabilities
+    )
+    try check(diagnostic.title == "Codex ready", "ready diagnostic should have a stable title")
+    try check(diagnostic.detail.contains("0.114.0"), "ready diagnostic should include the CLI version")
 }
 
 func writeFixturePDF(to url: URL, lines: [String]) throws {
