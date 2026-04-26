@@ -98,20 +98,19 @@ struct PDFKitView: NSViewRepresentable {
         @objc func selectionChanged(_ notification: Notification) {
             guard let pdfView,
                   let selection = pdfView.currentSelection,
-                  let text = selection.string?.trimmingCharacters(in: .whitespacesAndNewlines),
-                  !text.isEmpty,
-                  let page = selection.pages.first,
                   let document = pdfView.document else {
                 onSelection(nil)
                 return
             }
 
-            let pageIndex = document.index(for: page) + 1
-            let rect = selection.bounds(for: page)
+            guard let capturedSelection = PDFSelectionGeometry.capture(selection: selection, in: document) else {
+                onSelection(nil)
+                return
+            }
             onSelection(PDFSelectionInfo(
-                text: text,
-                page: pageIndex,
-                bbox: BoundingBox(x: rect.origin.x, y: rect.origin.y, width: rect.width, height: rect.height)
+                text: capturedSelection.text,
+                page: capturedSelection.page,
+                bboxList: capturedSelection.bboxList
             ))
         }
     }

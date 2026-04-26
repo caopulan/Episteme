@@ -10,7 +10,7 @@ enum AppRoute {
 struct PDFSelectionInfo: Equatable {
     var text: String
     var page: Int
-    var bbox: BoundingBox
+    var bboxList: [BoundingBox]
 }
 
 struct PDFJumpTarget: Equatable {
@@ -479,7 +479,7 @@ final class AppModel: ObservableObject {
                     paperID: paper.id,
                     page: selection.page,
                     selectedText: selection.text,
-                    bboxList: [selection.bbox],
+                    bboxList: selection.bboxList,
                     spans: focusedSpans,
                     anchorID: anchorID,
                     sessionID: session.id,

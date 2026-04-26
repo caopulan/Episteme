@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import CryptoKit
+import PDFKit
 import PaperCodexCore
 
 struct CheckFailure: Error, CustomStringConvertible {
@@ -433,6 +434,17 @@ func runPDFChecks() throws {
     try check(index.spans.contains { $0.text.contains("stable span") }, "spans should include selectable text")
     try check(index.spans.allSatisfy { $0.page == 1 }, "spans should use one-based page numbers")
     try check(index.spans.allSatisfy { $0.bbox.width > 0 && $0.bbox.height > 0 }, "spans should include non-empty bounding boxes")
+
+    guard let document = PDFDocument(url: pdfURL),
+          let page = document.page(at: 0),
+          let text = page.string,
+          let selection = page.selection(for: NSRange(location: 0, length: text.count)) else {
+        throw CheckFailure(description: "could not create fixture PDF selection")
+    }
+    let capturedSelection = PDFSelectionGeometry.capture(selection: selection, in: document)
+    try check(capturedSelection?.page == 1, "captured PDF selection should use one-based page numbers")
+    try check(capturedSelection?.bboxList.count == 2, "captured multiline PDF selection should preserve per-line boxes")
+    try check(capturedSelection?.text.contains("stable span") == true, "captured PDF selection should preserve selected text")
 }
 
 func runCodexCLIChecks() throws {
