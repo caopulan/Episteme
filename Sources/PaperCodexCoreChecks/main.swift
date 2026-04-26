@@ -76,12 +76,109 @@ func runModelsChecks() throws {
     try check(decodedSession == session, "session should JSON round-trip")
 }
 
+func runRepositoryChecks() throws {
+    let tempRoot = FileManager.default.temporaryDirectory
+        .appendingPathComponent("paper-codex-repository-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+    let databaseURL = tempRoot.appendingPathComponent("store.sqlite")
+    let repository = try PaperRepository(databasePath: databaseURL.path)
+    try repository.migrate()
+
+    let now = Date(timeIntervalSince1970: 1_777_220_000)
+    let paper = Paper(
+        id: "paper-a",
+        filePath: "/tmp/paper-a.pdf",
+        fileHash: "hash-a",
+        title: "Paper A",
+        authors: ["Alice", "Bob"],
+        year: 2026,
+        sourceURL: nil,
+        importedAt: now,
+        updatedAt: now
+    )
+    let category = Category(id: "cat-methods", parentID: nil, name: "Methods", sortOrder: 1)
+    let childCategory = Category(id: "cat-vae", parentID: "cat-methods", name: "VAE", sortOrder: 2)
+    let tag = PaperTag(id: "tag-control", name: "control")
+    let span = Span(
+        id: Span.makeID(paperID: "paper-a", page: 2, blockIndex: 3),
+        paperID: "paper-a",
+        page: 2,
+        bbox: BoundingBox(x: 1, y: 2, width: 3, height: 4),
+        text: "A stable span.",
+        charRange: TextRange(location: 10, length: 14),
+        sectionHint: "Method",
+        confidence: 0.91
+    )
+    let anchor = Anchor(
+        id: Anchor.makeID(paperID: "paper-a", page: 2, suffix: "sel1"),
+        paperID: "paper-a",
+        page: 2,
+        selectedText: "A stable span.",
+        bboxList: [span.bbox],
+        matchedSpanIDs: [span.id],
+        beforeContext: "Before",
+        afterContext: "After",
+        createdSessionID: "session-a",
+        createdAt: now,
+        confidence: 0.9
+    )
+    let session = PaperSession(
+        id: "session-a",
+        title: "Mechanism Notes",
+        paperIDs: ["paper-a"],
+        codexSessionID: "codex-a",
+        workspacePath: tempRoot.appendingPathComponent("session-a").path,
+        createdAt: now,
+        updatedAt: now
+    )
+    let message = ChatMessage(
+        id: "message-a",
+        sessionID: "session-a",
+        role: .user,
+        content: "Use [[cite:\(anchor.id)]] here.",
+        createdAt: now
+    )
+
+    try repository.upsertPaper(paper)
+    try repository.upsertCategory(category)
+    try repository.upsertCategory(childCategory)
+    try repository.upsertTag(tag)
+    try repository.assignPaper("paper-a", toCategory: "cat-vae")
+    try repository.assignPaper("paper-a", toTag: "tag-control")
+    try repository.upsertSpan(span)
+    try repository.upsertAnchor(anchor)
+    try repository.upsertSession(session)
+    try repository.appendMessage(message)
+
+    let fetchedPapers = try repository.fetchPapers()
+    let fetchedCategories = try repository.fetchCategories()
+    let fetchedTags = try repository.fetchTags(forPaperID: "paper-a")
+    let fetchedCategoryIDs = try repository.fetchCategoryIDs(forPaperID: "paper-a")
+    let fetchedSpans = try repository.fetchSpans(paperID: "paper-a")
+    let fetchedAnchors = try repository.fetchAnchors(paperID: "paper-a")
+    let fetchedSessions = try repository.fetchSessions(paperID: "paper-a")
+    let fetchedMessages = try repository.fetchMessages(sessionID: "session-a")
+
+    try check(fetchedPapers == [paper], "paper should round-trip through SQLite")
+    try check(fetchedCategories == [category, childCategory], "categories should preserve hierarchy and sort order")
+    try check(fetchedTags == [tag], "paper tags should round-trip")
+    try check(fetchedCategoryIDs == ["cat-vae"], "paper category links should round-trip")
+    try check(fetchedSpans == [span], "spans should round-trip")
+    try check(fetchedAnchors == [anchor], "anchors should round-trip")
+    try check(fetchedSessions == [session], "sessions should round-trip")
+    try check(fetchedMessages == [message], "messages should round-trip")
+}
+
 let selectedChecks = Set(CommandLine.arguments.dropFirst())
 
 do {
     if selectedChecks.isEmpty || selectedChecks.contains("models") {
         try runModelsChecks()
         print("models: pass")
+    }
+    if selectedChecks.isEmpty || selectedChecks.contains("repository") {
+        try runRepositoryChecks()
+        print("repository: pass")
     }
 } catch {
     fputs("check failed: \(error)\n", stderr)
