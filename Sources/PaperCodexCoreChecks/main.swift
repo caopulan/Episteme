@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 import PaperCodexCore
 
 struct CheckFailure: Error, CustomStringConvertible {
@@ -302,6 +303,63 @@ func runWorkspaceChecks() throws {
     try check(spans.contains("paper:paper-a:p1:b1"), "spans jsonl should include span ID")
 }
 
+func runPDFChecks() throws {
+    let tempRoot = FileManager.default.temporaryDirectory
+        .appendingPathComponent("paper-codex-pdf-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+    let pdfURL = tempRoot.appendingPathComponent("fixture.pdf")
+    try writeFixturePDF(
+        to: pdfURL,
+        lines: [
+            "Paper Codex extracts selectable text.",
+            "This paragraph becomes a stable span."
+        ]
+    )
+
+    let index = try PDFIndexExtractor().extract(paperID: "paper-a", pdfURL: pdfURL)
+    try check(index.pages.count == 1, "fixture PDF should produce one page")
+    try check(index.pages[0].text.contains("Paper Codex extracts selectable text."), "page text should contain first fixture line")
+    try check(index.spans.contains { $0.text.contains("stable span") }, "spans should include selectable text")
+    try check(index.spans.allSatisfy { $0.page == 1 }, "spans should use one-based page numbers")
+    try check(index.spans.allSatisfy { $0.bbox.width > 0 && $0.bbox.height > 0 }, "spans should include non-empty bounding boxes")
+}
+
+func runCodexCLIChecks() throws {
+    let codexPath = try CodexCLI.findCodexExecutable()
+    try check(FileManager.default.isExecutableFile(atPath: codexPath), "codex executable should be runnable")
+
+    let cli = CodexCLI(executablePath: codexPath)
+    let start = cli.startArguments(prompt: "hello", workspacePath: "/tmp/session-a")
+    try check(start == ["exec", "--json", "-C", "/tmp/session-a", "hello"], "start args should use codex exec with JSON output and workspace")
+
+    let resume = cli.resumeArguments(sessionID: "session-a", prompt: "continue")
+    try check(resume == ["exec", "resume", "--json", "session-a", "continue"], "resume args should use codex exec resume with JSON output")
+}
+
+func writeFixturePDF(to url: URL, lines: [String]) throws {
+    let data = NSMutableData()
+    var mediaBox = CGRect(x: 0, y: 0, width: 612, height: 792)
+    guard let consumer = CGDataConsumer(data: data as CFMutableData),
+          let context = CGContext(consumer: consumer, mediaBox: &mediaBox, nil) else {
+        throw CheckFailure(description: "could not create PDF context")
+    }
+    context.beginPDFPage(nil)
+    NSGraphicsContext.saveGraphicsState()
+    NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
+    let attributes: [NSAttributedString.Key: Any] = [
+        .font: NSFont.systemFont(ofSize: 18),
+        .foregroundColor: NSColor.black
+    ]
+    for (index, line) in lines.enumerated() {
+        let attributed = NSAttributedString(string: line, attributes: attributes)
+        attributed.draw(in: CGRect(x: 72, y: 690 - (index * 34), width: 460, height: 28))
+    }
+    NSGraphicsContext.restoreGraphicsState()
+    context.endPDFPage()
+    context.closePDF()
+    try data.write(to: url, options: [.atomic])
+}
+
 let selectedChecks = Set(CommandLine.arguments.dropFirst())
 
 do {
@@ -324,6 +382,14 @@ do {
     if selectedChecks.isEmpty || selectedChecks.contains("workspace") {
         try runWorkspaceChecks()
         print("workspace: pass")
+    }
+    if selectedChecks.isEmpty || selectedChecks.contains("pdf") {
+        try runPDFChecks()
+        print("pdf: pass")
+    }
+    if selectedChecks.isEmpty || selectedChecks.contains("codex") {
+        try runCodexCLIChecks()
+        print("codex: pass")
     }
 } catch {
     fputs("check failed: \(error)\n", stderr)
