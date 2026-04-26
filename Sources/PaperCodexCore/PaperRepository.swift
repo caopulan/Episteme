@@ -412,6 +412,20 @@ public final class PaperRepository {
         }
     }
 
+    public func fetchSession(id: String) throws -> PaperSession? {
+        let sessions = try database.query("""
+        SELECT id, title, codex_session_id, workspace_path, created_at, updated_at
+        FROM sessions WHERE id = ? LIMIT 1;
+        """, bindings: [.text(id)]) { row in
+            try session(from: row)
+        }
+        guard var session = sessions.first else {
+            return nil
+        }
+        session.paperIDs = try fetchPaperIDs(sessionID: session.id)
+        return session
+    }
+
     public func appendMessage(_ message: ChatMessage) throws {
         try database.run("""
         INSERT INTO chat_messages (id, session_id, role, content, created_at)

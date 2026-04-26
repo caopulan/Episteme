@@ -200,6 +200,15 @@ func runRepositoryChecks() throws {
     try check(fetchedSessions == [session], "sessions should round-trip")
     try check(fetchedMessages == [message], "messages should round-trip")
 
+    var multiPaperSession = session
+    multiPaperSession.paperIDs = ["paper-b", "paper-a"]
+    multiPaperSession.updatedAt = Date(timeIntervalSince1970: 1_777_220_100)
+    try repository.upsertSession(multiPaperSession)
+    let fetchedSessionByID = try repository.fetchSession(id: "session-a")
+    let fetchedSessionsForPaperB = try repository.fetchSessions(paperID: "paper-b")
+    try check(fetchedSessionByID == multiPaperSession, "session should be fetchable by ID with ordered paper IDs")
+    try check(fetchedSessionsForPaperB == [multiPaperSession], "sessions should be visible from every linked paper")
+
     try repository.removePaper("paper-a", fromCategory: "cat-vae")
     try repository.removePaper("paper-a", fromTag: "tag-control")
     let removedCategoryIDs = try repository.fetchCategoryIDs(forPaperID: "paper-a")

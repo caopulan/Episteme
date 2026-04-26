@@ -299,6 +299,69 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func selectReaderPaper(_ paper: Paper) {
+        guard selectedSession?.paperIDs.contains(paper.id) == true else {
+            return
+        }
+        selectedPaper = paper
+        currentSelection = nil
+        pdfJumpTarget = nil
+    }
+
+    func setPaper(_ paper: Paper, includedInCurrentSession included: Bool) {
+        do {
+            guard let repository else {
+                throw AppModelError.repositoryUnavailable
+            }
+            guard var session = selectedSession else {
+                throw AppModelError.noSelectedSession
+            }
+
+            var paperIDs = session.paperIDs
+            if included {
+                if !paperIDs.contains(paper.id) {
+                    paperIDs.append(paper.id)
+                }
+            } else {
+                guard paperIDs.count > 1 else {
+                    return
+                }
+                paperIDs.removeAll { $0 == paper.id }
+            }
+
+            session.paperIDs = paperIDs
+            session.updatedAt = Date()
+            try repository.upsertSession(session)
+
+            if selectedPaper.map({ !paperIDs.contains($0.id) }) == true,
+               let firstPaperID = paperIDs.first,
+               let replacement = try repository.fetchPapers(ids: [firstPaperID]).first {
+                selectedPaper = replacement
+                currentSelection = nil
+                pdfJumpTarget = nil
+            }
+
+            let storedSession = try repository.fetchSession(id: session.id) ?? session
+            let fallback = selectedPaper ?? paper
+            let context = try loadSessionPaperContext(session: storedSession, fallbackPaper: fallback, repository: repository)
+            try workspaceManager.writeWorkspace(
+                session: storedSession,
+                papers: context.papers,
+                pagesByPaperID: context.pagesByPaperID,
+                spansByPaperID: context.spansByPaperID,
+                anchorsByPaperID: context.anchorsByPaperID
+            )
+
+            selectedSession = storedSession
+            if let selectedPaper {
+                sessions = try repository.fetchSessions(paperID: selectedPaper.id)
+            }
+            messages = try repository.fetchMessages(sessionID: storedSession.id)
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
     func updateSelection(_ selection: PDFSelectionInfo?) {
         currentSelection = selection
     }
