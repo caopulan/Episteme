@@ -204,6 +204,65 @@ func runCitationChecks() throws {
     try check(malformed.brokenMarkers == ["[[cite:not-a-paper]]"], "malformed markers should be reported")
 }
 
+func runAnchorResolverChecks() throws {
+    let before = Span(
+        id: Span.makeID(paperID: "paper-a", page: 2, blockIndex: 1),
+        paperID: "paper-a",
+        page: 2,
+        bbox: BoundingBox(x: 20, y: 720, width: 300, height: 20),
+        text: "Before context explains the setup.",
+        charRange: TextRange(location: 0, length: 34),
+        sectionHint: nil,
+        confidence: 0.95
+    )
+    let target = Span(
+        id: Span.makeID(paperID: "paper-a", page: 2, blockIndex: 2),
+        paperID: "paper-a",
+        page: 2,
+        bbox: BoundingBox(x: 20, y: 690, width: 360, height: 22),
+        text: "The selected mechanism controls latent trajectories.",
+        charRange: TextRange(location: 35, length: 52),
+        sectionHint: nil,
+        confidence: 0.95
+    )
+    let after = Span(
+        id: Span.makeID(paperID: "paper-a", page: 2, blockIndex: 3),
+        paperID: "paper-a",
+        page: 2,
+        bbox: BoundingBox(x: 20, y: 660, width: 300, height: 20),
+        text: "After context describes the consequence.",
+        charRange: TextRange(location: 88, length: 39),
+        sectionHint: nil,
+        confidence: 0.95
+    )
+    let otherPage = Span(
+        id: Span.makeID(paperID: "paper-a", page: 3, blockIndex: 1),
+        paperID: "paper-a",
+        page: 3,
+        bbox: BoundingBox(x: 20, y: 690, width: 360, height: 22),
+        text: "A different page should not be matched.",
+        charRange: TextRange(location: 0, length: 39),
+        sectionHint: nil,
+        confidence: 0.95
+    )
+
+    let anchor = AnchorResolver().resolve(
+        paperID: "paper-a",
+        page: 2,
+        selectedText: "controls latent trajectories",
+        bboxList: [BoundingBox(x: 40, y: 686, width: 220, height: 28)],
+        spans: [before, target, after, otherPage],
+        anchorID: Anchor.makeID(paperID: "paper-a", page: 2, suffix: "sel1"),
+        sessionID: "session-a",
+        createdAt: Date(timeIntervalSince1970: 1_777_220_000)
+    )
+
+    try check(anchor.matchedSpanIDs == [target.id], "anchor resolver should match the selected page span")
+    try check(anchor.beforeContext == before.text, "anchor resolver should include preceding span context")
+    try check(anchor.afterContext == after.text, "anchor resolver should include following span context")
+    try check(anchor.confidence > 0.8, "anchor resolver should assign high confidence for text and bbox matches")
+}
+
 func runPromptChecks() throws {
     let now = Date(timeIntervalSince1970: 1_777_220_000)
     let paper = Paper(
@@ -402,6 +461,10 @@ do {
     if selectedChecks.isEmpty || selectedChecks.contains("citations") {
         try runCitationChecks()
         print("citations: pass")
+    }
+    if selectedChecks.isEmpty || selectedChecks.contains("anchors") {
+        try runAnchorResolverChecks()
+        print("anchors: pass")
     }
     if selectedChecks.isEmpty || selectedChecks.contains("prompt") {
         try runPromptChecks()

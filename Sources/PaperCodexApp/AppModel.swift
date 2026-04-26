@@ -355,26 +355,37 @@ final class AppModel: ObservableObject {
                 throw AppModelError.noSelectedSession
             }
 
+            let spans = try repository.fetchSpans(paperID: paper.id)
             var content = trimmed
             var selectedAnchors: [PaperCodexCore.Anchor] = []
             if let selection = currentSelection {
                 let anchorID = PaperCodexCore.Anchor.makeID(paperID: paper.id, page: selection.page, suffix: UUID().uuidString.lowercased())
-                let anchor = PaperCodexCore.Anchor(
-                    id: anchorID,
+                let anchor = AnchorResolver().resolve(
                     paperID: paper.id,
                     page: selection.page,
                     selectedText: selection.text,
                     bboxList: [selection.bbox],
-                    matchedSpanIDs: [],
-                    beforeContext: "",
-                    afterContext: "",
-                    createdSessionID: session.id,
-                    createdAt: Date(),
-                    confidence: 0.75
+                    spans: spans,
+                    anchorID: anchorID,
+                    sessionID: session.id,
+                    createdAt: Date()
                 )
+                let nearbySpans = anchor.matchedSpanIDs.isEmpty ? "none" : anchor.matchedSpanIDs.joined(separator: ", ")
+                let beforeContext = anchor.beforeContext.isEmpty ? "none" : anchor.beforeContext
+                let afterContext = anchor.afterContext.isEmpty ? "none" : anchor.afterContext
+                content += """
+
+                [selected source]
+                anchor_id: \(anchor.id)
+                paper_id: \(anchor.paperID)
+                page: \(anchor.page)
+                text: "\(anchor.selectedText)"
+                nearby_spans: \(nearbySpans)
+                before: "\(beforeContext)"
+                after: "\(afterContext)"
+                """
                 try repository.upsertAnchor(anchor)
                 selectedAnchors = [anchor]
-                content += "\n\n[selected source]\nanchor_id: \(anchor.id)\npage: \(anchor.page)\ntext: \"\(anchor.selectedText)\""
                 currentSelection = nil
             }
 
@@ -393,7 +404,6 @@ final class AppModel: ObservableObject {
             messages = try repository.fetchMessages(sessionID: session.id)
 
             let pages = try repository.fetchPages(paperID: paper.id)
-            let spans = try repository.fetchSpans(paperID: paper.id)
             let anchors = try repository.fetchAnchors(paperID: paper.id)
             try workspaceManager.writeWorkspace(
                 session: session,
@@ -409,7 +419,7 @@ final class AppModel: ObservableObject {
                     workspacePath: session.workspacePath,
                     papers: [paper],
                     selectedAnchors: selectedAnchors,
-                    relevantSpans: Array(spans.prefix(8))
+                    relevantSpans: relevantSpans(from: spans, selectedAnchors: selectedAnchors)
                 )
             )
             let codexReply = try await runCodex(prompt: prompt, session: session)
@@ -444,6 +454,16 @@ final class AppModel: ObservableObject {
         messages = []
         currentSelection = nil
         pdfJumpTarget = nil
+    }
+
+    private func relevantSpans(from spans: [Span], selectedAnchors: [PaperCodexCore.Anchor]) -> [Span] {
+        let matchedSpanIDs = selectedAnchors.flatMap(\.matchedSpanIDs)
+        let matchedSet = Set(matchedSpanIDs)
+        let matchedSpans = matchedSpanIDs.compactMap { id in
+            spans.first { $0.id == id }
+        }
+        let fallbackSpans = spans.filter { !matchedSet.contains($0.id) }
+        return Array((matchedSpans + fallbackSpans).prefix(8))
     }
 
     private func makeManualID(prefix: String, name: String) -> String {
