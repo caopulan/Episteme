@@ -106,6 +106,12 @@ final class AppModel: ObservableObject {
 
             let data = try Data(contentsOf: sourceURL)
             let hash = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+            if let existingPaper = try repository.fetchPaper(fileHash: hash) {
+                try reloadLibrary()
+                openPaper(existingPaper)
+                return
+            }
+
             let title = sourceURL.deletingPathExtension().lastPathComponent
             let paperID = makePaperID(title: title, hash: hash)
             let paperDir = supportRoot.appendingPathComponent("papers/\(paperID)", isDirectory: true)

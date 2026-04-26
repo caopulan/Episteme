@@ -172,6 +172,15 @@ public final class PaperRepository {
         return ids.compactMap { byID[$0] }
     }
 
+    public func fetchPaper(fileHash: String) throws -> Paper? {
+        try database.query("""
+        SELECT id, file_path, file_hash, title, authors_json, year, source_url, imported_at, updated_at
+        FROM papers WHERE file_hash = ? LIMIT 1;
+        """, bindings: [.text(fileHash)]) { row in
+            try paper(from: row)
+        }.first
+    }
+
     public func upsertCategory(_ category: Category) throws {
         try database.run("""
         INSERT INTO categories (id, parent_id, name, sort_order)

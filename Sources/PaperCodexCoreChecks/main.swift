@@ -175,6 +175,8 @@ func runRepositoryChecks() throws {
 
     let fetchedPapers = try repository.fetchPapers()
     let fetchedPapersByID = try repository.fetchPapers(ids: ["paper-b", "missing-paper", "paper-a"])
+    let fetchedPaperByHash = try repository.fetchPaper(fileHash: "hash-a")
+    let missingPaperByHash = try repository.fetchPaper(fileHash: "missing-hash")
     let fetchedCategories = try repository.fetchCategories()
     let fetchedAllTags = try repository.fetchTags()
     let fetchedTags = try repository.fetchTags(forPaperID: "paper-a")
@@ -189,6 +191,8 @@ func runRepositoryChecks() throws {
 
     try check(fetchedPapers == [paper, paperB], "papers should round-trip through SQLite")
     try check(fetchedPapersByID == [paperB, paper], "papers should be fetchable by ID in requested order")
+    try check(fetchedPaperByHash == paper, "paper should be fetchable by file hash for duplicate detection")
+    try check(missingPaperByHash == nil, "missing file hash should not return a paper")
     try check(fetchedCategories == [category, childCategory], "categories should preserve hierarchy and sort order")
     try check(fetchedAllTags == [tag, unassignedTag], "all tags should round-trip sorted by name")
     try check(fetchedTags == [tag], "paper tags should round-trip")
