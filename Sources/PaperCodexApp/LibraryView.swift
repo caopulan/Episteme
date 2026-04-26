@@ -1,9 +1,12 @@
 import PaperCodexCore
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct LibraryView: View {
     @EnvironmentObject private var model: AppModel
     @State private var isImporting = false
+    @State private var isChoosingWatchedFolder = false
+    @State private var isShowingWatchedFolders = false
     @State private var isCreatingCategory = false
     @State private var isCreatingTag = false
     @State private var newCategoryName = ""
@@ -52,6 +55,11 @@ struct LibraryView: View {
                 model.importPDF(from: url)
             }
         }
+        .fileImporter(isPresented: $isChoosingWatchedFolder, allowedContentTypes: [.folder], allowsMultipleSelection: false) { result in
+            if case let .success(urls) = result, let url = urls.first {
+                model.addWatchedFolder(from: url)
+            }
+        }
         .sheet(isPresented: $isCreatingCategory) {
             CategoryEditorSheet(
                 categoryItems: flattenedCategoryItems(),
@@ -77,6 +85,14 @@ struct LibraryView: View {
                 newTagName = ""
                 isCreatingTag = false
             }
+        }
+        .sheet(isPresented: $isShowingWatchedFolders) {
+            WatchedFoldersSheet {
+                isChoosingWatchedFolder = true
+            } onClose: {
+                isShowingWatchedFolders = false
+            }
+            .environmentObject(model)
         }
     }
 
@@ -149,6 +165,12 @@ struct LibraryView: View {
                 Text("Library")
                     .font(.system(size: 28, weight: .semibold))
                 Spacer()
+                Button {
+                    isShowingWatchedFolders = true
+                } label: {
+                    Label("Folders", systemImage: "folder.badge.plus")
+                }
+                .buttonStyle(.bordered)
                 Button {
                     isImporting = true
                 } label: {
@@ -369,6 +391,95 @@ struct LibraryView: View {
                 [CategoryListItem(category: category, depth: depth)]
                     + flattenedCategoryItems(parentID: category.id, depth: depth + 1)
             }
+    }
+}
+
+private struct WatchedFoldersSheet: View {
+    @EnvironmentObject private var model: AppModel
+    var onAdd: () -> Void
+    var onClose: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Text("Watched Folders")
+                    .font(.title3.weight(.semibold))
+                Spacer()
+                Button(action: onAdd) {
+                    Label("Add Folder", systemImage: "plus")
+                }
+                .buttonStyle(.bordered)
+                Button {
+                    model.scanWatchedFolders()
+                } label: {
+                    Label(model.isScanningWatchedFolders ? "Scanning" : "Scan", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.bordered)
+                .disabled(model.watchedFolders.isEmpty || model.isScanningWatchedFolders)
+            }
+
+            if model.watchedFolders.isEmpty {
+                ContentUnavailableView("No Folders", systemImage: "folder")
+                    .frame(width: 520, height: 220)
+            } else {
+                List {
+                    ForEach(model.watchedFolders) { folder in
+                        WatchedFolderRow(folder: folder) {
+                            model.removeWatchedFolder(folder)
+                        }
+                    }
+                }
+                .listStyle(.inset)
+                .frame(width: 560, height: 260)
+            }
+
+            HStack {
+                Spacer()
+                Button("Close", action: onClose)
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(22)
+        .frame(width: 600)
+    }
+}
+
+private struct WatchedFolderRow: View {
+    var folder: WatchedFolder
+    var onRemove: () -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "folder")
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(URL(fileURLWithPath: folder.path).lastPathComponent)
+                    .font(.system(size: 13, weight: .medium))
+                Text(folder.path)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Text(lastScannedText)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+            Spacer()
+            Button(action: onRemove) {
+                Image(systemName: "trash")
+            }
+            .buttonStyle(.borderless)
+            .foregroundStyle(.secondary)
+            .help("Remove Folder")
+        }
+        .padding(.vertical, 4)
+    }
+
+    private var lastScannedText: String {
+        guard let date = folder.lastScannedAt else {
+            return "Not scanned"
+        }
+        return "Scanned \(date.formatted(date: .abbreviated, time: .shortened))"
     }
 }
 

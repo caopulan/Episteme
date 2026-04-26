@@ -64,6 +64,13 @@ public final class PaperRepository {
           PRIMARY KEY (paper_id, tag_id)
         );
 
+        CREATE TABLE IF NOT EXISTS watched_folders (
+          id TEXT PRIMARY KEY,
+          path TEXT NOT NULL UNIQUE,
+          created_at TEXT NOT NULL,
+          last_scanned_at TEXT
+        );
+
         CREATE TABLE IF NOT EXISTS pages (
           paper_id TEXT NOT NULL REFERENCES papers(id) ON DELETE CASCADE,
           page INTEGER NOT NULL,
@@ -243,6 +250,34 @@ public final class PaperRepository {
         try database.run("""
         DELETE FROM paper_tags WHERE paper_id = ? AND tag_id = ?;
         """, bindings: [.text(paperID), .text(tagID)])
+    }
+
+    public func upsertWatchedFolder(_ folder: WatchedFolder) throws {
+        try database.run("""
+        INSERT INTO watched_folders (id, path, created_at, last_scanned_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          path = excluded.path,
+          last_scanned_at = excluded.last_scanned_at;
+        """, bindings: [
+            .text(folder.id),
+            .text(folder.path),
+            .text(dates.string(from: folder.createdAt)),
+            folder.lastScannedAt.map { .text(dates.string(from: $0)) } ?? .null
+        ])
+    }
+
+    public func fetchWatchedFolders() throws -> [WatchedFolder] {
+        try database.query("""
+        SELECT id, path, created_at, last_scanned_at
+        FROM watched_folders ORDER BY path, id;
+        """) { row in
+            try watchedFolder(from: row)
+        }
+    }
+
+    public func deleteWatchedFolder(id: String) throws {
+        try database.run("DELETE FROM watched_folders WHERE id = ?;", bindings: [.text(id)])
     }
 
     public func fetchTags(forPaperID paperID: String) throws -> [PaperTag] {
@@ -523,6 +558,15 @@ public final class PaperRepository {
             createdSessionID: try row.text(8),
             createdAt: try date(from: try row.text(9)),
             confidence: row.double(10)
+        )
+    }
+
+    private func watchedFolder(from row: SQLiteRow) throws -> WatchedFolder {
+        WatchedFolder(
+            id: try row.text(0),
+            path: try row.text(1),
+            createdAt: try date(from: try row.text(2)),
+            lastScannedAt: try row.optionalText(3).map { try date(from: $0) }
         )
     }
 

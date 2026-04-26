@@ -1,4 +1,3 @@
-import CryptoKit
 import Foundation
 import PaperCodexCore
 import SwiftUI
@@ -39,6 +38,7 @@ final class AppModel: ObservableObject {
     @Published var papers: [Paper] = []
     @Published var categories: [PaperCodexCore.Category] = []
     @Published var tags: [PaperTag] = []
+    @Published var watchedFolders: [WatchedFolder] = []
     @Published var paperCategoryIDsByID: [String: [String]] = [:]
     @Published var paperTagsByID: [String: [PaperTag]] = [:]
     @Published var selectedLibraryPaper: Paper?
@@ -51,6 +51,7 @@ final class AppModel: ObservableObject {
     @Published var codexDiagnostic: CodexDiagnostic?
     @Published var errorMessage: String?
     @Published var isSending = false
+    @Published var isScanningWatchedFolders = false
 
     private var repository: PaperRepository?
     private let supportRoot: URL
@@ -81,6 +82,7 @@ final class AppModel: ObservableObject {
         papers = try repository.fetchPapers()
         categories = try repository.fetchCategories()
         tags = try repository.fetchTags()
+        watchedFolders = try repository.fetchWatchedFolders()
         paperCategoryIDsByID = try Dictionary(uniqueKeysWithValues: papers.map { paper in
             (paper.id, try repository.fetchCategoryIDs(forPaperID: paper.id))
         })
@@ -104,48 +106,72 @@ final class AppModel: ObservableObject {
                 }
             }
 
-            let data = try Data(contentsOf: sourceURL)
-            let hash = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
-            if let existingPaper = try repository.fetchPaper(fileHash: hash) {
-                try reloadLibrary()
-                openPaper(existingPaper)
+            let result = try PaperLibraryImporter(repository: repository, supportRoot: supportRoot)
+                .importPDF(from: sourceURL)
+            try reloadLibrary()
+            openPaper(result.paper)
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func addWatchedFolder(from sourceURL: URL) {
+        do {
+            guard let repository else {
+                throw AppModelError.repositoryUnavailable
+            }
+            let accessed = sourceURL.startAccessingSecurityScopedResource()
+            defer {
+                if accessed {
+                    sourceURL.stopAccessingSecurityScopedResource()
+                }
+            }
+
+            let path = sourceURL.standardizedFileURL.path
+            let folder = watchedFolders.first { $0.path == path } ?? WatchedFolder(
+                id: makeManualID(prefix: "watch", name: sourceURL.lastPathComponent),
+                path: path,
+                createdAt: Date(),
+                lastScannedAt: nil
+            )
+            try repository.upsertWatchedFolder(folder)
+            try reloadLibrary()
+            try scanWatchedFolder(folder)
+            try reloadLibrary()
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func scanWatchedFolders() {
+        do {
+            guard !isScanningWatchedFolders else {
                 return
             }
-
-            let title = sourceURL.deletingPathExtension().lastPathComponent
-            let paperID = makePaperID(title: title, hash: hash)
-            let paperDir = supportRoot.appendingPathComponent("papers/\(paperID)", isDirectory: true)
-            try FileManager.default.createDirectory(at: paperDir, withIntermediateDirectories: true)
-            let destination = paperDir.appendingPathComponent("original.pdf")
-            if FileManager.default.fileExists(atPath: destination.path) {
-                try FileManager.default.removeItem(at: destination)
+            guard !watchedFolders.isEmpty else {
+                return
             }
-            try data.write(to: destination, options: [.atomic])
-
-            let now = Date()
-            let paper = Paper(
-                id: paperID,
-                filePath: destination.path,
-                fileHash: hash,
-                title: title,
-                authors: [],
-                year: nil,
-                sourceURL: nil,
-                importedAt: now,
-                updatedAt: now
-            )
-            try repository.upsertPaper(paper)
-
-            let index = try PDFIndexExtractor().extract(paperID: paperID, pdfURL: destination)
-            for page in index.pages {
-                try repository.upsertPage(page)
-            }
-            for span in index.spans {
-                try repository.upsertSpan(span)
+            isScanningWatchedFolders = true
+            defer {
+                isScanningWatchedFolders = false
             }
 
+            for folder in watchedFolders {
+                try scanWatchedFolder(folder)
+            }
             try reloadLibrary()
-            openPaper(paper)
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func removeWatchedFolder(_ folder: WatchedFolder) {
+        do {
+            guard let repository else {
+                throw AppModelError.repositoryUnavailable
+            }
+            try repository.deleteWatchedFolder(id: folder.id)
+            try reloadLibrary()
         } catch {
             errorMessage = String(describing: error)
         }
@@ -593,11 +619,6 @@ final class AppModel: ObservableObject {
         return "\(prefix)-\(slug.isEmpty ? "item" : slug)-\(UUID().uuidString.prefix(8).lowercased())"
     }
 
-    private func makePaperID(title: String, hash: String) -> String {
-        let slug = makeSlug(from: title)
-        return "\(slug.isEmpty ? "paper" : slug)-\(hash.prefix(10))"
-    }
-
     private func makeSlug(from text: String) -> String {
         text
             .lowercased()
@@ -611,6 +632,14 @@ final class AppModel: ObservableObject {
                 partial.append(character)
             }
             .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+    }
+
+    private func scanWatchedFolder(_ folder: WatchedFolder) throws {
+        guard let repository else {
+            throw AppModelError.repositoryUnavailable
+        }
+        _ = try WatchedFolderScanner(repository: repository, supportRoot: supportRoot)
+            .scan(folder: folder)
     }
 
     private func runCodex(prompt: String, session: PaperSession) async throws -> (stdout: String, lastMessage: String, threadID: String?) {

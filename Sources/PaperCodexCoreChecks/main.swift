@@ -496,6 +496,53 @@ func runFixtureLibraryChecks() throws {
     try check(!spans.isEmpty, "fixture library should persist extracted text spans")
 }
 
+func runWatchedFolderChecks() throws {
+    let tempRoot = FileManager.default.temporaryDirectory
+        .appendingPathComponent("paper-codex-watch-\(UUID().uuidString)", isDirectory: true)
+    let supportRoot = tempRoot.appendingPathComponent("support", isDirectory: true)
+    let inbox = tempRoot.appendingPathComponent("inbox", isDirectory: true)
+    try FileManager.default.createDirectory(at: inbox, withIntermediateDirectories: true)
+    let databaseURL = supportRoot.appendingPathComponent("store.sqlite")
+    try FileManager.default.createDirectory(at: supportRoot, withIntermediateDirectories: true)
+
+    try writeFixturePDF(to: inbox.appendingPathComponent("paper-a.pdf"), lines: [
+        "Watched folders import real PDF files.",
+        "The scanner should persist page text and spans."
+    ])
+    try writeFixturePDF(to: inbox.appendingPathComponent("paper-b.pdf"), lines: [
+        "A second PDF exercises deterministic folder scans.",
+        "Duplicate scans should not create duplicate papers."
+    ])
+    try "ignore me".write(to: inbox.appendingPathComponent("notes.txt"), atomically: true, encoding: .utf8)
+
+    let repository = try PaperRepository(databasePath: databaseURL.path)
+    try repository.migrate()
+    let now = Date(timeIntervalSince1970: 1_777_220_000)
+    let folder = WatchedFolder(id: "watch-inbox", path: inbox.path, createdAt: now, lastScannedAt: nil)
+    try repository.upsertWatchedFolder(folder)
+    let storedFolders = try repository.fetchWatchedFolders()
+    try check(storedFolders == [folder], "watched folder should persist")
+
+    let scanner = WatchedFolderScanner(repository: repository, supportRoot: supportRoot)
+    let firstScan = try scanner.scan(folder: folder, now: now.addingTimeInterval(5))
+    try check(firstScan.importedPapers.count == 2, "first watched folder scan should import two PDFs")
+    try check(firstScan.existingPapers.isEmpty, "first watched folder scan should not report existing papers")
+    let firstPapers = try repository.fetchPapers()
+    try check(firstPapers.count == 2, "watched folder scan should persist imported papers")
+    let storedFolder = try repository.fetchWatchedFolders().first
+    try check(storedFolder?.lastScannedAt == now.addingTimeInterval(5), "watched folder scan should update last scanned time")
+
+    let secondScan = try scanner.scan(folder: folder, now: now.addingTimeInterval(10))
+    try check(secondScan.importedPapers.isEmpty, "second watched folder scan should not re-import duplicates")
+    try check(secondScan.existingPapers.count == 2, "second watched folder scan should report two existing papers")
+    let secondPapers = try repository.fetchPapers()
+    try check(secondPapers.count == 2, "duplicate watched folder scan should keep paper count stable")
+
+    try repository.deleteWatchedFolder(id: folder.id)
+    let removedFolders = try repository.fetchWatchedFolders()
+    try check(removedFolders.isEmpty, "watched folder should be removable")
+}
+
 func seedFixtureLibrary(at root: URL) throws {
     let fileManager = FileManager.default
     let storeURL = root.appendingPathComponent("store.sqlite")
@@ -722,6 +769,10 @@ do {
     if selectedChecks.isEmpty || selectedChecks.contains("fixture") {
         try runFixtureLibraryChecks()
         print("fixture: pass")
+    }
+    if selectedChecks.isEmpty || selectedChecks.contains("watch") {
+        try runWatchedFolderChecks()
+        print("watch: pass")
     }
 } catch {
     fputs("check failed: \(error)\n", stderr)

@@ -82,6 +82,20 @@ public struct PaperTag: Codable, Equatable, Identifiable, Sendable {
     }
 }
 
+public struct WatchedFolder: Codable, Equatable, Identifiable, Sendable {
+    public var id: String
+    public var path: String
+    public var createdAt: Date
+    public var lastScannedAt: Date?
+
+    public init(id: String, path: String, createdAt: Date, lastScannedAt: Date?) {
+        self.id = id
+        self.path = path
+        self.createdAt = createdAt
+        self.lastScannedAt = lastScannedAt
+    }
+}
+
 public struct Span: Codable, Equatable, Identifiable, Sendable {
     public var id: String
     public var paperID: String
