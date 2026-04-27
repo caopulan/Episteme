@@ -482,6 +482,16 @@ func runCodexCLIChecks() throws {
 
     let parsedVersion = CodexCLI.parseVersion(from: "codex-cli 0.114.0\n")
     try check(parsedVersion == "0.114.0", "Codex version parser should read codex-cli output")
+    let selectedExecutable = CodexCLI.selectBestExecutable(candidates: [
+        CodexExecutableCandidate(path: "/opt/homebrew/bin/codex", version: "0.114.0"),
+        CodexExecutableCandidate(path: "/Applications/Codex.app/Contents/Resources/codex", version: "0.125.0-alpha.3")
+    ])
+    try check(selectedExecutable?.path == "/Applications/Codex.app/Contents/Resources/codex", "newest Codex executable should be selected when multiple copies exist")
+    let firstUnknownExecutable = CodexCLI.selectBestExecutable(candidates: [
+        CodexExecutableCandidate(path: "/first/codex", version: nil),
+        CodexExecutableCandidate(path: "/second/codex", version: nil)
+    ])
+    try check(firstUnknownExecutable?.path == "/first/codex", "candidate order should be preserved when versions are unknown")
     let help = "Usage: codex exec [OPTIONS]\n      --json\n  -o, --output-last-message <FILE>\nCommands:\n  resume\n"
     let capabilities = CodexCLI.parseCapabilities(fromExecHelp: help)
     try check(capabilities.supportsJSONOutput, "Codex help parser should detect JSON output support")

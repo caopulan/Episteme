@@ -26,6 +26,16 @@ public struct CodexCapabilities: Equatable, Sendable {
     }
 }
 
+public struct CodexExecutableCandidate: Equatable, Sendable {
+    public var path: String
+    public var version: String?
+
+    public init(path: String, version: String?) {
+        self.path = path
+        self.version = version
+    }
+}
+
 public enum CodexDiagnosticSeverity: String, Codable, Equatable, Sendable {
     case ready
     case warning
@@ -95,17 +105,53 @@ public struct CodexCLI: Sendable {
 
     public static func findCodexExecutable(environment: [String: String] = ProcessInfo.processInfo.environment) throws -> String {
         let pathValue = environment["PATH"] ?? ""
-        let candidates = pathValue
+        let candidatePaths = pathValue
             .split(separator: ":")
             .map { String($0) + "/codex" }
-            + ["/opt/homebrew/bin/codex", "/usr/local/bin/codex"]
+            + [
+                "/Applications/Codex.app/Contents/Resources/codex",
+                "/opt/homebrew/bin/codex",
+                "/usr/local/bin/codex"
+            ]
 
-        for candidate in candidates {
-            if FileManager.default.isExecutableFile(atPath: candidate) {
-                return candidate
+        var seen: Set<String> = []
+        let candidates = candidatePaths.compactMap { path -> CodexExecutableCandidate? in
+            guard !seen.contains(path) else {
+                return nil
             }
+            seen.insert(path)
+            guard FileManager.default.isExecutableFile(atPath: path) else {
+                return nil
+            }
+            let version = try? CodexCLI(executablePath: path).version()
+            return CodexExecutableCandidate(path: path, version: version)
+        }
+
+        if let selected = selectBestExecutable(candidates: candidates) {
+            return selected.path
         }
         throw CodexCLIError.executableNotFound
+    }
+
+    public static func selectBestExecutable(candidates: [CodexExecutableCandidate]) -> CodexExecutableCandidate? {
+        guard var best = candidates.first else {
+            return nil
+        }
+        for candidate in candidates.dropFirst() {
+            switch (candidate.version, best.version) {
+            case let (candidateVersion?, bestVersion?):
+                if compareVersion(candidateVersion, bestVersion) == .orderedDescending {
+                    best = candidate
+                }
+            case (_?, nil):
+                best = candidate
+            case (nil, _?):
+                continue
+            case (nil, nil):
+                continue
+            }
+        }
+        return best
     }
 
     public func startArguments(
