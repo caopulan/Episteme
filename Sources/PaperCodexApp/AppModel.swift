@@ -21,6 +21,13 @@ struct PDFJumpTarget: Equatable {
     var label: String
 }
 
+struct ActiveCodexRun: Identifiable, Equatable {
+    var id: String
+    var title: String
+    var startedAt: Date
+    var events: [CodexRunEvent]
+}
+
 private struct SessionPaperContext {
     var papers: [Paper]
     var pagesByPaperID: [String: [PageIndex]]
@@ -33,6 +40,7 @@ private struct SessionPaperContext {
 }
 
 private let codexModelOverrideDefaultsKey = "PaperCodexCodexModelOverride"
+private let codexReasoningEffortDefaultsKey = "PaperCodexCodexReasoningEffort"
 
 @MainActor
 final class AppModel: ObservableObject {
@@ -52,6 +60,11 @@ final class AppModel: ObservableObject {
     @Published var pdfJumpTarget: PDFJumpTarget?
     @Published var codexDiagnostic: CodexDiagnostic?
     @Published var codexModelOverride: String = UserDefaults.standard.string(forKey: codexModelOverrideDefaultsKey) ?? ""
+    @Published var codexReasoningEffort: CodexReasoningEffort = {
+        let stored = UserDefaults.standard.string(forKey: codexReasoningEffortDefaultsKey)
+        return stored.flatMap(CodexReasoningEffort.init(rawValue:)) ?? .default
+    }()
+    @Published var activeCodexRun: ActiveCodexRun?
     @Published var errorMessage: String?
     @Published var isSending = false
     @Published var isScanningWatchedFolders = false
@@ -439,6 +452,15 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func setCodexReasoningEffort(_ effort: CodexReasoningEffort) {
+        codexReasoningEffort = effort
+        if effort == .default {
+            UserDefaults.standard.removeObject(forKey: codexReasoningEffortDefaultsKey)
+        } else {
+            UserDefaults.standard.set(effort.rawValue, forKey: codexReasoningEffortDefaultsKey)
+        }
+    }
+
     func jumpToCitation(_ citationID: String) {
         do {
             guard let repository else {
@@ -487,6 +509,7 @@ final class AppModel: ObservableObject {
         isSending = true
         defer {
             isSending = false
+            activeCodexRun = nil
         }
 
         do {
@@ -572,6 +595,7 @@ final class AppModel: ObservableObject {
         isSending = true
         defer {
             isSending = false
+            activeCodexRun = nil
         }
 
         do {
@@ -712,6 +736,29 @@ final class AppModel: ObservableObject {
             .scanAllWatchedFolders()
     }
 
+    private func beginCodexRun(title: String) -> String {
+        let runID = UUID().uuidString.lowercased()
+        activeCodexRun = ActiveCodexRun(
+            id: runID,
+            title: title,
+            startedAt: Date(),
+            events: [
+                CodexRunEvent(kind: .status, title: "Preparing", detail: "Preparing paper context and Codex workspace")
+            ]
+        )
+        return runID
+    }
+
+    private func appendCodexRunEvent(_ event: CodexRunEvent, runID: String) {
+        guard activeCodexRun?.id == runID else {
+            return
+        }
+        activeCodexRun?.events.append(event)
+        if let count = activeCodexRun?.events.count, count > 80 {
+            activeCodexRun?.events.removeFirst(count - 80)
+        }
+    }
+
     private func startWatchedFolderAutoScan() {
         watchedFolderAutoScanTask?.cancel()
         watchedFolderAutoScanTask = Task { [weak self] in
@@ -732,31 +779,53 @@ final class AppModel: ObservableObject {
         scanWatchedFolders()
     }
 
-    private func runCodex(prompt: String, session: PaperSession) async throws -> (stdout: String, lastMessage: String, threadID: String?) {
+    private func runCodex(prompt: String, session: PaperSession, runID: String) async throws -> (stdout: String, lastMessage: String, threadID: String?) {
         let executable = try CodexCLI.findCodexExecutable()
         let cli = CodexCLI(executablePath: executable)
+        appendCodexRunEvent(
+            CodexRunEvent(kind: .status, title: "Codex", detail: "Launching \(URL(fileURLWithPath: executable).lastPathComponent)"),
+            runID: runID
+        )
         let outputURL = URL(fileURLWithPath: session.workspacePath)
             .appendingPathComponent("turns", isDirectory: true)
             .appendingPathComponent("\(UUID().uuidString.lowercased())-codex.txt")
+        let eventLogURL = outputURL.deletingPathExtension().appendingPathExtension("events.jsonl")
+        let reasoningEffort = codexReasoningEffort
+        let modelOverride = codexModelOverride
         let arguments: [String]
         if let codexSessionID = session.codexSessionID {
             arguments = cli.resumeArguments(
                 sessionID: codexSessionID,
                 prompt: prompt,
                 outputLastMessagePath: outputURL.path,
-                modelOverride: codexModelOverride
+                modelOverride: modelOverride,
+                reasoningEffort: reasoningEffort
             )
         } else {
             arguments = cli.startArguments(
                 prompt: prompt,
                 workspacePath: session.workspacePath,
                 outputLastMessagePath: outputURL.path,
-                modelOverride: codexModelOverride
+                modelOverride: modelOverride,
+                reasoningEffort: reasoningEffort
             )
         }
 
+        appendCodexRunEvent(
+            CodexRunEvent(
+                kind: .status,
+                title: "Codex",
+                detail: reasoningEffort == .default ? "Using default thinking level" : "Using \(reasoningEffort.displayName) thinking"
+            ),
+            runID: runID
+        )
+        let eventSink: @Sendable (CodexRunEvent) -> Void = { [weak self] event in
+            Task { @MainActor in
+                self?.appendCodexRunEvent(event, runID: runID)
+            }
+        }
         let stdout = try await Task.detached(priority: .userInitiated) {
-            try cli.run(arguments: arguments)
+            try cli.runStreaming(arguments: arguments, eventLogURL: eventLogURL, onEvent: eventSink)
         }.value
         let lastMessage = (try? String(contentsOf: outputURL, encoding: .utf8)) ?? ""
         return (stdout: stdout, lastMessage: lastMessage, threadID: CodexCLI.parseThreadID(from: stdout))
@@ -768,14 +837,23 @@ final class AppModel: ObservableObject {
         fallbackPaper: Paper,
         repository: PaperRepository
     ) async throws -> PaperSession {
+        let runID = beginCodexRun(title: "Codex is working")
         let context = try loadSessionPaperContext(session: session, fallbackPaper: fallbackPaper, repository: repository)
         let selectedAnchors = anchorsReferenced(in: content, context: context)
+        appendCodexRunEvent(
+            CodexRunEvent(kind: .status, title: "Context", detail: "Loaded \(context.papers.count) paper(s), \(context.spans.count) indexed span(s), \(selectedAnchors.count) selected source anchor(s)"),
+            runID: runID
+        )
         try workspaceManager.writeWorkspace(
             session: session,
             papers: context.papers,
             pagesByPaperID: context.pagesByPaperID,
             spansByPaperID: context.spansByPaperID,
             anchorsByPaperID: context.anchorsByPaperID
+        )
+        appendCodexRunEvent(
+            CodexRunEvent(kind: .status, title: "Workspace", detail: "Wrote session workspace at \(session.workspacePath)"),
+            runID: runID
         )
 
         let prompt = PromptBuilder().buildPrompt(
@@ -787,7 +865,11 @@ final class AppModel: ObservableObject {
                 relevantSpans: relevantSpans(from: context.spans, selectedAnchors: selectedAnchors)
             )
         )
-        let codexReply = try await runCodex(prompt: prompt, session: session)
+        appendCodexRunEvent(
+            CodexRunEvent(kind: .status, title: "Prompt", detail: "Built grounded prompt and started Codex"),
+            runID: runID
+        )
+        let codexReply = try await runCodex(prompt: prompt, session: session, runID: runID)
         var updatedSession = session
         if let threadID = codexReply.threadID {
             updatedSession.codexSessionID = threadID

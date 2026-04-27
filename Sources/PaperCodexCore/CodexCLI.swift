@@ -36,6 +36,278 @@ public struct CodexExecutableCandidate: Equatable, Sendable {
     }
 }
 
+public enum CodexReasoningEffort: String, Codable, CaseIterable, Sendable {
+    case `default`
+    case low
+    case medium
+    case high
+    case xhigh
+
+    public var codexConfigValue: String? {
+        self == .default ? nil : rawValue
+    }
+
+    public var displayName: String {
+        switch self {
+        case .default:
+            "Default"
+        case .low:
+            "Low"
+        case .medium:
+            "Medium"
+        case .high:
+            "High"
+        case .xhigh:
+            "XHigh"
+        }
+    }
+}
+
+public enum CodexRunEventKind: String, Codable, Equatable, Sendable {
+    case status
+    case thinking
+    case tool
+    case terminal
+    case answer
+    case warning
+    case error
+    case raw
+}
+
+public struct CodexRunEvent: Codable, Equatable, Identifiable, Sendable {
+    public var id: String
+    public var kind: CodexRunEventKind
+    public var title: String
+    public var detail: String
+    public var createdAt: Date
+
+    public init(
+        id: String = UUID().uuidString.lowercased(),
+        kind: CodexRunEventKind,
+        title: String,
+        detail: String,
+        createdAt: Date = Date()
+    ) {
+        self.id = id
+        self.kind = kind
+        self.title = title
+        self.detail = detail
+        self.createdAt = createdAt
+    }
+}
+
+public enum CodexJSONEventParser {
+    public static func parseLine(_ line: String) throws -> CodexRunEvent? {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return nil
+        }
+        guard let data = trimmed.data(using: .utf8),
+              let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return CodexRunEvent(kind: .raw, title: "Codex", detail: trimmed)
+        }
+
+        let payload = json["payload"] as? [String: Any]
+        let item = json["item"] as? [String: Any]
+        let effective = payload ?? item ?? json
+        let type = stringValue(named: "type", in: effective)
+            ?? stringValue(named: "type", in: json)
+            ?? "event"
+        let lowerType = type.lowercased()
+
+        if lowerType.contains("thread.started") {
+            let threadID = stringValue(named: "thread_id", in: effective)
+                ?? stringValue(named: "thread_id", in: json)
+                ?? "unknown"
+            return CodexRunEvent(kind: .status, title: "Session", detail: "Codex session \(threadID) started")
+        }
+        if lowerType.contains("turn.started") {
+            return CodexRunEvent(kind: .status, title: "Turn", detail: "Codex turn started")
+        }
+        if lowerType.contains("reasoning") || lowerType.contains("thinking") {
+            let detail = summaryText(in: effective)
+                ?? stringValue(named: "text", in: effective)
+                ?? stringValue(named: "message", in: effective)
+                ?? type
+            return CodexRunEvent(kind: .thinking, title: "Thinking", detail: detail)
+        }
+        if lowerType.contains("exec_command") || lowerType.contains("terminal") || lowerType.contains("command") {
+            let command = stringValue(named: "cmd", in: effective)
+                ?? stringValue(named: "command", in: effective)
+            let output = stringValue(named: "stdout", in: effective)
+                ?? stringValue(named: "stderr", in: effective)
+                ?? stringValue(named: "output", in: effective)
+                ?? stringValue(named: "text", in: effective)
+            let detail = command.map { "Command: \($0)" } ?? output ?? compactJSONString(effective) ?? type
+            return CodexRunEvent(kind: .terminal, title: "Terminal", detail: detail)
+        }
+        if lowerType.contains("tool") || lowerType.contains("function_call") {
+            let name = stringValue(named: "name", in: effective)
+                ?? stringValue(named: "tool_name", in: effective)
+                ?? stringValue(named: "call_id", in: effective)
+                ?? "Tool"
+            let arguments = compactJSONString(effective["arguments"])
+                ?? compactJSONString(effective["args"])
+                ?? stringValue(named: "arguments", in: effective)
+                ?? stringValue(named: "input", in: effective)
+                ?? name
+            return CodexRunEvent(kind: .tool, title: name, detail: arguments)
+        }
+        if lowerType.contains("message") || lowerType.contains("answer") {
+            let detail = stringValue(named: "text", in: effective)
+                ?? stringValue(named: "message", in: effective)
+                ?? summaryText(in: effective)
+                ?? compactJSONString(effective)
+                ?? type
+            return CodexRunEvent(kind: .answer, title: "Answer", detail: detail)
+        }
+        if lowerType.contains("error") || lowerType.contains("failed") {
+            let detail = stringValue(named: "message", in: effective)
+                ?? stringValue(named: "error", in: effective)
+                ?? compactJSONString(effective)
+                ?? type
+            return CodexRunEvent(kind: .error, title: "Error", detail: detail)
+        }
+        if lowerType.contains("warning") || lowerType.contains("warn") {
+            let detail = stringValue(named: "message", in: effective)
+                ?? stringValue(named: "detail", in: effective)
+                ?? compactJSONString(effective)
+                ?? type
+            return CodexRunEvent(kind: .warning, title: "Warning", detail: detail)
+        }
+
+        return CodexRunEvent(kind: .raw, title: type, detail: compactJSONString(effective) ?? trimmed)
+    }
+
+    private static func summaryText(in value: Any?) -> String? {
+        guard let value else {
+            return nil
+        }
+        if let dictionary = value as? [String: Any],
+           let summary = dictionary["summary"] {
+            return summaryText(in: summary)
+        }
+        if let array = value as? [Any] {
+            let parts = array.compactMap { item -> String? in
+                if let text = item as? String {
+                    return text
+                }
+                if let dictionary = item as? [String: Any] {
+                    return stringValue(named: "text", in: dictionary)
+                        ?? stringValue(named: "summary_text", in: dictionary)
+                }
+                return nil
+            }
+            return parts.isEmpty ? nil : parts.joined(separator: "\n")
+        }
+        return nil
+    }
+
+    private static func stringValue(named key: String, in value: Any?) -> String? {
+        guard let value else {
+            return nil
+        }
+        if let dictionary = value as? [String: Any] {
+            if let string = dictionary[key] as? String, !string.isEmpty {
+                return string
+            }
+            for nested in dictionary.values {
+                if let found = stringValue(named: key, in: nested) {
+                    return found
+                }
+            }
+        }
+        if let array = value as? [Any] {
+            for nested in array {
+                if let found = stringValue(named: key, in: nested) {
+                    return found
+                }
+            }
+        }
+        return nil
+    }
+
+    private static func compactJSONString(_ value: Any?) -> String? {
+        guard let value,
+              JSONSerialization.isValidJSONObject(value),
+              let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]),
+              let text = String(data: data, encoding: .utf8) else {
+            return nil
+        }
+        return text
+    }
+}
+
+private final class CodexStreamBuffer: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stdoutData = Data()
+    private var stderrData = Data()
+    private var stdoutRemainder = ""
+    private var stderrRemainder = ""
+
+    func appendStdout(_ data: Data) -> [CodexRunEvent] {
+        guard !data.isEmpty else {
+            return []
+        }
+        let text = String(decoding: data, as: UTF8.self)
+        let lines: [String]
+        lock.lock()
+        stdoutData.append(data)
+        stdoutRemainder += text
+        lines = Self.consumeLines(from: &stdoutRemainder)
+        lock.unlock()
+        return lines.compactMap { try? CodexJSONEventParser.parseLine($0) }
+    }
+
+    func appendStderr(_ data: Data) -> [CodexRunEvent] {
+        guard !data.isEmpty else {
+            return []
+        }
+        let text = String(decoding: data, as: UTF8.self)
+        let lines: [String]
+        lock.lock()
+        stderrData.append(data)
+        stderrRemainder += text
+        lines = Self.consumeLines(from: &stderrRemainder)
+        lock.unlock()
+        return lines
+            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .map { CodexRunEvent(kind: .terminal, title: "stderr", detail: $0) }
+    }
+
+    func finish() -> (stdout: String, stderr: String, events: [CodexRunEvent]) {
+        let stdoutRemainderSnapshot: String
+        let stderrRemainderSnapshot: String
+        let stdout: String
+        let stderr: String
+        lock.lock()
+        stdoutRemainderSnapshot = stdoutRemainder
+        stderrRemainderSnapshot = stderrRemainder
+        stdout = String(decoding: stdoutData, as: UTF8.self)
+        stderr = String(decoding: stderrData, as: UTF8.self)
+        lock.unlock()
+
+        var events: [CodexRunEvent] = []
+        if let event = try? CodexJSONEventParser.parseLine(stdoutRemainderSnapshot) {
+            events.append(event)
+        }
+        let trimmedStderrRemainder = stderrRemainderSnapshot.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedStderrRemainder.isEmpty {
+            events.append(CodexRunEvent(kind: .terminal, title: "stderr", detail: trimmedStderrRemainder))
+        }
+        return (stdout, stderr, events)
+    }
+
+    private static func consumeLines(from buffer: inout String) -> [String] {
+        var lines: [String] = []
+        while let newline = buffer.firstIndex(where: { $0.isNewline }) {
+            lines.append(String(buffer[..<newline]))
+            buffer.removeSubrange(...newline)
+        }
+        return lines
+    }
+}
+
 public enum CodexDiagnosticSeverity: String, Codable, Equatable, Sendable {
     case ready
     case warning
@@ -158,11 +430,15 @@ public struct CodexCLI: Sendable {
         prompt: String,
         workspacePath: String,
         outputLastMessagePath: String? = nil,
-        modelOverride: String? = nil
+        modelOverride: String? = nil,
+        reasoningEffort: CodexReasoningEffort = .default
     ) -> [String] {
         var arguments = ["exec", "--skip-git-repo-check", "--json"]
         if let modelOverride = Self.normalizedModelOverride(modelOverride) {
             arguments += ["--model", modelOverride]
+        }
+        if let reasoningEffort = reasoningEffort.codexConfigValue {
+            arguments += ["-c", "model_reasoning_effort=\"\(reasoningEffort)\""]
         }
         arguments += ["-C", workspacePath]
         if let outputLastMessagePath {
@@ -176,11 +452,15 @@ public struct CodexCLI: Sendable {
         sessionID: String,
         prompt: String,
         outputLastMessagePath: String? = nil,
-        modelOverride: String? = nil
+        modelOverride: String? = nil,
+        reasoningEffort: CodexReasoningEffort = .default
     ) -> [String] {
         var arguments = ["exec", "resume", "--skip-git-repo-check", "--json"]
         if let modelOverride = Self.normalizedModelOverride(modelOverride) {
             arguments += ["--model", modelOverride]
+        }
+        if let reasoningEffort = reasoningEffort.codexConfigValue {
+            arguments += ["-c", "model_reasoning_effort=\"\(reasoningEffort)\""]
         }
         if let outputLastMessagePath {
             arguments += ["--output-last-message", outputLastMessagePath]
@@ -338,6 +618,67 @@ public struct CodexCLI: Sendable {
             throw CodexCLIError.processFailed(status: process.terminationStatus, stderr: stderr)
         }
         return stdout
+    }
+
+    public func runStreaming(
+        arguments: [String],
+        eventLogURL: URL? = nil,
+        onEvent: @escaping @Sendable (CodexRunEvent) -> Void
+    ) throws -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: executablePath)
+        process.arguments = arguments
+
+        let output = Pipe()
+        let error = Pipe()
+        process.standardOutput = output
+        process.standardError = error
+
+        let streamBuffer = CodexStreamBuffer()
+
+        let group = DispatchGroup()
+        group.enter()
+        DispatchQueue.global(qos: .userInitiated).async {
+            while true {
+                let data = output.fileHandleForReading.availableData
+                if data.isEmpty {
+                    break
+                }
+                for event in streamBuffer.appendStdout(data) {
+                    onEvent(event)
+                }
+            }
+            group.leave()
+        }
+        group.enter()
+        DispatchQueue.global(qos: .userInitiated).async {
+            while true {
+                let data = error.fileHandleForReading.availableData
+                if data.isEmpty {
+                    break
+                }
+                for event in streamBuffer.appendStderr(data) {
+                    onEvent(event)
+                }
+            }
+            group.leave()
+        }
+
+        try process.run()
+        process.waitUntilExit()
+        group.wait()
+
+        let result = streamBuffer.finish()
+        for event in result.events {
+            onEvent(event)
+        }
+        if let eventLogURL {
+            try result.stdout.write(to: eventLogURL, atomically: true, encoding: .utf8)
+        }
+        if process.terminationStatus != 0 {
+            throw CodexCLIError.processFailed(status: process.terminationStatus, stderr: result.stderr)
+        }
+        return result.stdout
     }
 
     public static func parseThreadID(from jsonl: String) -> String? {

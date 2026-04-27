@@ -11,7 +11,7 @@ struct ChatView: View {
             Divider()
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 12) {
-                    if model.messages.isEmpty {
+                    if model.messages.isEmpty && model.activeCodexRun == nil {
                         ContentUnavailableView(
                             "No Messages",
                             systemImage: "text.bubble",
@@ -35,6 +35,9 @@ struct ChatView: View {
                                     model.startFreshSessionFromCurrentPaperSet()
                                 }
                             )
+                        }
+                        if let activeCodexRun = model.activeCodexRun {
+                            CodexRunBubble(run: activeCodexRun)
                         }
                     }
                 }
@@ -83,7 +86,9 @@ struct ChatView: View {
             CodexStatusLine(
                 diagnostic: model.codexDiagnostic,
                 modelOverride: model.codexModelOverride,
-                onModelOverride: { model.setCodexModelOverride($0) }
+                reasoningEffort: model.codexReasoningEffort,
+                onModelOverride: { model.setCodexModelOverride($0) },
+                onReasoningEffort: { model.setCodexReasoningEffort($0) }
             ) {
                 Task {
                     await model.refreshCodexDiagnostic()
@@ -119,7 +124,9 @@ struct ChatView: View {
 private struct CodexStatusLine: View {
     var diagnostic: CodexDiagnostic?
     var modelOverride: String
+    var reasoningEffort: CodexReasoningEffort
     var onModelOverride: (String) -> Void
+    var onReasoningEffort: (CodexReasoningEffort) -> Void
     var onRefresh: () -> Void
 
     var body: some View {
@@ -156,6 +163,25 @@ private struct CodexStatusLine: View {
             .menuStyle(.button)
             .buttonStyle(.borderless)
             .controlSize(.small)
+            Menu {
+                ForEach(CodexReasoningEffort.allCases, id: \.self) { effort in
+                    Button {
+                        onReasoningEffort(effort)
+                    } label: {
+                        if effort == reasoningEffort {
+                            Label(effort.displayName, systemImage: "checkmark")
+                        } else {
+                            Text(effort.displayName)
+                        }
+                    }
+                }
+            } label: {
+                Label(reasoningLabel, systemImage: "brain.head.profile")
+                    .labelStyle(.titleAndIcon)
+            }
+            .menuStyle(.button)
+            .buttonStyle(.borderless)
+            .controlSize(.small)
             Button(action: onRefresh) {
                 Image(systemName: "arrow.clockwise")
             }
@@ -183,6 +209,10 @@ private struct CodexStatusLine: View {
     private var modelLabel: String {
         let trimmed = modelOverride.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? "Default" : trimmed
+    }
+
+    private var reasoningLabel: String {
+        "Think \(reasoningEffort.displayName)"
     }
 
     private var shouldOfferCompatibleModel: Bool {
@@ -215,6 +245,138 @@ private struct CodexStatusLine: View {
             return .orange
         case .blocked:
             return .red
+        }
+    }
+}
+
+private struct CodexRunBubble: View {
+    var run: ActiveCodexRun
+
+    private var visibleEvents: [CodexRunEvent] {
+        Array(run.events.suffix(16))
+    }
+
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Codex")
+                        .font(.caption.weight(.semibold))
+                    Text("Running")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text("\(run.events.count) events")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(visibleEvents) { event in
+                        CodexRunEventRow(event: event)
+                    }
+                }
+            }
+            .padding(12)
+            .background(Color(nsColor: .textBackgroundColor))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color.accentColor.opacity(0.22), lineWidth: 1)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            Spacer(minLength: 32)
+        }
+    }
+}
+
+private struct CodexRunEventRow: View {
+    var event: CodexRunEvent
+    @State private var isExpanded = false
+
+    var body: some View {
+        if event.kind == .terminal {
+            DisclosureGroup(isExpanded: $isExpanded) {
+                Text(event.detail)
+                    .font(.system(size: 12, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(8)
+                    .background(Color(nsColor: .controlBackgroundColor))
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+            } label: {
+                eventHeader
+            }
+            .font(.caption)
+        } else {
+            VStack(alignment: .leading, spacing: 3) {
+                eventHeader
+                Text(event.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .lineLimit(event.kind == .tool ? 3 : 2)
+            }
+        }
+    }
+
+    private var eventHeader: some View {
+        HStack(spacing: 6) {
+            Image(systemName: iconName)
+                .foregroundStyle(tint)
+                .frame(width: 14)
+            Text(event.title)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.primary)
+            if event.kind == .terminal, !isExpanded {
+                Text(event.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+    }
+
+    private var iconName: String {
+        switch event.kind {
+        case .status:
+            "circle.dotted"
+        case .thinking:
+            "brain.head.profile"
+        case .tool:
+            "wrench.and.screwdriver"
+        case .terminal:
+            "terminal"
+        case .answer:
+            "text.bubble"
+        case .warning:
+            "exclamationmark.triangle"
+        case .error:
+            "xmark.octagon"
+        case .raw:
+            "doc.plaintext"
+        }
+    }
+
+    private var tint: Color {
+        switch event.kind {
+        case .status:
+            .blue
+        case .thinking:
+            .purple
+        case .tool:
+            .indigo
+        case .terminal:
+            .gray
+        case .answer:
+            .green
+        case .warning:
+            .orange
+        case .error:
+            .red
+        case .raw:
+            .secondary
         }
     }
 }
