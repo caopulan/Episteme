@@ -29,7 +29,7 @@ public struct ParsedCitationText: Codable, Equatable, Sendable {
 }
 
 public enum CitationParser {
-    public static func parse(_ text: String) -> ParsedCitationText {
+    public static func parse(_ text: String, maxVisibleCitations: Int? = nil) -> ParsedCitationText {
         var output = ""
         var markdownOutput = ""
         var citations: [SourceCitation] = []
@@ -54,11 +54,16 @@ public enum CitationParser {
             let citationID = String(text[citationIDStart..<citationIDEnd])
 
             if isValidCitationID(citationID) {
-                let displayIndex = citations.count + 1
-                let citation = SourceCitation(id: citationID, marker: marker, displayIndex: displayIndex)
-                citations.append(citation)
-                output.append("[\(displayIndex)]")
-                markdownOutput.append("[\(displayIndex)](\(citation.link))")
+                if let maxVisibleCitations, citations.count >= maxVisibleCitations {
+                    output.append("")
+                    markdownOutput.append("")
+                } else {
+                    let displayIndex = citations.count + 1
+                    let citation = SourceCitation(id: citationID, marker: marker, displayIndex: displayIndex)
+                    citations.append(citation)
+                    output.append("[\(displayIndex)]")
+                    markdownOutput.append("[\(displayIndex)](\(citation.link))")
+                }
             } else {
                 brokenMarkers.append(marker)
                 output.append(marker)
@@ -82,6 +87,21 @@ public enum CitationParser {
         }
         let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
         return components?.queryItems?.first { $0.name == "id" }?.value
+    }
+
+    public static func baseSpanCitationID(for citationID: String) -> String? {
+        let parts = citationID.split(separator: ":", omittingEmptySubsequences: false).map(String.init)
+        guard parts.count == 4, parts[0] == "paper", parts[3].hasPrefix("b") else {
+            return nil
+        }
+        let suffix = parts[3].dropFirst()
+        let digits = suffix.prefix { $0.isNumber }
+        guard !digits.isEmpty else {
+            return nil
+        }
+        var baseParts = parts
+        baseParts[3] = "b\(digits)"
+        return baseParts.joined(separator: ":")
     }
 
     private static func isValidCitationID(_ id: String) -> Bool {

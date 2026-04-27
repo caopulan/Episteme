@@ -74,6 +74,8 @@ final class AppModel: ObservableObject {
     private let supportRoot: URL
     private let workspaceManager = SessionWorkspaceManager()
     private var watchedFolderAutoScanTask: Task<Void, Never>?
+    private var activeCodexRunHandle: CodexRunHandle?
+    private var isCancellingCodexRun = false
 
     init() {
         let root = PaperCodexPaths.supportRoot()
@@ -467,6 +469,15 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func cancelActiveCodexRun() {
+        guard isSending else {
+            return
+        }
+        isCancellingCodexRun = true
+        activeCodexRunHandle?.cancel()
+        activeCodexRun = nil
+    }
+
     func jumpToCitation(_ citationID: String) {
         do {
             guard let repository else {
@@ -478,6 +489,21 @@ final class AppModel: ObservableObject {
                 }
                 pdfJumpTarget = PDFJumpTarget(
                     id: span.id,
+                    paperID: span.paperID,
+                    page: span.page,
+                    bboxList: [span.bbox],
+                    label: span.text
+                )
+                return
+            }
+            if let baseSpanID = CitationParser.baseSpanCitationID(for: citationID),
+               baseSpanID != citationID,
+               let span = try repository.fetchSpan(id: baseSpanID) {
+                if selectedPaper?.id != span.paperID, let paper = papers.first(where: { $0.id == span.paperID }) {
+                    selectedPaper = paper
+                }
+                pdfJumpTarget = PDFJumpTarget(
+                    id: citationID,
                     paperID: span.paperID,
                     page: span.page,
                     bboxList: [span.bbox],
@@ -516,6 +542,8 @@ final class AppModel: ObservableObject {
         defer {
             isSending = false
             activeCodexRun = nil
+            activeCodexRunHandle = nil
+            isCancellingCodexRun = false
         }
 
         do {
@@ -590,6 +618,9 @@ final class AppModel: ObservableObject {
         } catch AppModelError.anchorMatchFailed {
             errorMessage = AppModelError.anchorMatchFailed.description
         } catch {
+            if isCancellingCodexRun {
+                return
+            }
             await appendCodexFailureMessage(String(describing: error))
         }
     }
@@ -602,6 +633,8 @@ final class AppModel: ObservableObject {
         defer {
             isSending = false
             activeCodexRun = nil
+            activeCodexRunHandle = nil
+            isCancellingCodexRun = false
         }
 
         do {
@@ -630,6 +663,9 @@ final class AppModel: ObservableObject {
             sessions = try repository.fetchSessions(paperID: fallbackPaper.id)
             messages = try repository.fetchMessages(sessionID: session.id)
         } catch {
+            if isCancellingCodexRun {
+                return
+            }
             await appendCodexFailureMessage(String(describing: error))
         }
     }
@@ -821,8 +857,10 @@ final class AppModel: ObservableObject {
                 self?.appendCodexRunEvent(event, runID: runID)
             }
         }
+        let runHandle = CodexRunHandle()
+        activeCodexRunHandle = runHandle
         let stdout = try await Task.detached(priority: .userInitiated) {
-            try cli.runStreaming(arguments: arguments, eventLogURL: eventLogURL, onEvent: eventSink)
+            try cli.runStreaming(arguments: arguments, eventLogURL: eventLogURL, runHandle: runHandle, onEvent: eventSink)
         }.value
         let lastMessage = (try? String(contentsOf: outputURL, encoding: .utf8)) ?? ""
         return (stdout: stdout, lastMessage: lastMessage, threadID: CodexCLI.parseThreadID(from: stdout))

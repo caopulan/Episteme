@@ -1,6 +1,9 @@
 import Foundation
 
 public enum SpanCompactor {
+    private static let maxLinesPerBlock = 4
+    private static let maxCharactersPerBlock = 420
+
     public static func compact(_ spans: [Span]) -> [Span] {
         let orderedSpans = spans.sorted { left, right in
             if left.paperID != right.paperID {
@@ -57,6 +60,9 @@ public enum SpanCompactor {
         }
 
         for span in spans {
+            if shouldFlushBeforeAdding(current: current, next: span.text) {
+                flush()
+            }
             if let previous = current.last, shouldStartNewBlock(previous: previous.text, next: span.text) {
                 flush()
             }
@@ -66,7 +72,18 @@ public enum SpanCompactor {
             }
         }
         flush()
-        return result
+        return result.flatMap(splitOversizedSpan)
+    }
+
+    private static func shouldFlushBeforeAdding(current: [Span], next: String) -> Bool {
+        guard !current.isEmpty else {
+            return false
+        }
+        if current.count >= maxLinesPerBlock {
+            return true
+        }
+        let currentLength = joinedText(for: current).count
+        return currentLength + next.count + 1 > maxCharactersPerBlock
     }
 
     private static func shouldStartNewBlock(previous: String, next: String) -> Bool {
@@ -95,6 +112,119 @@ public enum SpanCompactor {
             }
         }
         return result
+    }
+
+    private static func splitOversizedSpan(_ span: Span) -> [Span] {
+        let chunks = splitText(span.text)
+        guard chunks.count > 1 else {
+            return [span]
+        }
+        return chunks.enumerated().map { index, chunk in
+            Span(
+                id: index == 0 ? span.id : "\(span.id)s\(index + 1)",
+                paperID: span.paperID,
+                page: span.page,
+                bbox: span.bbox,
+                text: chunk.text,
+                charRange: TextRange(location: span.charRange.location + chunk.offset, length: chunk.length),
+                sectionHint: span.sectionHint,
+                confidence: span.confidence
+            )
+        }
+    }
+
+    private static func splitText(_ text: String) -> [(text: String, offset: Int, length: Int)] {
+        guard text.count > maxCharactersPerBlock else {
+            return [(text, 0, text.count)]
+        }
+
+        var chunks: [(text: String, offset: Int, length: Int)] = []
+        var current = ""
+        var currentOffset: Int?
+        var searchOffset = 0
+        let units = sentenceLikeUnits(in: text)
+
+        func flush() {
+            let trimmed = current.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else {
+                current = ""
+                currentOffset = nil
+                return
+            }
+            let offset = currentOffset ?? 0
+            chunks.append((trimmed, offset, trimmed.count))
+            current = ""
+            currentOffset = nil
+        }
+
+        for unit in units {
+            let trimmed = unit.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else {
+                searchOffset += unit.count
+                continue
+            }
+            if current.isEmpty {
+                current = trimmed
+                currentOffset = searchOffset
+            } else if current.count + trimmed.count + 1 <= maxCharactersPerBlock {
+                current += " " + trimmed
+            } else {
+                flush()
+                current = trimmed
+                currentOffset = searchOffset
+            }
+            if current.count >= maxCharactersPerBlock {
+                flush()
+            }
+            searchOffset += unit.count
+        }
+        flush()
+
+        if chunks.contains(where: { $0.text.count > maxCharactersPerBlock }) {
+            return splitByWords(text)
+        }
+        return chunks
+    }
+
+    private static func sentenceLikeUnits(in text: String) -> [String] {
+        var units: [String] = []
+        var current = ""
+        for character in text {
+            current.append(character)
+            if ".?!;。！？；".contains(character) {
+                units.append(current)
+                current = ""
+            }
+        }
+        if !current.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            units.append(current)
+        }
+        return units
+    }
+
+    private static func splitByWords(_ text: String) -> [(text: String, offset: Int, length: Int)] {
+        var chunks: [(text: String, offset: Int, length: Int)] = []
+        var current = ""
+        var currentOffset = 0
+        var offset = 0
+        for wordSubsequence in text.split(separator: " ", omittingEmptySubsequences: false) {
+            let word = String(wordSubsequence)
+            if current.isEmpty {
+                current = word
+                currentOffset = offset
+            } else if current.count + word.count + 1 <= maxCharactersPerBlock {
+                current += " " + word
+            } else {
+                chunks.append((current, currentOffset, current.count))
+                current = word
+                currentOffset = offset
+            }
+            offset += word.count + 1
+        }
+        if !current.isEmpty {
+            chunks.append((current, currentOffset, current.count))
+        }
+        return chunks
     }
 
     private static func union(_ boxes: [BoundingBox]) -> BoundingBox {

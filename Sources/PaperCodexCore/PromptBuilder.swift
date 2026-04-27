@@ -38,6 +38,7 @@ public struct PromptBuilder: Sendable {
         - Decide what to inspect from the workspace files before answering.
         - Ground claims in the original PDF, full text, anchors, spans, or workspace files.
         - Cite source positions exactly as [[cite:paper:{paper_id}:p{page}:b{block_index}]] or [[cite:paper:{paper_id}:p{page}:a{anchor_suffix}]].
+        - Use citations sparingly: normally use one citation marker for the answer, and use at most three citation markers unless the user explicitly asks for an evidence audit.
         - If evidence is insufficient, say what is missing.
         - Do not invent paper positions.
         """)

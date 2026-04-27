@@ -14,6 +14,42 @@ public enum CodexCLIError: Error, CustomStringConvertible, Equatable {
     }
 }
 
+public final class CodexRunHandle: @unchecked Sendable {
+    private let lock = NSLock()
+    private var process: Process?
+    private var isCancelled = false
+
+    public init() {}
+
+    func setProcess(_ process: Process) {
+        lock.lock()
+        self.process = process
+        let shouldCancel = isCancelled
+        lock.unlock()
+        if shouldCancel, process.isRunning {
+            process.terminate()
+        }
+    }
+
+    func clearProcess(_ process: Process) {
+        lock.lock()
+        if self.process === process {
+            self.process = nil
+        }
+        lock.unlock()
+    }
+
+    public func cancel() {
+        lock.lock()
+        isCancelled = true
+        let runningProcess = process
+        lock.unlock()
+        if runningProcess?.isRunning == true {
+            runningProcess?.terminate()
+        }
+    }
+}
+
 public struct CodexCapabilities: Equatable, Sendable {
     public var supportsJSONOutput: Bool
     public var supportsOutputLastMessage: Bool
@@ -645,6 +681,7 @@ public struct CodexCLI: Sendable {
     public func runStreaming(
         arguments: [String],
         eventLogURL: URL? = nil,
+        runHandle: CodexRunHandle? = nil,
         onEvent: @escaping @Sendable (CodexRunEvent) -> Void
     ) throws -> String {
         let process = Process()
@@ -687,7 +724,9 @@ public struct CodexCLI: Sendable {
         }
 
         try process.run()
+        runHandle?.setProcess(process)
         process.waitUntilExit()
+        runHandle?.clearProcess(process)
         group.wait()
 
         let result = streamBuffer.finish()

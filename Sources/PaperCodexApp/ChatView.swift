@@ -5,6 +5,7 @@ import WebKit
 struct ChatView: View {
     @EnvironmentObject private var model: AppModel
     @State private var draft = ""
+    @State private var isSendButtonHovered = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -114,17 +115,34 @@ struct ChatView: View {
                     .background(Color(nsColor: .textBackgroundColor))
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                 Button {
-                    sendDraft()
+                    if model.isSending {
+                        model.cancelActiveCodexRun()
+                    } else {
+                        sendDraft()
+                    }
                 } label: {
-                    Image(systemName: model.isSending ? "hourglass.circle.fill" : "arrow.up.circle.fill")
+                    Image(systemName: sendButtonIcon)
                         .font(.system(size: 26))
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(.blue)
-                .disabled(model.isSending || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .foregroundStyle(sendButtonColor)
+                .disabled(!model.isSending && draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .onHover { isSendButtonHovered = $0 }
+                .help(model.isSending ? "Stop Codex" : "Send")
             }
         }
         .padding(14)
+    }
+
+    private var sendButtonIcon: String {
+        if model.isSending {
+            return isSendButtonHovered ? "xmark.circle.fill" : "hourglass.circle.fill"
+        }
+        return "arrow.up.circle.fill"
+    }
+
+    private var sendButtonColor: Color {
+        model.isSending && isSendButtonHovered ? .red : .blue
     }
 
     private func sendDraft() {
@@ -423,7 +441,7 @@ private struct MessageBubble: View {
     }
 
     private var parsed: ParsedCitationText {
-        CitationParser.parse(message.content)
+        CitationParser.parse(message.content, maxVisibleCitations: isUser ? nil : 3)
     }
 
     private var failureNotice: CodexFailureNotice? {

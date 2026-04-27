@@ -30,6 +30,22 @@ func runModelsChecks() throws {
     try check(span.page == 5, "span page should round-trip")
     try check(span.bbox.width == 120, "span bbox width should round-trip")
 
+    let longSpan = Span(
+        id: Span.makeID(paperID: "paper-a", page: 5, blockIndex: 18),
+        paperID: "paper-a",
+        page: 5,
+        bbox: BoundingBox(x: 10, y: 60, width: 300, height: 120),
+        text: String(repeating: "Long citation evidence sentence. ", count: 18),
+        charRange: TextRange(location: 60, length: 540),
+        sectionHint: nil,
+        confidence: 0.9
+    )
+    let compactedLongSpan = SpanCompactor.compact([longSpan])
+    try check(compactedLongSpan.count > 1, "oversized imported spans should be split into smaller citation blocks")
+    try check(compactedLongSpan.allSatisfy { $0.text.count <= 420 }, "split citation blocks should stay within the target size")
+    try check(compactedLongSpan.first?.id == longSpan.id, "first split should preserve the original citation id")
+    try check(compactedLongSpan.dropFirst().allSatisfy { $0.id.hasPrefix("\(longSpan.id)s") }, "later splits should keep resolvable citation aliases")
+
     let anchor = Anchor(
         id: Anchor.makeID(paperID: "paper-a", page: 5, suffix: "01HX"),
         paperID: "paper-a",
@@ -230,6 +246,18 @@ func runCitationChecks() throws {
     try check(parsed.displayMarkdown.contains("[1](papercodex-cite://open?id=paper%3Apaper-a%3Ap5%3Ab17)"), "citation parser should produce inline clickable markdown links")
     try check(parsed.displayMarkdown.contains("[2](papercodex-cite://open?id=paper%3Apaper-a%3Ap5%3Aasel1)"), "citation parser should keep anchor citations clickable inline")
 
+    let manyCitations = CitationParser.parse(
+        "A [[cite:paper:paper-a:p1:b1]] B [[cite:paper:paper-a:p1:b2]] C [[cite:paper:paper-a:p1:b3]] D [[cite:paper:paper-a:p1:b4]]",
+        maxVisibleCitations: 3
+    )
+    try check(manyCitations.citations.map(\.displayIndex) == [1, 2, 3], "citation parser should cap visible citations")
+    try check(!manyCitations.displayMarkdown.contains("p1%3Ab4"), "citation parser should omit citation links above the visible cap")
+    try check(manyCitations.displayText == "A [1] B [2] C [3] D ", "citation parser should remove extra citation markers from display text")
+    try check(
+        CitationParser.baseSpanCitationID(for: "paper:paper-a:p1:b17s2") == "paper:paper-a:p1:b17",
+        "split citation aliases should resolve to their original span citation"
+    )
+
     let malformed = CitationParser.parse("Broken [[cite:not-a-paper]] marker.")
     try check(malformed.citations.isEmpty, "malformed markers should not become citations")
     try check(malformed.brokenMarkers == ["[[cite:not-a-paper]]"], "malformed markers should be reported")
@@ -369,6 +397,8 @@ func runPromptChecks() throws {
     try check(prompt.contains("full_text: /tmp/session-a/papers/paper-a/full_text.txt"), "prompt should point Codex at the full text workspace file")
     try check(prompt.contains("spans_jsonl: /tmp/session-a/papers/paper-a/spans.jsonl"), "prompt should point Codex at the full span index")
     try check(prompt.contains("[[cite:paper:{paper_id}:p{page}:b{block_index}]]"), "prompt should include citation contract")
+    try check(prompt.contains("Use citations sparingly"), "prompt should ask Codex to keep citation count low")
+    try check(prompt.contains("at most three citation markers"), "prompt should hard-limit normal citation count")
     try check(!prompt.contains("[relevant span]"), "prompt should not inline a limited curated span list")
     try check(!prompt.contains("This curated span should stay in workspace files"), "prompt should make Codex inspect workspace files instead of reading a narrowed prompt excerpt")
 }
@@ -502,13 +532,16 @@ func runPDFChecks() throws {
             "Transformer-based large language models have considerably",
             "advanced our understanding of language in the human",
             "brain; however, their validity is questioned.",
-            "Autoregressive transformers are increasingly used in neuroscience."
+            "Autoregressive transformers are increasingly used in neuroscience.",
+            "They support studies of language processing at scale",
+            "while preserving source citation locality."
         ]
     )
     let abstractIndex = try PDFIndexExtractor().extract(paperID: "paper-b", pdfURL: abstractPDFURL)
-    try check(abstractIndex.spans.count == 2, "wrapped paragraph lines should be merged into larger citation spans")
+    try check(abstractIndex.spans.count == 2, "wrapped paragraph lines should be merged into medium citation spans")
     try check(abstractIndex.spans[0].text.contains("considerably advanced"), "merged citation span should join wrapped lines")
     try check(abstractIndex.spans[0].text.contains("validity is questioned."), "merged citation span should keep the paragraph ending")
+    try check(abstractIndex.spans.allSatisfy { $0.text.count <= 420 }, "citation spans should not become oversized blocks")
 }
 
 func runCodexCLIChecks() throws {
@@ -576,6 +609,22 @@ func runCodexCLIChecks() throws {
     try check(capabilities.supportsJSONOutput, "Codex help parser should detect JSON output support")
     try check(capabilities.supportsOutputLastMessage, "Codex help parser should detect last-message output support")
     try check(capabilities.supportsResume, "Codex help parser should detect resume support")
+    let cancelHandle = CodexRunHandle()
+    let cancelSemaphore = DispatchSemaphore(value: 0)
+    let cancelStarted = Date()
+    DispatchQueue.global().async {
+        do {
+            _ = try CodexCLI(executablePath: "/bin/sleep")
+                .runStreaming(arguments: ["5"], runHandle: cancelHandle) { _ in }
+        } catch {
+        }
+        cancelSemaphore.signal()
+    }
+    Thread.sleep(forTimeInterval: 0.1)
+    cancelHandle.cancel()
+    let cancelResult = cancelSemaphore.wait(timeout: .now() + 2)
+    try check(cancelResult == .success, "Codex run handle should terminate a running process")
+    try check(Date().timeIntervalSince(cancelStarted) < 2, "Codex run cancellation should return promptly")
     let diagnostic = CodexDiagnostic.ready(
         executablePath: "/opt/homebrew/bin/codex",
         version: "0.114.0",

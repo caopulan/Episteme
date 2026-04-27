@@ -26,6 +26,9 @@ public enum PDFIndexExtractorError: Error, CustomStringConvertible, Equatable {
 }
 
 public struct PDFIndexExtractor: Sendable {
+    private let maxLinesPerBlock = 4
+    private let maxCharactersPerBlock = 420
+
     public init() {}
 
     public func extract(paperID: String, pdfURL: URL) throws -> PDFIndexResult {
@@ -68,7 +71,7 @@ public struct PDFIndexExtractor: Sendable {
         if pages.isEmpty {
             throw PDFIndexExtractorError.noTextLayer(pdfURL.path)
         }
-        return PDFIndexResult(pages: pages, spans: spans)
+        return PDFIndexResult(pages: pages, spans: SpanCompactor.compact(spans))
     }
 
     private struct IndexedLine {
@@ -124,6 +127,9 @@ public struct PDFIndexExtractor: Sendable {
         }
 
         for line in lines {
+            if shouldFlushBeforeAdding(current: current, next: line.text) {
+                flush()
+            }
             if let previous = current.last, shouldStartNewBlock(previous: previous.text, next: line.text) {
                 flush()
             }
@@ -134,6 +140,17 @@ public struct PDFIndexExtractor: Sendable {
         }
         flush()
         return blocks
+    }
+
+    private func shouldFlushBeforeAdding(current: [IndexedLine], next: String) -> Bool {
+        guard !current.isEmpty else {
+            return false
+        }
+        if current.count >= maxLinesPerBlock {
+            return true
+        }
+        let currentLength = joinedText(for: current).count
+        return currentLength + next.count + 1 > maxCharactersPerBlock
     }
 
     private func shouldStartNewBlock(previous: String, next: String) -> Bool {
