@@ -37,7 +37,7 @@ struct ChatView: View {
                                 }
                             )
                         }
-                        if let activeCodexRun = model.activeCodexRun {
+                        if let activeCodexRun = visibleActiveCodexRun {
                             CodexRunBubble(run: activeCodexRun)
                         }
                     }
@@ -48,6 +48,14 @@ struct ChatView: View {
             composer
         }
         .background(Color(nsColor: .controlBackgroundColor))
+    }
+
+    private var visibleActiveCodexRun: ActiveCodexRun? {
+        guard let run = model.activeCodexRun,
+              run.sessionID == model.selectedSession?.id else {
+            return nil
+        }
+        return run
     }
 
     private var sessionBar: some View {
@@ -266,7 +274,7 @@ private struct CodexRunBubble: View {
     var run: ActiveCodexRun
 
     private var visibleEvents: [CodexRunEvent] {
-        Array(run.events.suffix(16))
+        Array(run.events.filter { $0.kind == .thinking || $0.kind == .answer }.suffix(8))
     }
 
     var body: some View {
@@ -281,14 +289,16 @@ private struct CodexRunBubble: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Spacer()
-                    Text("\(run.events.count) events")
+                    Text(statusText)
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                 }
 
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(visibleEvents) { event in
-                        CodexRunEventRow(event: event)
+                if !visibleEvents.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(visibleEvents) { event in
+                            CodexRunEventRow(event: event)
+                        }
                     }
                 }
             }
@@ -301,6 +311,10 @@ private struct CodexRunBubble: View {
             .clipShape(RoundedRectangle(cornerRadius: 8))
             Spacer(minLength: 32)
         }
+    }
+
+    private var statusText: String {
+        visibleEvents.isEmpty ? "Working" : "\(visibleEvents.count) update\(visibleEvents.count == 1 ? "" : "s")"
     }
 }
 
@@ -583,7 +597,7 @@ private struct MarkdownWebView: NSViewRepresentable {
     func makeNSView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.userContentController.add(context.coordinator, name: "height")
-        let webView = WKWebView(frame: .zero, configuration: configuration)
+        let webView = ScrollForwardingWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = context.coordinator
         webView.setValue(false, forKey: "drawsBackground")
         webView.allowsMagnification = false
@@ -668,5 +682,26 @@ private struct MarkdownWebView: NSViewRepresentable {
     static func dismantleNSView(_ webView: WKWebView, coordinator: Coordinator) {
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "height")
         webView.navigationDelegate = nil
+    }
+
+    final class ScrollForwardingWebView: WKWebView {
+        override func scrollWheel(with event: NSEvent) {
+            if let outerScrollView = findOuterScrollView() {
+                outerScrollView.scrollWheel(with: event)
+                return
+            }
+            super.scrollWheel(with: event)
+        }
+
+        private func findOuterScrollView() -> NSScrollView? {
+            var view = superview
+            while let current = view {
+                if let scrollView = current.enclosingScrollView {
+                    return scrollView
+                }
+                view = current.superview
+            }
+            return nil
+        }
     }
 }

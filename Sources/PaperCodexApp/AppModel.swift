@@ -23,6 +23,7 @@ struct PDFJumpTarget: Equatable {
 
 struct ActiveCodexRun: Identifiable, Equatable {
     var id: String
+    var sessionID: String
     var title: String
     var startedAt: Date
     var events: [CodexRunEvent]
@@ -292,6 +293,7 @@ final class AppModel: ObservableObject {
             } else {
                 try createSession()
             }
+            activeCodexRun = nil
             route = .reader
         } catch {
             errorMessage = String(describing: error)
@@ -330,6 +332,7 @@ final class AppModel: ObservableObject {
         sessions = try repository.fetchSessions(paperID: paper.id)
         selectedSession = session
         messages = []
+        activeCodexRun = nil
     }
 
     func newSessionButtonTapped() {
@@ -358,6 +361,9 @@ final class AppModel: ObservableObject {
             }
             selectedSession = session
             messages = try repository.fetchMessages(sessionID: session.id)
+            if activeCodexRun?.sessionID != session.id {
+                activeCodexRun = nil
+            }
         } catch {
             errorMessage = String(describing: error)
         }
@@ -726,10 +732,11 @@ final class AppModel: ObservableObject {
             .scanAllWatchedFolders()
     }
 
-    private func beginCodexRun(title: String) -> String {
+    private func beginCodexRun(sessionID: String, title: String) -> String {
         let runID = UUID().uuidString.lowercased()
         activeCodexRun = ActiveCodexRun(
             id: runID,
+            sessionID: sessionID,
             title: title,
             startedAt: Date(),
             events: [
@@ -827,7 +834,7 @@ final class AppModel: ObservableObject {
         fallbackPaper: Paper,
         repository: PaperRepository
     ) async throws -> PaperSession {
-        let runID = beginCodexRun(title: "Codex is working")
+        let runID = beginCodexRun(sessionID: session.id, title: "Codex is working")
         let context = try loadSessionPaperContext(session: session, fallbackPaper: fallbackPaper, repository: repository)
         let selectedAnchors = anchorsReferenced(in: content, context: context)
         appendCodexRunEvent(
