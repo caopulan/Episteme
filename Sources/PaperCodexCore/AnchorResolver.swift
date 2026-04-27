@@ -12,7 +12,7 @@ public struct AnchorResolver: Sendable {
         anchorID: String,
         sessionID: String,
         createdAt: Date
-    ) -> Anchor {
+    ) -> Anchor? {
         let pageSpans = spans
             .filter { $0.paperID == paperID && $0.page == page }
             .sorted { left, right in
@@ -35,6 +35,10 @@ public struct AnchorResolver: Sendable {
             }
             .map(\.span)
 
+        guard !matchedSpans.isEmpty else {
+            return nil
+        }
+
         let contextIndexes = matchedSpans.compactMap { match in
             pageSpans.firstIndex { $0.id == match.id }
         }
@@ -45,12 +49,8 @@ public struct AnchorResolver: Sendable {
             index + 1 < pageSpans.count ? pageSpans[index + 1].text : nil
         } ?? ""
 
-        let confidence: Double
-        if let best = scoredMatches.map(\.score).max() {
-            confidence = min(0.98, max(0.55, best))
-        } else {
-            confidence = 0.45
-        }
+        let best = scoredMatches.map(\.score).max() ?? 0
+        let confidence = min(0.98, max(0.55, best))
 
         return Anchor(
             id: anchorID,

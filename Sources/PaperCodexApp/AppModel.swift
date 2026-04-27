@@ -480,7 +480,7 @@ final class AppModel: ObservableObject {
             var selectedAnchors: [PaperCodexCore.Anchor] = []
             if let selection = currentSelection {
                 let anchorID = PaperCodexCore.Anchor.makeID(paperID: paper.id, page: selection.page, suffix: UUID().uuidString.lowercased())
-                let anchor = AnchorResolver().resolve(
+                guard let anchor = AnchorResolver().resolve(
                     paperID: paper.id,
                     page: selection.page,
                     selectedText: selection.text,
@@ -489,7 +489,9 @@ final class AppModel: ObservableObject {
                     anchorID: anchorID,
                     sessionID: session.id,
                     createdAt: Date()
-                )
+                ) else {
+                    throw AppModelError.anchorMatchFailed
+                }
                 let nearbySpans = anchor.matchedSpanIDs.isEmpty ? "none" : anchor.matchedSpanIDs.joined(separator: ", ")
                 let beforeContext = anchor.beforeContext.isEmpty ? "none" : anchor.beforeContext
                 let afterContext = anchor.afterContext.isEmpty ? "none" : anchor.afterContext
@@ -560,6 +562,8 @@ final class AppModel: ObservableObject {
             selectedSession = updatedSession
             sessions = try repository.fetchSessions(paperID: paper.id)
             messages = try repository.fetchMessages(sessionID: session.id)
+        } catch AppModelError.anchorMatchFailed {
+            errorMessage = AppModelError.anchorMatchFailed.description
         } catch {
             await appendCodexFailureMessage(String(describing: error))
         }
@@ -730,6 +734,7 @@ enum AppModelError: Error, CustomStringConvertible {
     case noSelectedSession
     case emptyName
     case sourceNotFound(String)
+    case anchorMatchFailed
 
     var description: String {
         switch self {
@@ -743,6 +748,8 @@ enum AppModelError: Error, CustomStringConvertible {
             "Name cannot be empty."
         case let .sourceNotFound(id):
             "No source was found for citation \(id)."
+        case .anchorMatchFailed:
+            "The selected PDF text could not be matched to the paper index. Try selecting a slightly larger or smaller passage."
         }
     }
 }

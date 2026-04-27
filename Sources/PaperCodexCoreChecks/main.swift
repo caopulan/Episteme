@@ -275,7 +275,7 @@ func runAnchorResolverChecks() throws {
         confidence: 0.95
     )
 
-    let anchor = AnchorResolver().resolve(
+    guard let anchor = AnchorResolver().resolve(
         paperID: "paper-a",
         page: 2,
         selectedText: "controls latent trajectories",
@@ -284,12 +284,26 @@ func runAnchorResolverChecks() throws {
         anchorID: Anchor.makeID(paperID: "paper-a", page: 2, suffix: "sel1"),
         sessionID: "session-a",
         createdAt: Date(timeIntervalSince1970: 1_777_220_000)
-    )
+    ) else {
+        throw CheckFailure(description: "anchor resolver should return an anchor for a matched selection")
+    }
 
     try check(anchor.matchedSpanIDs == [target.id], "anchor resolver should match the selected page span")
     try check(anchor.beforeContext == before.text, "anchor resolver should include preceding span context")
     try check(anchor.afterContext == after.text, "anchor resolver should include following span context")
     try check(anchor.confidence > 0.8, "anchor resolver should assign high confidence for text and bbox matches")
+
+    let unmatchedAnchor = AnchorResolver().resolve(
+        paperID: "paper-a",
+        page: 2,
+        selectedText: "unrelated words from a different document",
+        bboxList: [BoundingBox(x: 500, y: 120, width: 40, height: 18)],
+        spans: [before, target, after, otherPage],
+        anchorID: Anchor.makeID(paperID: "paper-a", page: 2, suffix: "missing"),
+        sessionID: "session-a",
+        createdAt: Date(timeIntervalSince1970: 1_777_220_000)
+    )
+    try check(unmatchedAnchor == nil, "anchor resolver should not create a fake anchor when matching fails")
 }
 
 func runPromptChecks() throws {
