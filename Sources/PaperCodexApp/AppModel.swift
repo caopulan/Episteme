@@ -816,21 +816,28 @@ final class AppModel: ObservableObject {
         scanWatchedFolders()
     }
 
-    private func runCodex(prompt: String, session: PaperSession, runID: String) async throws -> (stdout: String, lastMessage: String, threadID: String?) {
-        let executable = try CodexCLI.findCodexExecutable()
+    private func runCodex(
+        prompt: String,
+        session: PaperSession,
+        runID: String,
+        prefersWorkspaceImageOutput: Bool
+    ) async throws -> (stdout: String, lastMessage: String, threadID: String?, generatedImages: [URL]) {
+        let executable = try CodexCLI.findCodexExecutable(preferWorkspaceImageOutput: prefersWorkspaceImageOutput)
         let cli = CodexCLI(executablePath: executable)
         appendCodexRunEvent(
             CodexRunEvent(kind: .status, title: "Codex", detail: "Launching \(URL(fileURLWithPath: executable).lastPathComponent)"),
             runID: runID
         )
+        let workspaceURL = URL(fileURLWithPath: session.workspacePath, isDirectory: true)
+        let imageSnapshot = try GeneratedImageCollector.snapshot(in: workspaceURL)
         let outputURL = URL(fileURLWithPath: session.workspacePath)
             .appendingPathComponent("turns", isDirectory: true)
             .appendingPathComponent("\(UUID().uuidString.lowercased())-codex.txt")
         let eventLogURL = outputURL.deletingPathExtension().appendingPathExtension("events.jsonl")
         let reasoningEffort = codexReasoningEffort
-        let modelOverride = codexModelOverride
+        let modelOverride = effectiveModelOverride(prefersWorkspaceImageOutput: prefersWorkspaceImageOutput)
         let arguments: [String]
-        if let codexSessionID = session.codexSessionID {
+        if let codexSessionID = session.codexSessionID, !prefersWorkspaceImageOutput {
             arguments = cli.resumeArguments(
                 sessionID: codexSessionID,
                 prompt: prompt,
@@ -852,7 +859,11 @@ final class AppModel: ObservableObject {
             CodexRunEvent(
                 kind: .status,
                 title: "Codex",
-                detail: reasoningEffort == .default ? "Using default thinking level" : "Using \(reasoningEffort.displayName) thinking"
+                detail: codexRunModeDescription(
+                    reasoningEffort: reasoningEffort,
+                    modelOverride: modelOverride,
+                    prefersWorkspaceImageOutput: prefersWorkspaceImageOutput
+                )
             ),
             runID: runID
         )
@@ -867,7 +878,42 @@ final class AppModel: ObservableObject {
             try cli.runStreaming(arguments: arguments, eventLogURL: eventLogURL, runHandle: runHandle, onEvent: eventSink)
         }.value
         let lastMessage = (try? String(contentsOf: outputURL, encoding: .utf8)) ?? ""
-        return (stdout: stdout, lastMessage: lastMessage, threadID: CodexCLI.parseThreadID(from: stdout))
+        let generatedImages = try GeneratedImageCollector.newImages(in: workspaceURL, excluding: imageSnapshot)
+        if !generatedImages.isEmpty {
+            appendCodexRunEvent(
+                CodexRunEvent(kind: .answer, title: "Image", detail: "Generated \(generatedImages.count) image\(generatedImages.count == 1 ? "" : "s")"),
+                runID: runID
+            )
+        }
+        return (stdout: stdout, lastMessage: lastMessage, threadID: CodexCLI.parseThreadID(from: stdout), generatedImages: generatedImages)
+    }
+
+    private func effectiveModelOverride(prefersWorkspaceImageOutput: Bool) -> String {
+        let trimmed = codexModelOverride.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard prefersWorkspaceImageOutput else {
+            return trimmed
+        }
+        if trimmed.isEmpty || trimmed == "gpt-5.5" {
+            return "gpt-5.4-mini"
+        }
+        return trimmed
+    }
+
+    private func codexRunModeDescription(
+        reasoningEffort: CodexReasoningEffort,
+        modelOverride: String,
+        prefersWorkspaceImageOutput: Bool
+    ) -> String {
+        var parts: [String] = []
+        if prefersWorkspaceImageOutput {
+            parts.append("Image generation enabled")
+        }
+        let trimmedModel = modelOverride.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedModel.isEmpty {
+            parts.append("Model \(trimmedModel)")
+        }
+        parts.append(reasoningEffort == .default ? "default thinking" : "\(reasoningEffort.displayName) thinking")
+        return parts.joined(separator: " · ")
     }
 
     private func runCodexTurn(
@@ -908,9 +954,15 @@ final class AppModel: ObservableObject {
             CodexRunEvent(kind: .status, title: "Prompt", detail: "Built grounded prompt and started Codex"),
             runID: runID
         )
-        let codexReply = try await runCodex(prompt: prompt, session: session, runID: runID)
+        let prefersWorkspaceImageOutput = ImageGenerationRequestDetector.isImageRequest(content)
+        let codexReply = try await runCodex(
+            prompt: prompt,
+            session: session,
+            runID: runID,
+            prefersWorkspaceImageOutput: prefersWorkspaceImageOutput
+        )
         var updatedSession = session
-        if let threadID = codexReply.threadID {
+        if let threadID = codexReply.threadID, !prefersWorkspaceImageOutput {
             updatedSession.codexSessionID = threadID
         }
         updatedSession.updatedAt = Date()
@@ -920,11 +972,34 @@ final class AppModel: ObservableObject {
             id: UUID().uuidString.lowercased(),
             sessionID: session.id,
             role: .codex,
-            content: codexReply.lastMessage.isEmpty ? codexReply.stdout : codexReply.lastMessage,
+            content: codexMessageContent(
+                lastMessage: codexReply.lastMessage,
+                stdout: codexReply.stdout,
+                generatedImages: codexReply.generatedImages
+            ),
             createdAt: Date()
         )
         try repository.appendMessage(codexMessage)
         return updatedSession
+    }
+
+    private func codexMessageContent(lastMessage: String, stdout: String, generatedImages: [URL]) -> String {
+        let imageMarkdown = GeneratedImageCollector.markdown(for: generatedImages)
+        let trimmedLastMessage = lastMessage.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedLastMessage.isEmpty {
+            return imageMarkdown.isEmpty ? stdout : imageMarkdown
+        }
+        guard !imageMarkdown.isEmpty else {
+            return lastMessage
+        }
+        let missingImageMarkdown = imageMarkdown
+            .components(separatedBy: "\n\n")
+            .filter { !lastMessage.contains($0) }
+            .joined(separator: "\n\n")
+        guard !missingImageMarkdown.isEmpty else {
+            return lastMessage
+        }
+        return "\(lastMessage)\n\n\(missingImageMarkdown)"
     }
 
     private func fallbackPaper(for session: PaperSession, repository: PaperRepository) throws -> Paper {

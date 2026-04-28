@@ -576,22 +576,22 @@ func runCodexCLIChecks() throws {
 
     let cli = CodexCLI(executablePath: codexPath)
     let start = cli.startArguments(prompt: "hello", workspacePath: "/tmp/session-a")
-    try check(start == ["exec", "--skip-git-repo-check", "--json", "-C", "/tmp/session-a", "hello"], "start args should allow non-git session workspaces")
+    try check(start == ["exec", "--skip-git-repo-check", "--json", "--enable", "image_generation", "-C", "/tmp/session-a", "hello"], "start args should allow non-git session workspaces with image generation enabled")
     let startWithOutput = cli.startArguments(prompt: "hello", workspacePath: "/tmp/session-a", outputLastMessagePath: "/tmp/last.txt")
-    try check(startWithOutput == ["exec", "--skip-git-repo-check", "--json", "-C", "/tmp/session-a", "--output-last-message", "/tmp/last.txt", "hello"], "start args should support output-last-message")
+    try check(startWithOutput == ["exec", "--skip-git-repo-check", "--json", "--enable", "image_generation", "-C", "/tmp/session-a", "--output-last-message", "/tmp/last.txt", "hello"], "start args should support output-last-message")
     let startWithModel = cli.startArguments(prompt: "hello", workspacePath: "/tmp/session-a", outputLastMessagePath: "/tmp/last.txt", modelOverride: "gpt-5.4")
-    try check(startWithModel == ["exec", "--skip-git-repo-check", "--json", "--model", "gpt-5.4", "-C", "/tmp/session-a", "--output-last-message", "/tmp/last.txt", "hello"], "start args should support an app-local model override")
+    try check(startWithModel == ["exec", "--skip-git-repo-check", "--json", "--enable", "image_generation", "--model", "gpt-5.4", "-C", "/tmp/session-a", "--output-last-message", "/tmp/last.txt", "hello"], "start args should support an app-local model override")
     let startWithReasoning = cli.startArguments(prompt: "hello", workspacePath: "/tmp/session-a", reasoningEffort: .high)
-    try check(startWithReasoning == ["exec", "--skip-git-repo-check", "--json", "-c", "model_reasoning_effort=\"high\"", "-C", "/tmp/session-a", "hello"], "start args should support an app-local reasoning effort override")
+    try check(startWithReasoning == ["exec", "--skip-git-repo-check", "--json", "--enable", "image_generation", "-c", "model_reasoning_effort=\"high\"", "-C", "/tmp/session-a", "hello"], "start args should support an app-local reasoning effort override")
     let startWithDefaultReasoning = cli.startArguments(prompt: "hello", workspacePath: "/tmp/session-a", reasoningEffort: .default)
     try check(startWithDefaultReasoning == start, "default reasoning effort should not add a Codex config override")
 
     let resume = cli.resumeArguments(sessionID: "session-a", prompt: "continue")
-    try check(resume == ["exec", "resume", "--skip-git-repo-check", "--json", "session-a", "continue"], "resume args should use codex exec resume with JSON output")
+    try check(resume == ["exec", "resume", "--skip-git-repo-check", "--json", "--enable", "image_generation", "session-a", "continue"], "resume args should use codex exec resume with JSON output and image generation enabled")
     let resumeWithModel = cli.resumeArguments(sessionID: "session-a", prompt: "continue", modelOverride: "gpt-5.4")
-    try check(resumeWithModel == ["exec", "resume", "--skip-git-repo-check", "--json", "--model", "gpt-5.4", "session-a", "continue"], "resume args should support an app-local model override")
+    try check(resumeWithModel == ["exec", "resume", "--skip-git-repo-check", "--json", "--enable", "image_generation", "--model", "gpt-5.4", "session-a", "continue"], "resume args should support an app-local model override")
     let resumeWithReasoning = cli.resumeArguments(sessionID: "session-a", prompt: "continue", reasoningEffort: .xhigh)
-    try check(resumeWithReasoning == ["exec", "resume", "--skip-git-repo-check", "--json", "-c", "model_reasoning_effort=\"xhigh\"", "session-a", "continue"], "resume args should support an app-local reasoning effort override")
+    try check(resumeWithReasoning == ["exec", "resume", "--skip-git-repo-check", "--json", "--enable", "image_generation", "-c", "model_reasoning_effort=\"xhigh\"", "session-a", "continue"], "resume args should support an app-local reasoning effort override")
     let parsedThreadID = CodexCLI.parseThreadID(from: #"{"type":"thread.started","thread_id":"019dcaf6-01d5-7060-bc43-40401e3693c3"}"#)
     try check(parsedThreadID == "019dcaf6-01d5-7060-bc43-40401e3693c3", "Codex thread ID should be parsed from JSONL output")
 
@@ -620,11 +620,14 @@ func runCodexCLIChecks() throws {
 
     let parsedVersion = CodexCLI.parseVersion(from: "codex-cli 0.114.0\n")
     try check(parsedVersion == "0.114.0", "Codex version parser should read codex-cli output")
-    let selectedExecutable = CodexCLI.selectBestExecutable(candidates: [
+    let executableCandidates = [
         CodexExecutableCandidate(path: "/opt/homebrew/bin/codex", version: "0.114.0"),
         CodexExecutableCandidate(path: "/Applications/Codex.app/Contents/Resources/codex", version: "0.125.0-alpha.3")
-    ])
+    ]
+    let selectedExecutable = CodexCLI.selectBestExecutable(candidates: executableCandidates)
     try check(selectedExecutable?.path == "/Applications/Codex.app/Contents/Resources/codex", "newest Codex executable should be selected when multiple copies exist")
+    let imageExecutable = CodexCLI.selectBestExecutable(candidates: executableCandidates, preferWorkspaceImageOutput: true)
+    try check(imageExecutable?.path == "/opt/homebrew/bin/codex", "image-generation runs should prefer the CLI that writes generated images into the workspace")
     let firstUnknownExecutable = CodexCLI.selectBestExecutable(candidates: [
         CodexExecutableCandidate(path: "/first/codex", version: nil),
         CodexExecutableCandidate(path: "/second/codex", version: nil)
@@ -686,6 +689,37 @@ func runCodexCLIChecks() throws {
     try check(overrideDiagnostic.severity == .ready, "app-local model override should bypass the incompatible default model")
     try check(overrideDiagnostic.detail.contains("gpt-5.4"), "override diagnostic should name the selected model")
     try check(CodexCLI.configuredModelIssue(configText: #"model = "gpt-5.4""#, cliVersion: "0.114.0") == nil, "other configured models should not be blocked by the gpt-5.5 compatibility rule")
+}
+
+func runGeneratedImageChecks() throws {
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent("paper-codex-generated-images-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    let oldImage = root.appendingPathComponent("ig_old.png")
+    let newImage = root.appendingPathComponent("ig_new.png")
+    let nestedDir = root.appendingPathComponent("nested", isDirectory: true)
+    try FileManager.default.createDirectory(at: nestedDir, withIntermediateDirectories: true)
+    let nestedImage = nestedDir.appendingPathComponent("ig_nested.jpeg")
+    let note = root.appendingPathComponent("note.txt")
+
+    try Data([0x89, 0x50, 0x4e, 0x47]).write(to: oldImage)
+    let before = try GeneratedImageCollector.snapshot(in: root)
+    try Data([0x89, 0x50, 0x4e, 0x47]).write(to: newImage)
+    try Data([0xff, 0xd8, 0xff, 0xd9]).write(to: nestedImage)
+    try "not an image".write(to: note, atomically: true, encoding: .utf8)
+
+    let generated = try GeneratedImageCollector.newImages(in: root, excluding: before)
+    try check(generated.map(\.lastPathComponent).sorted() == ["ig_nested.jpeg", "ig_new.png"], "generated image collector should return only new images")
+    let markdown = GeneratedImageCollector.markdown(for: generated)
+    try check(markdown.contains("![Generated image](\(newImage.path))"), "generated image markdown should include absolute image paths")
+    try check(!markdown.contains(oldImage.path), "generated image markdown should not include previous images")
+}
+
+func runImageRequestChecks() throws {
+    try check(ImageGenerationRequestDetector.isImageRequest("生成一张图，展示实验流程"), "Chinese image-generation wording should request image generation")
+    try check(ImageGenerationRequestDetector.isImageRequest("make an infographic about this paper"), "English infographic wording should request image generation")
+    try check(!ImageGenerationRequestDetector.isImageRequest("解释一下图 2 的结果"), "discussing an existing figure should not force image generation")
+    try check(!ImageGenerationRequestDetector.isImageRequest("这个论文讲了什么"), "ordinary paper QA should not request image generation")
 }
 
 func runCodexRecoveryChecks() throws {
@@ -1007,6 +1041,14 @@ do {
     if selectedChecks.isEmpty || selectedChecks.contains("codex") {
         try runCodexCLIChecks()
         print("codex: pass")
+    }
+    if selectedChecks.isEmpty || selectedChecks.contains("generated-images") {
+        try runGeneratedImageChecks()
+        print("generated-images: pass")
+    }
+    if selectedChecks.isEmpty || selectedChecks.contains("image-requests") {
+        try runImageRequestChecks()
+        print("image-requests: pass")
     }
     if selectedChecks.isEmpty || selectedChecks.contains("codex-recovery") {
         try runCodexRecoveryChecks()

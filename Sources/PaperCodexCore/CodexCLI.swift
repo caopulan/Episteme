@@ -433,7 +433,10 @@ public struct CodexCLI: Sendable {
         self.executablePath = executablePath
     }
 
-    public static func findCodexExecutable(environment: [String: String] = ProcessInfo.processInfo.environment) throws -> String {
+    public static func findCodexExecutable(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        preferWorkspaceImageOutput: Bool = false
+    ) throws -> String {
         let pathValue = environment["PATH"] ?? ""
         let candidatePaths = pathValue
             .split(separator: ":")
@@ -457,13 +460,23 @@ public struct CodexCLI: Sendable {
             return CodexExecutableCandidate(path: path, version: version)
         }
 
-        if let selected = selectBestExecutable(candidates: candidates) {
+        if let selected = selectBestExecutable(
+            candidates: candidates,
+            preferWorkspaceImageOutput: preferWorkspaceImageOutput
+        ) {
             return selected.path
         }
         throw CodexCLIError.executableNotFound
     }
 
-    public static func selectBestExecutable(candidates: [CodexExecutableCandidate]) -> CodexExecutableCandidate? {
+    public static func selectBestExecutable(
+        candidates: [CodexExecutableCandidate],
+        preferWorkspaceImageOutput: Bool = false
+    ) -> CodexExecutableCandidate? {
+        if preferWorkspaceImageOutput,
+           let imageCandidate = candidates.first(where: { supportsWorkspaceImageOutput(version: $0.version) }) {
+            return imageCandidate
+        }
         guard var best = candidates.first else {
             return nil
         }
@@ -484,6 +497,13 @@ public struct CodexCLI: Sendable {
         return best
     }
 
+    private static func supportsWorkspaceImageOutput(version: String?) -> Bool {
+        guard let version else {
+            return false
+        }
+        return compareVersion(version, "0.120.0") == .orderedAscending
+    }
+
     public func startArguments(
         prompt: String,
         workspacePath: String,
@@ -491,7 +511,7 @@ public struct CodexCLI: Sendable {
         modelOverride: String? = nil,
         reasoningEffort: CodexReasoningEffort = .default
     ) -> [String] {
-        var arguments = ["exec", "--skip-git-repo-check", "--json"]
+        var arguments = ["exec", "--skip-git-repo-check", "--json", "--enable", "image_generation"]
         if let modelOverride = Self.normalizedModelOverride(modelOverride) {
             arguments += ["--model", modelOverride]
         }
@@ -513,7 +533,7 @@ public struct CodexCLI: Sendable {
         modelOverride: String? = nil,
         reasoningEffort: CodexReasoningEffort = .default
     ) -> [String] {
-        var arguments = ["exec", "resume", "--skip-git-repo-check", "--json"]
+        var arguments = ["exec", "resume", "--skip-git-repo-check", "--json", "--enable", "image_generation"]
         if let modelOverride = Self.normalizedModelOverride(modelOverride) {
             arguments += ["--model", modelOverride]
         }
