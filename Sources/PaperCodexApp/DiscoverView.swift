@@ -3,10 +3,6 @@ import PaperCodexCore
 import SwiftUI
 
 struct DiscoverView: View {
-    private let discoverTopInset: CGFloat = 222
-    private let discoverSidebarTopInset: CGFloat = 216
-    private let discoverInspectorTopInset: CGFloat = 230
-
     @EnvironmentObject private var model: AppModel
     @State private var searchText = ""
     @State private var selectedCategory: String?
@@ -96,15 +92,15 @@ struct DiscoverView: View {
     }
 
     private var mainLayout: some View {
-        SidebarSplitLayout(minContentWidth: 860) {
+        SidebarSplitLayout(minContentWidth: 820) {
             sidebar
         } content: {
-            HStack(spacing: 0) {
+            HStack(alignment: .top, spacing: 0) {
                 feed
-                    .frame(minWidth: 560, maxWidth: .infinity)
+                    .frame(minWidth: 620, maxWidth: .infinity, maxHeight: .infinity)
                     .clipped()
                 inspector
-                    .frame(width: 300)
+                    .frame(width: 320)
             }
         }
         .background(Color(nsColor: .windowBackgroundColor))
@@ -120,9 +116,6 @@ struct DiscoverView: View {
 
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Color.clear
-                .frame(height: discoverSidebarTopInset)
-
             Text("Paper Codex")
                 .font(.system(size: 24, weight: .semibold))
 
@@ -138,46 +131,49 @@ struct DiscoverView: View {
 
             Divider()
 
-            VStack(alignment: .leading, spacing: 8) {
-                Label("Categories", systemImage: "line.3.horizontal.decrease.circle")
-                    .font(.headline)
-                filterButton(title: "All", selected: selectedCategory == nil && selectedTag == nil) {
-                    selectedCategory = nil
-                    selectedTag = nil
-                }
-                ForEach(categories, id: \.self) { category in
-                    filterButton(title: category, selected: selectedCategory == category) {
-                        selectedCategory = category
-                        selectedTag = nil
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("Categories", systemImage: "line.3.horizontal.decrease.circle")
+                            .font(.headline)
+                        filterButton(title: "All", selected: selectedCategory == nil && selectedTag == nil) {
+                            selectedCategory = nil
+                            selectedTag = nil
+                        }
+                        ForEach(categories, id: \.self) { category in
+                            filterButton(title: category, selected: selectedCategory == category) {
+                                selectedCategory = category
+                                selectedTag = nil
+                            }
+                        }
+                    }
+
+                    Divider()
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("Tags", systemImage: "tag")
+                            .font(.headline)
+                        filterButton(
+                            title: "All Tags",
+                            detail: "\(tagCounts.values.reduce(0, +))",
+                            selected: selectedTag == nil
+                        ) {
+                            selectedTag = nil
+                        }
+                        ForEach(tags.prefix(18), id: \.self) { tag in
+                            filterButton(
+                                title: tag,
+                                detail: "\(tagCounts[tag, default: 0])",
+                                selected: selectedTag == tag
+                            ) {
+                                selectedTag = tag
+                                selectedCategory = nil
+                            }
+                        }
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-
-            Divider()
-
-            VStack(alignment: .leading, spacing: 8) {
-                Label("Tags", systemImage: "tag")
-                    .font(.headline)
-                filterButton(
-                    title: "All Tags",
-                    detail: "\(tagCounts.values.reduce(0, +))",
-                    selected: selectedTag == nil
-                ) {
-                    selectedTag = nil
-                }
-                ForEach(tags.prefix(18), id: \.self) { tag in
-                    filterButton(
-                        title: tag,
-                        detail: "\(tagCounts[tag, default: 0])",
-                        selected: selectedTag == tag
-                    ) {
-                        selectedTag = tag
-                        selectedCategory = nil
-                    }
-                }
-            }
-
-            Spacer()
         }
         .padding(22)
         .background(Color(nsColor: .controlBackgroundColor))
@@ -185,9 +181,6 @@ struct DiscoverView: View {
 
     private var feed: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Color.clear
-                .frame(height: discoverTopInset)
-
             toolbar
 
             if model.isLoadingArxivFeed {
@@ -197,135 +190,129 @@ struct DiscoverView: View {
                 ContentUnavailableView("No Papers", systemImage: "doc.text.magnifyingglass")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                GeometryReader { proxy in
-                    let gridInset: CGFloat = 12
-                    let gridWidth = max(0, proxy.size.width - gridInset * 2)
-
-                    ScrollView {
-                        LazyVGrid(
-                            columns: gridColumns(for: gridWidth),
-                            alignment: .leading,
-                            spacing: 14
-                        ) {
-                            ForEach(papers) { paper in
-                                ArxivPaperCard(
-                                    paper: paper,
-                                    imageURL: model.cachedArxivAssetURL(for: paper.assets.small),
-                                    inLibrary: model.libraryPaper(for: paper) != nil,
-                                    isBusy: model.isDownloadingArxivPaper(paper),
-                                    downloadProgress: model.arxivDownloadProgress(for: paper),
-                                    isSelected: inspectorPaper?.id == paper.id,
-                                    onInspect: {
-                                        inspectedPaper = paper
-                                    },
-                                    onPreview: {
-                                        inspectedPaper = paper
-                                        previewPaper = paper
-                                    },
-                                    onSave: {
-                                        inspectedPaper = paper
-                                        paperPendingSave = paper
-                                    },
-                                    onOpen: {
-                                        inspectedPaper = paper
-                                        Task {
-                                            await model.openArxivPaper(paper)
-                                        }
+                ScrollView {
+                    LazyVGrid(
+                        columns: gridColumns,
+                        alignment: .leading,
+                        spacing: 14
+                    ) {
+                        ForEach(papers) { paper in
+                            ArxivPaperCard(
+                                paper: paper,
+                                imageURL: model.cachedArxivAssetURL(for: paper.assets.small),
+                                inLibrary: model.libraryPaper(for: paper) != nil,
+                                isBusy: model.isDownloadingArxivPaper(paper),
+                                downloadProgress: model.arxivDownloadProgress(for: paper),
+                                isSelected: inspectorPaper?.id == paper.id,
+                                onInspect: {
+                                    inspectedPaper = paper
+                                },
+                                onPreview: {
+                                    inspectedPaper = paper
+                                    previewPaper = paper
+                                },
+                                onSave: {
+                                    inspectedPaper = paper
+                                    paperPendingSave = paper
+                                },
+                                onOpen: {
+                                    inspectedPaper = paper
+                                    Task {
+                                        await model.openArxivPaper(paper)
                                     }
-                                )
-                            }
+                                }
+                            )
                         }
-                        .frame(width: gridWidth, alignment: .leading)
-                        .padding(.horizontal, gridInset)
-                        .padding(.vertical, 2)
                     }
+                    .padding(.vertical, 2)
                 }
             }
         }
         .padding(24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     private var inspector: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Color.clear
-                .frame(height: discoverInspectorTopInset)
-
             Text("Paper Details")
                 .font(.system(size: 18, weight: .semibold))
 
             if let paper = inspectorPaper {
-                VStack(alignment: .leading, spacing: 14) {
-                    ArxivPreviewImage(url: model.cachedArxivAssetURL(for: paper.assets.small))
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 128)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 14) {
+                        Button {
+                            inspectedPaper = paper
+                            previewPaper = paper
+                        } label: {
+                            ArxivPreviewImage(url: model.cachedArxivAssetURL(for: paper.assets.small))
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 116)
+                        }
+                        .buttonStyle(.plain)
                         .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .disabled(paper.assets.large == nil && paper.assets.small == nil)
+                        .help("Open image preview")
 
-                    VStack(alignment: .leading, spacing: 8) {
-                        FlowLayout(spacing: 6) {
-                            Text(paper.primaryCategory ?? paper.categories.first ?? "arXiv")
-                                .font(.caption.weight(.semibold))
-                                .padding(.horizontal, 7)
-                                .padding(.vertical, 3)
-                                .background(Color.teal.opacity(0.12))
-                                .foregroundStyle(.teal)
-                                .clipShape(RoundedRectangle(cornerRadius: 6))
-                            Text(paper.id)
+                        VStack(alignment: .leading, spacing: 8) {
+                            FlowLayout(spacing: 6) {
+                                Text(paper.primaryCategory ?? paper.categories.first ?? "arXiv")
+                                    .font(.caption.weight(.semibold))
+                                    .padding(.horizontal, 7)
+                                    .padding(.vertical, 3)
+                                    .background(Color.teal.opacity(0.12))
+                                    .foregroundStyle(.teal)
+                                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                                Text(paper.id)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                if let similarity = paper.similarity {
+                                    SimilarityMeter(value: similarity)
+                                }
+                            }
+
+                            Text(paper.displayTitle(language: "zh"))
+                                .font(.system(size: 15, weight: .semibold))
+                                .fixedSize(horizontal: false, vertical: true)
+                            Text(paper.title.en)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
-                            if let similarity = paper.similarity {
-                                SimilarityMeter(value: similarity)
-                            }
+                                .fixedSize(horizontal: false, vertical: true)
                         }
 
-                        Text(paper.displayTitle(language: "zh"))
-                            .font(.system(size: 15, weight: .semibold))
-                            .fixedSize(horizontal: false, vertical: true)
-                        Text(paper.title.en)
+                        FlowTags(tags: Array(paper.tags.prefix(8)))
+
+                        Text(paper.displaySummary(language: "zh"))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
-                    }
 
-                    FlowTags(tags: Array(paper.tags.prefix(8)))
-
-                    Text(paper.displaySummary(language: "zh"))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    Spacer(minLength: 0)
-
-                    ResourceLinkButtons(links: paper.externalLinks, compact: false)
-                    HStack(spacing: 8) {
-                        if !model.isDownloadingArxivPaper(paper),
-                           model.libraryPaper(for: paper) == nil {
-                            SaveActionButton(isBusy: false) {
-                                paperPendingSave = paper
+                        ResourceLinkButtons(links: paper.externalLinks, compact: false)
+                        HStack(spacing: 8) {
+                            if !model.isDownloadingArxivPaper(paper),
+                               model.libraryPaper(for: paper) == nil {
+                                SaveActionButton(isBusy: false) {
+                                    paperPendingSave = paper
+                                }
                             }
-                        }
-                        if model.isDownloadingArxivPaper(paper) {
-                            ProgressView(value: model.arxivDownloadProgress(for: paper))
-                                .frame(width: 110)
-                        }
-                        StableOpenButton(isBusy: model.isDownloadingArxivPaper(paper)) {
-                            Task {
-                                await model.openArxivPaper(paper)
+                            if model.isDownloadingArxivPaper(paper) {
+                                ProgressView(value: model.arxivDownloadProgress(for: paper))
+                                    .frame(width: 110)
+                            }
+                            StableOpenButton(isBusy: model.isDownloadingArxivPaper(paper)) {
+                                Task {
+                                    await model.openArxivPaper(paper)
+                                }
                             }
                         }
                     }
+                    .padding(.trailing, 4)
                 }
             } else {
-                Spacer()
-                VStack(spacing: 10) {
-                    Image(systemName: "doc.text.magnifyingglass")
-                        .font(.system(size: 32))
-                    Text("Select Paper")
-                        .font(.title3.weight(.semibold))
-                }
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity)
-                Spacer()
+                ContentUnavailableView("Select Paper", systemImage: "sidebar.right")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
+
+            Spacer(minLength: 0)
         }
         .padding(22)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -337,15 +324,14 @@ struct DiscoverView: View {
         }
     }
 
-    private func gridColumns(for width: CGFloat) -> [GridItem] {
-        let spacing: CGFloat = 14
-        let minCardWidth: CGFloat = 560
-        let columnCount = max(1, min(3, Int((width + spacing) / (minCardWidth + spacing))))
-        let cardWidth = floor((width - spacing * CGFloat(columnCount - 1)) / CGFloat(columnCount))
-        return Array(
-            repeating: GridItem(.fixed(cardWidth), spacing: spacing, alignment: .top),
-            count: columnCount
-        )
+    private var gridColumns: [GridItem] {
+        [
+            GridItem(
+                .adaptive(minimum: 330, maximum: 430),
+                spacing: 14,
+                alignment: .top
+            )
+        ]
     }
 
     private var toolbar: some View {
@@ -359,38 +345,6 @@ struct DiscoverView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Picker("Date", selection: Binding(
-                    get: { model.selectedArxivDate ?? "" },
-                    set: { date in
-                        guard !date.isEmpty else {
-                            return
-                        }
-                        Task {
-                            await model.loadArxivFeed(date: date)
-                        }
-                    }
-                )) {
-                    ForEach(model.arxivDates, id: \.self) { date in
-                        Text(date).tag(date)
-                    }
-                }
-                .frame(width: 170)
-                Button {
-                    Task {
-                        await model.refreshArxivDatesAndFeed()
-                    }
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                }
-                .buttonStyle(.bordered)
-                .help("Refresh")
-                Button {
-                    model.showSettings()
-                } label: {
-                    Image(systemName: "gearshape")
-                }
-                .buttonStyle(.bordered)
-                .help("Settings")
             }
 
             VStack(alignment: .leading, spacing: 8) {
@@ -399,6 +353,35 @@ struct DiscoverView: View {
                     .layoutPriority(-1)
 
                 HStack(spacing: 8) {
+                    Picker("Date", selection: Binding(
+                        get: { model.selectedArxivDate ?? "" },
+                        set: { date in
+                            guard !date.isEmpty else {
+                                return
+                            }
+                            Task {
+                                await model.loadArxivFeed(date: date)
+                            }
+                        }
+                    )) {
+                        ForEach(model.arxivDates, id: \.self) { date in
+                            Text(date).tag(date)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: 132)
+                    .controlSize(.small)
+                    Button {
+                        Task {
+                            await model.refreshArxivDatesAndFeed()
+                        }
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .help("Refresh")
+
                     Button {
                         Task {
                             await model.preloadArxivAssets(includeLarge: false)
@@ -471,7 +454,7 @@ struct DiscoverView: View {
 }
 
 private struct ArxivPaperCard: View {
-    private let previewHeight: CGFloat = 180
+    private let previewHeight: CGFloat = 142
 
     var paper: ArxivFeedPaper
     var imageURL: URL?
@@ -541,7 +524,7 @@ private struct ArxivPaperCard: View {
             onInspect()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .frame(minHeight: 408, alignment: .top)
+        .frame(minHeight: 388, alignment: .top)
         .background(Color(nsColor: .textBackgroundColor))
         .overlay(
             RoundedRectangle(cornerRadius: 8)

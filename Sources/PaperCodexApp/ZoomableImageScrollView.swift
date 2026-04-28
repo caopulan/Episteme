@@ -163,8 +163,7 @@ final class ZoomableImageCanvasView: NSView {
         }
         let fitWidth = bounds.width / image.size.width
         let fitHeight = bounds.height / image.size.height
-        let isWideStrip = image.size.width / image.size.height > bounds.width / bounds.height * 1.25
-        scale = min(max(isWideStrip ? fitHeight : min(fitWidth, fitHeight), minScale), 1.25)
+        scale = min(max(min(fitWidth, fitHeight), minScale), 1.25)
         offset = .zero
         needsInitialFit = false
         clampOffset()

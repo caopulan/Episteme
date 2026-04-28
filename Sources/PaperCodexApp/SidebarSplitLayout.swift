@@ -19,10 +19,13 @@ struct SidebarSplitLayout<Sidebar: View, Content: View>: View {
     }
 
     var body: some View {
-        HStack(spacing: 0) {
+        HStack(alignment: .top, spacing: 0) {
             sidebar()
                 .frame(width: model.librarySidebarWidth)
+                .frame(maxHeight: .infinity, alignment: .topLeading)
+                .clipped()
             SplitterHandle()
+                .frame(maxHeight: .infinity)
                 .gesture(
                     DragGesture()
                         .onChanged { value in
