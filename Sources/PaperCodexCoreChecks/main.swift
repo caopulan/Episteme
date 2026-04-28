@@ -741,6 +741,15 @@ func runPathChecks() throws {
     try check(defaultRoot.path.contains("Application Support"), "default support root should live under Application Support")
 }
 
+func runBundleChecks() throws {
+    let scriptURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        .appendingPathComponent("scripts/build-app-bundle.sh")
+    let script = try String(contentsOf: scriptURL, encoding: .utf8)
+    try check(script.contains("NSAppTransportSecurity"), "app bundle should configure App Transport Security")
+    try check(script.contains("nas.pucao.cn"), "app bundle should allow the configured CodeArXiv host")
+    try check(script.contains("NSExceptionAllowsInsecureHTTPLoads"), "app bundle should allow HTTP for CodeArXiv")
+}
+
 func runFixtureLibraryChecks() throws {
     let tempRoot = FileManager.default.temporaryDirectory
         .appendingPathComponent("paper-codex-fixture-\(UUID().uuidString)", isDirectory: true)
@@ -1199,6 +1208,10 @@ do {
     if selectedChecks.isEmpty || selectedChecks.contains("paths") {
         try runPathChecks()
         print("paths: pass")
+    }
+    if selectedChecks.isEmpty || selectedChecks.contains("bundle") {
+        try runBundleChecks()
+        print("bundle: pass")
     }
     if selectedChecks.isEmpty || selectedChecks.contains("fixture") {
         try runFixtureLibraryChecks()
