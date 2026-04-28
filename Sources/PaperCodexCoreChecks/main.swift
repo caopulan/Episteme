@@ -921,6 +921,46 @@ func runArxivFeedChecks() throws {
     try check(enrichedDuplicate.paper.sourceURL == "https://arxiv.org/abs/2604.18586", "duplicate arXiv import should enrich source URL")
 }
 
+func runArxivLiveFeedChecks() async throws {
+    let environment = ProcessInfo.processInfo.environment
+    guard let baseURLValue = environment["PAPER_CODEX_ARXIV_FEED_BASE_URL"],
+          let baseURL = URL(string: baseURLValue),
+          let token = environment["PAPER_CODEX_ARXIV_FEED_TOKEN"],
+          !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        throw CheckFailure(
+            description: "arxiv-live requires PAPER_CODEX_ARXIV_FEED_BASE_URL and PAPER_CODEX_ARXIV_FEED_TOKEN"
+        )
+    }
+
+    let client = try ArxivFeedClient(baseURL: baseURL, token: token)
+    let badTokenClient = try ArxivFeedClient(baseURL: baseURL, token: "\(token)-bad")
+    do {
+        _ = try await badTokenClient.fetchDates()
+        throw CheckFailure(description: "live arXiv API should reject an invalid token")
+    } catch ArxivFeedClientError.badStatus(401) {
+    }
+
+    let dates = try await client.fetchDates()
+    try check(!dates.dates.isEmpty, "live arXiv API should return available dates")
+    guard let latest = dates.latest else {
+        throw CheckFailure(description: "live arXiv API should return a latest date")
+    }
+    let feed = try await client.fetchFeed(date: latest)
+    try check(feed.date == latest, "live arXiv feed date should match requested date")
+    try check(feed.count == feed.papers.count, "live arXiv feed count should match paper array")
+    try check(!feed.papers.isEmpty, "live arXiv feed should include papers")
+    guard let paper = feed.papers.first else {
+        throw CheckFailure(description: "live arXiv feed should include a first paper")
+    }
+    try check(paper.links.abs?.contains("arxiv.org/abs/") == true, "live arXiv paper should include arXiv abs link")
+    try check(paper.links.pdf?.contains("arxiv.org/pdf/") == true, "live arXiv paper should include arXiv PDF link")
+    guard let asset = paper.assets.small ?? paper.assets.large else {
+        throw CheckFailure(description: "live arXiv paper should include a thumbnail asset")
+    }
+    let assetData = try await client.fetchAsset(asset)
+    try check(!assetData.isEmpty, "live arXiv thumbnail asset should download bytes")
+}
+
 func seedFixtureLibrary(at root: URL) throws {
     let fileManager = FileManager.default
     let storeURL = root.appendingPathComponent("store.sqlite")
@@ -1171,6 +1211,10 @@ do {
     if selectedChecks.isEmpty || selectedChecks.contains("arxiv-feed") {
         try runArxivFeedChecks()
         print("arxiv-feed: pass")
+    }
+    if selectedChecks.contains("arxiv-live") {
+        try await runArxivLiveFeedChecks()
+        print("arxiv-live: pass")
     }
 } catch {
     fputs("check failed: \(error)\n", stderr)
