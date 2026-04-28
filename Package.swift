@@ -21,7 +21,8 @@ let package = Package(
         ),
         .executableTarget(
             name: "PaperCodexApp",
-            dependencies: ["PaperCodexCore"]
+            dependencies: ["PaperCodexCore"],
+            exclude: ["Resources"]
         ),
         .executableTarget(
             name: "PaperCodexCoreChecks",
