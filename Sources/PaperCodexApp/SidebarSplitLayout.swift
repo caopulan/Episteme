@@ -3,6 +3,7 @@ import SwiftUI
 struct SidebarSplitLayout<Sidebar: View, Content: View>: View {
     @EnvironmentObject private var model: AppModel
     @State private var dragStartWidth: CGFloat?
+    @State private var liveSidebarWidth: CGFloat?
 
     var minContentWidth: CGFloat
     @ViewBuilder var sidebar: () -> Sidebar
@@ -21,7 +22,7 @@ struct SidebarSplitLayout<Sidebar: View, Content: View>: View {
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
             sidebar()
-                .frame(width: model.librarySidebarWidth)
+                .frame(width: liveSidebarWidth ?? model.librarySidebarWidth)
                 .frame(maxHeight: .infinity, alignment: .topLeading)
                 .clipped()
             SplitterHandle()
@@ -32,17 +33,28 @@ struct SidebarSplitLayout<Sidebar: View, Content: View>: View {
                             if dragStartWidth == nil {
                                 dragStartWidth = model.librarySidebarWidth
                             }
-                            model.setLibrarySidebarWidth((dragStartWidth ?? model.librarySidebarWidth) + value.translation.width)
+                            liveSidebarWidth = clampedSidebarWidth((dragStartWidth ?? model.librarySidebarWidth) + value.translation.width)
                         }
                         .onEnded { _ in
+                            if let liveSidebarWidth {
+                                model.setLibrarySidebarWidth(liveSidebarWidth)
+                            }
                             dragStartWidth = nil
+                            liveSidebarWidth = nil
                         }
                 )
             content()
                 .frame(minWidth: minContentWidth, maxWidth: .infinity, maxHeight: .infinity)
         }
+        .transaction { transaction in
+            transaction.animation = nil
+        }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private func clampedSidebarWidth(_ width: CGFloat) -> CGFloat {
+        min(max(width, 220), 420)
     }
 }
 

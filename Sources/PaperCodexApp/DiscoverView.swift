@@ -9,7 +9,6 @@ struct DiscoverView: View {
     @State private var selectedTag: String?
     @State private var paperPendingSave: ArxivFeedPaper?
     @State private var previewPaper: ArxivFeedPaper?
-    @State private var inspectedPaper: ArxivFeedPaper?
 
     private var papers: [ArxivFeedPaper] {
         var result = model.arxivFeed?.papers ?? []
@@ -55,13 +54,6 @@ struct DiscoverView: View {
         Dictionary((model.arxivFeed?.papers ?? []).flatMap(\.tags).map { ($0, 1) }, uniquingKeysWith: +)
     }
 
-    private var inspectorPaper: ArxivFeedPaper? {
-        if let inspectedPaper, papers.contains(where: { $0.id == inspectedPaper.id }) {
-            return inspectedPaper
-        }
-        return papers.first
-    }
-
     var body: some View {
         mainLayout
             .overlay {
@@ -92,16 +84,12 @@ struct DiscoverView: View {
     }
 
     private var mainLayout: some View {
-        SidebarSplitLayout(minContentWidth: 820) {
+        SidebarSplitLayout(minContentWidth: 760) {
             sidebar
         } content: {
-            HStack(alignment: .top, spacing: 0) {
-                feed
-                    .frame(minWidth: 620, maxWidth: .infinity, maxHeight: .infinity)
-                    .clipped()
-                inspector
-                    .frame(width: 320)
-            }
+            feed
+                .frame(minWidth: 760, maxWidth: .infinity, maxHeight: .infinity)
+                .clipped()
         }
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear {
@@ -203,20 +191,13 @@ struct DiscoverView: View {
                                 inLibrary: model.libraryPaper(for: paper) != nil,
                                 isBusy: model.isDownloadingArxivPaper(paper),
                                 downloadProgress: model.arxivDownloadProgress(for: paper),
-                                isSelected: inspectorPaper?.id == paper.id,
-                                onInspect: {
-                                    inspectedPaper = paper
-                                },
                                 onPreview: {
-                                    inspectedPaper = paper
                                     previewPaper = paper
                                 },
                                 onSave: {
-                                    inspectedPaper = paper
                                     paperPendingSave = paper
                                 },
                                 onOpen: {
-                                    inspectedPaper = paper
                                     Task {
                                         await model.openArxivPaper(paper)
                                     }
@@ -232,103 +213,11 @@ struct DiscoverView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
-    private var inspector: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Paper Details")
-                .font(.system(size: 18, weight: .semibold))
-
-            if let paper = inspectorPaper {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 14) {
-                        Button {
-                            inspectedPaper = paper
-                            previewPaper = paper
-                        } label: {
-                            ArxivPreviewImage(url: model.cachedArxivAssetURL(for: paper.assets.small))
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 116)
-                        }
-                        .buttonStyle(.plain)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                        .disabled(paper.assets.large == nil && paper.assets.small == nil)
-                        .help("Open image preview")
-
-                        VStack(alignment: .leading, spacing: 8) {
-                            FlowLayout(spacing: 6) {
-                                Text(paper.primaryCategory ?? paper.categories.first ?? "arXiv")
-                                    .font(.caption.weight(.semibold))
-                                    .padding(.horizontal, 7)
-                                    .padding(.vertical, 3)
-                                    .background(Color.teal.opacity(0.12))
-                                    .foregroundStyle(.teal)
-                                    .clipShape(RoundedRectangle(cornerRadius: 6))
-                                Text(paper.id)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                if let similarity = paper.similarity {
-                                    SimilarityMeter(value: similarity)
-                                }
-                            }
-
-                            Text(paper.displayTitle(language: "zh"))
-                                .font(.system(size: 15, weight: .semibold))
-                                .fixedSize(horizontal: false, vertical: true)
-                            Text(paper.title.en)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-
-                        FlowTags(tags: Array(paper.tags.prefix(8)))
-
-                        Text(paper.displaySummary(language: "zh"))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-
-                        ResourceLinkButtons(links: paper.externalLinks, compact: false)
-                        HStack(spacing: 8) {
-                            if !model.isDownloadingArxivPaper(paper),
-                               model.libraryPaper(for: paper) == nil {
-                                SaveActionButton(isBusy: false) {
-                                    paperPendingSave = paper
-                                }
-                            }
-                            if model.isDownloadingArxivPaper(paper) {
-                                ProgressView(value: model.arxivDownloadProgress(for: paper))
-                                    .frame(width: 110)
-                            }
-                            StableOpenButton(isBusy: model.isDownloadingArxivPaper(paper)) {
-                                Task {
-                                    await model.openArxivPaper(paper)
-                                }
-                            }
-                        }
-                    }
-                    .padding(.trailing, 4)
-                }
-            } else {
-                ContentUnavailableView("Select Paper", systemImage: "sidebar.right")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-
-            Spacer(minLength: 0)
-        }
-        .padding(22)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Color(nsColor: .windowBackgroundColor))
-        .overlay(alignment: .leading) {
-            Rectangle()
-                .fill(Color(nsColor: .separatorColor).opacity(0.6))
-                .frame(width: 1)
-        }
-    }
-
     private var gridColumns: [GridItem] {
         [
             GridItem(
-                .adaptive(minimum: 330, maximum: 430),
-                spacing: 14,
+                .adaptive(minimum: 380, maximum: 560),
+                spacing: 16,
                 alignment: .top
             )
         ]
@@ -454,28 +343,22 @@ struct DiscoverView: View {
 }
 
 private struct ArxivPaperCard: View {
-    private let previewHeight: CGFloat = 142
-
     var paper: ArxivFeedPaper
     var imageURL: URL?
     var inLibrary: Bool
     var isBusy: Bool
     var downloadProgress: Double?
-    var isSelected: Bool
-    var onInspect: () -> Void
     var onPreview: () -> Void
     var onSave: () -> Void
     var onOpen: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: 12) {
             Button {
-                onInspect()
                 onPreview()
             } label: {
                 ArxivPreviewImage(url: imageURL)
                     .frame(maxWidth: .infinity)
-                    .frame(height: previewHeight)
             }
             .buttonStyle(.plain)
             .disabled(paper.assets.large == nil && paper.assets.small == nil)
@@ -486,22 +369,17 @@ private struct ArxivPaperCard: View {
 
                 Text(paper.displayTitle(language: "zh"))
                     .font(.system(size: 15, weight: .semibold))
-                    .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
                 Text(paper.title.en)
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
                 Text(paper.displaySummary(language: "zh"))
                     .font(.system(size: 12.5))
                     .foregroundStyle(.secondary)
-                    .lineLimit(3)
                     .fixedSize(horizontal: false, vertical: true)
 
                 FlowTags(tags: Array(paper.tags.prefix(5)))
-
-                Spacer(minLength: 0)
 
                 HStack(spacing: 8) {
                     ResourceLinkButtons(links: paper.externalLinks, compact: true)
@@ -516,19 +394,16 @@ private struct ArxivPaperCard: View {
                     Spacer(minLength: 0)
                 }
             }
-            .padding(12)
+            .padding(.horizontal, 12)
+            .padding(.bottom, 12)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .contentShape(RoundedRectangle(cornerRadius: 8))
-        .onTapGesture {
-            onInspect()
-        }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .frame(minHeight: 388, alignment: .top)
         .background(Color(nsColor: .textBackgroundColor))
         .overlay(
             RoundedRectangle(cornerRadius: 8)
-                .stroke(isSelected ? Color.accentColor.opacity(0.75) : Color.black.opacity(0.08), lineWidth: isSelected ? 1.5 : 1)
+                .stroke(Color.black.opacity(0.08), lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
@@ -549,6 +424,7 @@ private struct ArxivPaperCard: View {
                 Label("Saved", systemImage: "checkmark.seal.fill")
                     .font(.caption)
                     .foregroundStyle(.green)
+                    .fixedSize()
             }
             if let similarity = paper.similarity {
                 SimilarityMeter(value: similarity)
@@ -646,7 +522,7 @@ private struct ArxivPreviewImage: View {
             if let url, let image = NSImage(contentsOf: url) {
                 Image(nsImage: image)
                     .resizable()
-                    .scaledToFill()
+                    .aspectRatio(imageAspectRatio(image), contentMode: .fit)
             } else {
                 ZStack {
                     Color(nsColor: .separatorColor).opacity(0.22)
@@ -654,10 +530,17 @@ private struct ArxivPreviewImage: View {
                         .font(.system(size: 24))
                         .foregroundStyle(.secondary)
                 }
+                .aspectRatio(4.7, contentMode: .fit)
             }
         }
-        .clipped()
         .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private func imageAspectRatio(_ image: NSImage) -> CGFloat {
+        guard image.size.width > 0, image.size.height > 0 else {
+            return 4.7
+        }
+        return image.size.width / image.size.height
     }
 }
 
