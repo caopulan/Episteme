@@ -438,6 +438,10 @@ final class AppModel: ObservableObject {
         currentSelection = selection
     }
 
+    func clearCurrentSelection() {
+        currentSelection = nil
+    }
+
     func refreshCodexDiagnostic() async {
         codexDiagnostic = nil
         let modelOverride = codexModelOverride

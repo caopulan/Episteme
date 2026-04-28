@@ -271,6 +271,32 @@ func runCitationChecks() throws {
     try check(rendered.contains(#"href="papercodex-cite://open?id=paper%3Apaper-a%3Ap5%3Ab17""#), "markdown renderer should preserve clickable citation links")
 }
 
+func runUserSourceAttachmentChecks() throws {
+    let message = """
+    Compare this with the method section.
+
+    [selected source]
+    anchor_id: paper:paper-a:p3:aselection
+    paper_id: paper-a
+    page: 3
+    text: "The selected paragraph explains the training objective."
+    nearby_spans: paper:paper-a:p3:b9
+    before: "Previous paragraph."
+    after: "Next paragraph."
+    """
+
+    let parsed = UserSourceAttachmentParser.parse(message)
+    try check(parsed.visibleContent == "Compare this with the method section.", "user source attachment parser should hide selected-source metadata from chat display")
+    try check(parsed.attachment?.anchorID == "paper:paper-a:p3:aselection", "user source attachment should keep its anchor citation ID")
+    try check(parsed.attachment?.paperID == "paper-a", "user source attachment should keep the selected paper ID")
+    try check(parsed.attachment?.page == 3, "user source attachment should keep the selected page")
+    try check(parsed.attachment?.selectedText == "The selected paragraph explains the training objective.", "user source attachment should keep the selected text")
+
+    let plain = UserSourceAttachmentParser.parse("No attached source.")
+    try check(plain.visibleContent == "No attached source.", "plain user messages should remain unchanged")
+    try check(plain.attachment == nil, "plain user messages should not create source attachments")
+}
+
 func runAnchorResolverChecks() throws {
     let before = Span(
         id: Span.makeID(paperID: "paper-a", page: 2, blockIndex: 1),
@@ -957,6 +983,10 @@ do {
     if selectedChecks.isEmpty || selectedChecks.contains("citations") {
         try runCitationChecks()
         print("citations: pass")
+    }
+    if selectedChecks.isEmpty || selectedChecks.contains("user-source") {
+        try runUserSourceAttachmentChecks()
+        print("user-source: pass")
     }
     if selectedChecks.isEmpty || selectedChecks.contains("anchors") {
         try runAnchorResolverChecks()

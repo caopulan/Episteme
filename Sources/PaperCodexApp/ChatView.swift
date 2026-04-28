@@ -17,7 +17,7 @@ struct ChatView: View {
                         ContentUnavailableView(
                             "No Messages",
                             systemImage: "text.bubble",
-                            description: Text("Select text in the PDF, then ask Codex in this session. The selected source is inserted into your message.")
+                            description: Text("Select text in the PDF, then ask Codex in this session. The selected source appears as a quoted reply.")
                         )
                         .padding(.top, 80)
                     } else {
@@ -83,14 +83,9 @@ struct ChatView: View {
     private var composer: some View {
         VStack(alignment: .leading, spacing: 8) {
             if let selection = model.currentSelection {
-                HStack {
-                    Image(systemName: "quote.opening")
-                    Text("Selected p\(selection.page): \(selection.text)")
-                        .lineLimit(1)
-                    Spacer()
+                CurrentSelectionReplyCard(selection: selection) {
+                    model.clearCurrentSelection()
                 }
-                .font(.caption)
-                .foregroundStyle(.secondary)
             }
 
             CodexStatusLine(
@@ -444,12 +439,26 @@ private struct MessageBubble: View {
         CitationParser.parse(message.content, maxVisibleCitations: isUser ? nil : 3)
     }
 
+    private var parsedUserSource: ParsedUserSourceMessage {
+        UserSourceAttachmentParser.parse(message.content)
+    }
+
+    private var userSourceAttachment: UserSourceAttachment? {
+        isUser ? parsedUserSource.attachment : nil
+    }
+
     private var failureNotice: CodexFailureNotice? {
         CodexFailureNotice.parse(message.content)
     }
 
     private var renderedMarkdown: String {
-        failureNotice?.messageContent ?? parsed.displayMarkdown
+        if let failureNotice {
+            return failureNotice.messageContent
+        }
+        if isUser {
+            return parsedUserSource.visibleContent
+        }
+        return parsed.displayMarkdown
     }
 
     var body: some View {
@@ -461,8 +470,13 @@ private struct MessageBubble: View {
                 Text(isUser ? "You" : "Codex")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                MarkdownMessageView(messageID: message.id, markdown: renderedMarkdown, onCitation: onCitation)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                if let userSourceAttachment {
+                    UserSourceReplyView(attachment: userSourceAttachment, onOpen: onCitation)
+                }
+                if !renderedMarkdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    MarkdownMessageView(messageID: message.id, markdown: renderedMarkdown, onCitation: onCitation)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
                 if failureNotice != nil {
                     HStack(spacing: 8) {
                         Button {
@@ -493,6 +507,90 @@ private struct MessageBubble: View {
                 Spacer(minLength: 32)
             }
         }
+    }
+}
+
+private struct CurrentSelectionReplyCard: View {
+    var selection: PDFSelectionInfo
+    var onClear: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "quote.opening")
+                .foregroundStyle(Color.accentColor)
+                .frame(width: 18)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Replying to source · p\(selection.page)")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.primary)
+                Text(selection.text)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .truncationMode(.tail)
+            }
+            Spacer(minLength: 8)
+            Button(action: onClear) {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(.tertiary)
+            }
+            .buttonStyle(.plain)
+            .help("Remove source")
+        }
+        .padding(10)
+        .background(Color.accentColor.opacity(0.08))
+        .overlay(alignment: .leading) {
+            Rectangle()
+                .fill(Color.accentColor.opacity(0.65))
+                .frame(width: 3)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+private struct UserSourceReplyView: View {
+    var attachment: UserSourceAttachment
+    var onOpen: (String) -> Void
+
+    var body: some View {
+        Button {
+            onOpen(attachment.anchorID)
+        } label: {
+            HStack(alignment: .top, spacing: 9) {
+                Image(systemName: "quote.opening")
+                    .foregroundStyle(Color.accentColor)
+                    .frame(width: 16)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Quoted source · p\(attachment.page)")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.primary)
+                    Text(attachment.selectedText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(3)
+                        .truncationMode(.tail)
+                }
+                Spacer(minLength: 8)
+                Image(systemName: "arrow.up.right.square")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(9)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(nsColor: .textBackgroundColor).opacity(0.75))
+            .overlay(alignment: .leading) {
+                Rectangle()
+                    .fill(Color.accentColor.opacity(0.55))
+                    .frame(width: 3)
+            }
+            .overlay(
+                RoundedRectangle(cornerRadius: 7)
+                    .stroke(Color.accentColor.opacity(0.16), lineWidth: 1)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 7))
+        }
+        .buttonStyle(.plain)
+        .help("Open quoted source")
     }
 }
 
