@@ -35,13 +35,12 @@ struct DiscoverView: View {
     }
 
     var body: some View {
-        HSplitView {
+        SidebarSplitLayout(minContentWidth: 760) {
             sidebar
-                .frame(minWidth: 250, idealWidth: 280, maxWidth: 340)
+        } content: {
             feed
                 .frame(minWidth: 760)
         }
-        .background(Color(nsColor: .windowBackgroundColor))
         .onAppear {
             guard model.arxivFeed == nil, !model.isLoadingArxivFeed else {
                 return

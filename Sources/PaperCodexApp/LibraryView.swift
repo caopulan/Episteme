@@ -14,7 +14,6 @@ struct LibraryView: View {
     @State private var searchText = ""
     @State private var selectedCategoryID: String?
     @State private var selectedTagID: String?
-    @State private var sidebarDragStartWidth: CGFloat?
 
     private var filteredPapers: [Paper] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -39,22 +38,9 @@ struct LibraryView: View {
     }
 
     var body: some View {
-        HStack(spacing: 0) {
+        SidebarSplitLayout(minContentWidth: 820) {
             sidebar
-                .frame(width: model.librarySidebarWidth)
-            SplitterHandle()
-                .gesture(
-                    DragGesture()
-                        .onChanged { value in
-                            if sidebarDragStartWidth == nil {
-                                sidebarDragStartWidth = model.librarySidebarWidth
-                            }
-                            model.setLibrarySidebarWidth((sidebarDragStartWidth ?? model.librarySidebarWidth) + value.translation.width)
-                        }
-                        .onEnded { _ in
-                            sidebarDragStartWidth = nil
-                        }
-                )
+        } content: {
             HSplitView {
                 paperList
                     .frame(minWidth: 520)
@@ -62,7 +48,6 @@ struct LibraryView: View {
                     .frame(minWidth: 300, idealWidth: 340, maxWidth: 420)
             }
         }
-        .background(Color(nsColor: .windowBackgroundColor))
         .sheet(isPresented: $isCreatingCategory) {
             CategoryEditorSheet(
                 categoryItems: flattenedCategoryItems(),
@@ -612,19 +597,6 @@ private struct PaperRow: View {
                 .stroke(isSelected ? Color.accentColor.opacity(0.45) : Color.clear, lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 8))
-    }
-}
-
-private struct SplitterHandle: View {
-    var body: some View {
-        Rectangle()
-            .fill(Color(nsColor: .separatorColor).opacity(0.55))
-            .frame(width: 5)
-            .overlay(
-                Rectangle()
-                    .fill(Color.accentColor.opacity(0.0))
-                    .frame(width: 18)
-            )
     }
 }
 

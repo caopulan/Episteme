@@ -14,9 +14,9 @@ struct SettingsView: View {
     @State private var draftSimilarityFavoriteIDs: Set<Int> = []
 
     var body: some View {
-        HSplitView {
+        SidebarSplitLayout(minContentWidth: 720) {
             sidebar
-                .frame(minWidth: 250, idealWidth: 280, maxWidth: 340)
+        } content: {
             ScrollView {
                 VStack(alignment: .leading, spacing: 22) {
                     header
@@ -31,8 +31,6 @@ struct SettingsView: View {
             }
             .frame(minWidth: 720)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-        .background(Color(nsColor: .windowBackgroundColor))
         .onAppear {
             draftBaseURL = model.arxivFeedBaseURL
             draftToken = model.arxivFeedToken
