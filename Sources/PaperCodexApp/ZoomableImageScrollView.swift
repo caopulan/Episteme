@@ -8,37 +8,21 @@ struct ZoomableImageScrollView: NSViewRepresentable {
         Coordinator()
     }
 
-    func makeNSView(context: Context) -> WheelZoomScrollView {
-        let scrollView = WheelZoomScrollView()
-        scrollView.drawsBackground = false
-        scrollView.hasVerticalScroller = true
-        scrollView.hasHorizontalScroller = true
-        scrollView.autohidesScrollers = true
-        scrollView.allowsMagnification = true
-        scrollView.minMagnification = 0.08
-        scrollView.maxMagnification = 6
-        scrollView.magnification = 1
-
-        scrollView.documentView = CenteredImageDocumentView()
-        return scrollView
+    func makeNSView(context: Context) -> ZoomableImageCanvasView {
+        let view = ZoomableImageCanvasView()
+        view.wantsLayer = true
+        return view
     }
 
-    func updateNSView(_ scrollView: WheelZoomScrollView, context: Context) {
+    func updateNSView(_ view: ZoomableImageCanvasView, context: Context) {
         guard context.coordinator.imageURL != imageURL else {
             return
         }
         context.coordinator.imageURL = imageURL
-        guard let image = NSImage(contentsOf: imageURL),
-              let documentView = scrollView.documentView as? CenteredImageDocumentView else {
+        guard let image = NSImage(contentsOf: imageURL) else {
             return
         }
-
-        documentView.setImage(image)
-        scrollView.layoutSubtreeIfNeeded()
-
-        DispatchQueue.main.async {
-            scrollView.fitDocumentToViewport()
-        }
+        view.setImage(image)
     }
 
     final class Coordinator {
@@ -46,13 +30,75 @@ struct ZoomableImageScrollView: NSViewRepresentable {
     }
 }
 
-final class WheelZoomScrollView: NSScrollView {
+final class ZoomableImageCanvasView: NSView {
+    private var image: NSImage?
+    private var scale: CGFloat = 1
+    private var offset: CGPoint = .zero
+    private var lastDragPoint: CGPoint?
+    private var needsInitialFit = false
+
+    private let minScale: CGFloat = 0.05
+    private let maxScale: CGFloat = 8
+
     override var acceptsFirstResponder: Bool {
         true
     }
 
+    func setImage(_ image: NSImage) {
+        self.image = image
+        scale = 1
+        offset = .zero
+        needsInitialFit = true
+        needsDisplay = true
+    }
+
+    override func layout() {
+        super.layout()
+        if needsInitialFit {
+            fitImageToView()
+        }
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        NSColor(calibratedWhite: 0.035, alpha: 1).setFill()
+        dirtyRect.fill()
+
+        guard let image else {
+            return
+        }
+        if needsInitialFit {
+            fitImageToView()
+        }
+        image.draw(in: imageRect(for: image), from: .zero, operation: .sourceOver, fraction: 1)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(self)
+        lastDragPoint = convert(event.locationInWindow, from: nil)
+        if event.clickCount == 2 {
+            fitImageToView()
+        }
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        guard let lastDragPoint else {
+            self.lastDragPoint = point
+            return
+        }
+        offset.x += point.x - lastDragPoint.x
+        offset.y += point.y - lastDragPoint.y
+        self.lastDragPoint = point
+        clampOffset()
+        needsDisplay = true
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        lastDragPoint = nil
+    }
+
     override func scrollWheel(with event: NSEvent) {
-        guard let centeredDocumentView = documentView as? CenteredImageDocumentView else {
+        guard let image else {
             super.scrollWheel(with: event)
             return
         }
@@ -63,72 +109,76 @@ final class WheelZoomScrollView: NSScrollView {
         }
 
         let nextMagnification = min(
-            max(magnification * pow(1.0018, delta), minMagnification),
-            maxMagnification
+            max(scale * pow(1.0018, delta), minScale),
+            maxScale
         )
-        let focusPoint = contentView.convert(event.locationInWindow, from: nil)
-        let documentFocusPoint = centeredDocumentView.convert(focusPoint, from: contentView)
-        centeredDocumentView.layoutImage(viewportSize: contentView.bounds.size, magnification: nextMagnification)
-        setMagnification(nextMagnification, centeredAt: documentFocusPoint)
-    }
-
-    func fitDocumentToViewport() {
-        guard let centeredDocumentView = documentView as? CenteredImageDocumentView,
-              centeredDocumentView.imageSize.width > 0,
-              centeredDocumentView.imageSize.height > 0,
-              contentView.bounds.width > 0,
-              contentView.bounds.height > 0 else {
+        guard nextMagnification != scale else {
             return
         }
-        let fitScale = min(
-            contentView.bounds.width / centeredDocumentView.imageSize.width,
-            contentView.bounds.height / centeredDocumentView.imageSize.height
+
+        let point = convert(event.locationInWindow, from: nil)
+        let rect = imageRect(for: image)
+        let imagePoint = CGPoint(
+            x: (point.x - rect.minX) / scale,
+            y: (point.y - rect.minY) / scale
         )
-        let initialScale = min(max(fitScale, minMagnification), 1)
-        centeredDocumentView.layoutImage(viewportSize: contentView.bounds.size, magnification: initialScale)
-        setMagnification(
-            initialScale,
-            centeredAt: NSPoint(x: centeredDocumentView.bounds.midX, y: centeredDocumentView.bounds.midY)
+        scale = nextMagnification
+        let scaledSize = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+        offset = CGPoint(
+            x: point.x - bounds.midX + scaledSize.width / 2 - imagePoint.x * scale,
+            y: point.y - bounds.midY + scaledSize.height / 2 - imagePoint.y * scale
+        )
+        clampOffset()
+        needsDisplay = true
+    }
+
+    private func fitImageToView() {
+        guard let image,
+              image.size.width > 0,
+              image.size.height > 0,
+              bounds.width > 0,
+              bounds.height > 0 else {
+            return
+        }
+        let fitWidth = bounds.width / image.size.width
+        let fitHeight = bounds.height / image.size.height
+        let isWideStrip = image.size.width / image.size.height > bounds.width / bounds.height * 1.25
+        scale = min(max(isWideStrip ? fitHeight : min(fitWidth, fitHeight), minScale), 1.25)
+        offset = .zero
+        needsInitialFit = false
+        clampOffset()
+        needsDisplay = true
+    }
+
+    private func imageRect(for image: NSImage) -> CGRect {
+        let scaledSize = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+        return CGRect(
+            x: bounds.midX - scaledSize.width / 2 + offset.x,
+            y: bounds.midY - scaledSize.height / 2 + offset.y,
+            width: scaledSize.width,
+            height: scaledSize.height
         )
     }
-}
 
-final class CenteredImageDocumentView: NSView {
-    private let imageView = NSImageView()
+    private func clampOffset() {
+        guard let image else {
+            return
+        }
+        let scaledWidth = image.size.width * scale
+        let scaledHeight = image.size.height * scale
 
-    var imageSize: NSSize {
-        imageView.image?.size ?? .zero
-    }
+        if scaledWidth <= bounds.width {
+            offset.x = 0
+        } else {
+            let maxX = (scaledWidth - bounds.width) / 2
+            offset.x = min(max(offset.x, -maxX), maxX)
+        }
 
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        imageView.imageScaling = .scaleNone
-        imageView.imageAlignment = .alignCenter
-        addSubview(imageView)
-    }
-
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    func setImage(_ image: NSImage) {
-        imageView.image = image
-        frame = NSRect(origin: .zero, size: image.size)
-        imageView.frame = NSRect(origin: .zero, size: image.size)
-    }
-
-    func layoutImage(viewportSize: NSSize, magnification: CGFloat) {
-        let scale = max(magnification, 0.0001)
-        let documentSize = NSSize(
-            width: max(imageSize.width, viewportSize.width / scale),
-            height: max(imageSize.height, viewportSize.height / scale)
-        )
-        frame = NSRect(origin: .zero, size: documentSize)
-        imageView.frame = NSRect(
-            x: max((documentSize.width - imageSize.width) / 2, 0),
-            y: max((documentSize.height - imageSize.height) / 2, 0),
-            width: imageSize.width,
-            height: imageSize.height
-        )
+        if scaledHeight <= bounds.height {
+            offset.y = 0
+        } else {
+            let maxY = (scaledHeight - bounds.height) / 2
+            offset.y = min(max(offset.y, -maxY), maxY)
+        }
     }
 }

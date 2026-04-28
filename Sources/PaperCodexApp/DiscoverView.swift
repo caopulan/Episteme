@@ -120,7 +120,11 @@ struct DiscoverView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 12) {
+                    LazyVGrid(
+                        columns: [GridItem(.adaptive(minimum: 390, maximum: 540), spacing: 14, alignment: .top)],
+                        alignment: .leading,
+                        spacing: 14
+                    ) {
                         ForEach(papers) { paper in
                             ArxivPaperCard(
                                 paper: paper,
@@ -258,8 +262,7 @@ struct DiscoverView: View {
 }
 
 private struct ArxivPaperCard: View {
-    private let previewWidth: CGFloat = 420
-    private let rowHeight: CGFloat = 218
+    private let previewHeight: CGFloat = 172
 
     var paper: ArxivFeedPaper
     var imageURL: URL?
@@ -271,67 +274,68 @@ private struct ArxivPaperCard: View {
     var onOpen: () -> Void
 
     var body: some View {
-        HStack(alignment: .top, spacing: 16) {
+        VStack(alignment: .leading, spacing: 10) {
             Button {
                 onPreview()
             } label: {
                 ArxivPreviewImage(url: imageURL)
-                    .frame(width: previewWidth, height: rowHeight)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: previewHeight)
             }
             .buttonStyle(.plain)
             .disabled(paper.assets.large == nil && paper.assets.small == nil)
             .help("Open image preview")
 
-            VStack(alignment: .leading, spacing: 10) {
-                metadataRow
+            metadataRow
 
-                Text(paper.displayTitle(language: "zh"))
-                    .font(.system(size: 16, weight: .semibold))
-                    .lineLimit(2)
-                Text(paper.title.en)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                Text(paper.displaySummary(language: "zh"))
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(3)
+            Text(paper.displayTitle(language: "zh"))
+                .font(.system(size: 15, weight: .semibold))
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(paper.title.en)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(paper.displaySummary(language: "zh"))
+                .font(.system(size: 12.5))
+                .foregroundStyle(.secondary)
+                .lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
 
-                Spacer(minLength: 0)
+            FlowTags(tags: Array(paper.tags.prefix(5)))
 
-                HStack(alignment: .center, spacing: 8) {
-                    FlowTags(tags: Array(paper.tags.prefix(5)))
-                    Spacer(minLength: 8)
-                    ResourceLinkButtons(links: paper.externalLinks, compact: true)
-                }
+            Spacer(minLength: 0)
 
-                HStack(spacing: 8) {
-                    Spacer(minLength: 8)
-                    if isBusy {
-                        VStack(alignment: .trailing, spacing: 4) {
-                            ProgressView(value: downloadProgress)
-                                .frame(width: 120)
-                            Text("Downloading")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    Button {
-                        onSave()
-                    } label: {
-                        Label(inLibrary ? "Saved" : "Add", systemImage: inLibrary ? "checkmark" : "plus")
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(inLibrary || isBusy)
-                    StableOpenButton(isBusy: isBusy, action: onOpen)
-                }
+            HStack(alignment: .center, spacing: 8) {
+                ResourceLinkButtons(links: paper.externalLinks, compact: true)
+                Spacer(minLength: 8)
             }
-            .frame(height: rowHeight, alignment: .top)
-            .frame(maxWidth: .infinity, alignment: .leading)
+
+            HStack(spacing: 8) {
+                if isBusy {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ProgressView(value: downloadProgress)
+                            .frame(width: 104)
+                        Text("Downloading")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Spacer(minLength: 8)
+                Button {
+                    onSave()
+                } label: {
+                    Label(inLibrary ? "Saved" : "Add", systemImage: inLibrary ? "checkmark" : "plus")
+                }
+                .buttonStyle(.bordered)
+                .disabled(inLibrary || isBusy)
+                StableOpenButton(isBusy: isBusy, action: onOpen)
+            }
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .frame(minHeight: rowHeight + 24, alignment: .top)
+        .frame(minHeight: 390, alignment: .top)
         .background(Color(nsColor: .textBackgroundColor))
         .overlay(
             RoundedRectangle(cornerRadius: 8)
@@ -341,7 +345,7 @@ private struct ArxivPaperCard: View {
     }
 
     private var metadataRow: some View {
-        HStack(spacing: 6) {
+        FlowLayout(spacing: 6) {
             Text(paper.primaryCategory ?? paper.categories.first ?? "arXiv")
                 .font(.caption.weight(.semibold))
                 .padding(.horizontal, 7)
@@ -371,8 +375,8 @@ private struct ArxivPaperCard: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
             }
-            Spacer(minLength: 0)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var groupLabel: String? {
@@ -449,15 +453,16 @@ private struct ArxivImagePreviewSheet: View {
 
     var body: some View {
         ZStack {
-            Color(nsColor: .textBackgroundColor)
+            Color.black.opacity(0.90)
             if let imageURL {
                 ZoomableImageScrollView(imageURL: imageURL)
-                    .padding(10)
             } else {
                 ProgressView()
+                    .controlSize(.large)
+                    .tint(.white)
             }
         }
-        .frame(minWidth: 880, idealWidth: 1040, minHeight: 620, idealHeight: 720)
+        .frame(minWidth: 1080, idealWidth: 1220, minHeight: 740, idealHeight: 820)
         .task(id: paper.id) {
             await model.ensureArxivAssetCached(paper.assets.large ?? paper.assets.small)
         }
