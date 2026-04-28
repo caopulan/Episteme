@@ -38,6 +38,15 @@ struct ReaderView: View {
             }
             Spacer()
 
+            if let paper = model.selectedPaper, !paper.isSaved {
+                Button {
+                    model.saveCachedPaperToLibrary(paper)
+                } label: {
+                    Label("Save to Library", systemImage: "tray.and.arrow.down")
+                }
+                .buttonStyle(.borderedProminent)
+            }
+
             Button {
                 isShowingSessionPapers.toggle()
             } label: {

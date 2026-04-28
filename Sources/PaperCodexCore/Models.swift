@@ -32,6 +32,7 @@ public struct Paper: Codable, Equatable, Identifiable, Sendable {
     public var authors: [String]
     public var year: Int?
     public var sourceURL: String?
+    public var isSaved: Bool
     public var importedAt: Date
     public var updatedAt: Date
 
@@ -43,6 +44,7 @@ public struct Paper: Codable, Equatable, Identifiable, Sendable {
         authors: [String],
         year: Int?,
         sourceURL: String?,
+        isSaved: Bool = true,
         importedAt: Date,
         updatedAt: Date
     ) {
@@ -53,6 +55,7 @@ public struct Paper: Codable, Equatable, Identifiable, Sendable {
         self.authors = authors
         self.year = year
         self.sourceURL = sourceURL
+        self.isSaved = isSaved
         self.importedAt = importedAt
         self.updatedAt = updatedAt
     }

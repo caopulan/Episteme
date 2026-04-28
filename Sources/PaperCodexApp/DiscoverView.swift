@@ -6,8 +6,6 @@ struct DiscoverView: View {
     @EnvironmentObject private var model: AppModel
     @State private var searchText = ""
     @State private var selectedCategory: String?
-    @State private var draftBaseURL = ""
-    @State private var draftToken = ""
 
     private var papers: [ArxivFeedPaper] {
         var result = model.arxivFeed?.papers ?? []
@@ -23,6 +21,7 @@ struct DiscoverView: View {
                     || paper.displayTitle(language: "en").localizedCaseInsensitiveContains(query)
                     || paper.authors.joined(separator: " ").localizedCaseInsensitiveContains(query)
                     || paper.tags.joined(separator: " ").localizedCaseInsensitiveContains(query)
+                    || paper.id.localizedCaseInsensitiveContains(query)
             }
         }
         return result
@@ -36,18 +35,12 @@ struct DiscoverView: View {
     var body: some View {
         HSplitView {
             sidebar
-                .frame(minWidth: 250, idealWidth: 280, maxWidth: 340)
-            HSplitView {
-                feedList
-                    .frame(minWidth: 520)
-                detailPane
-                    .frame(minWidth: 340, idealWidth: 400, maxWidth: 480)
-            }
+                .frame(minWidth: 232, idealWidth: 260, maxWidth: 310)
+            feed
+                .frame(minWidth: 760)
         }
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear {
-            draftBaseURL = model.arxivFeedBaseURL
-            draftToken = model.arxivFeedToken
             guard model.arxivFeed == nil, !model.isLoadingArxivFeed else {
                 return
             }
@@ -67,27 +60,9 @@ struct DiscoverView: View {
                     model.goToLibrary()
                 }
                 navButton(title: "Discover", systemImage: "sparkle.magnifyingglass", selected: true) {}
-            }
-
-            Divider()
-
-            VStack(alignment: .leading, spacing: 10) {
-                Label("Server", systemImage: "server.rack")
-                    .font(.headline)
-                TextField("Base URL", text: $draftBaseURL)
-                    .textFieldStyle(.roundedBorder)
-                SecureField("API token", text: $draftToken)
-                    .textFieldStyle(.roundedBorder)
-                Button {
-                    model.setArxivFeedConnection(baseURL: draftBaseURL, token: draftToken)
-                    Task {
-                        await model.refreshArxivDatesAndFeed()
-                    }
-                } label: {
-                    Label("Connect", systemImage: "point.3.connected.trianglepath.dotted")
-                        .frame(maxWidth: .infinity)
+                navButton(title: "Settings", systemImage: "gearshape") {
+                    model.showSettings()
                 }
-                .buttonStyle(.borderedProminent)
             }
 
             Divider()
@@ -111,13 +86,56 @@ struct DiscoverView: View {
         .background(Color(nsColor: .controlBackgroundColor))
     }
 
-    private var feedList: some View {
+    private var feed: some View {
         VStack(alignment: .leading, spacing: 14) {
+            toolbar
+
+            if model.isLoadingArxivFeed {
+                ProgressView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if papers.isEmpty {
+                ContentUnavailableView("No Papers", systemImage: "doc.text.magnifyingglass")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    LazyVGrid(
+                        columns: [GridItem(.adaptive(minimum: 520), spacing: 12, alignment: .top)],
+                        alignment: .leading,
+                        spacing: 12
+                    ) {
+                        ForEach(papers) { paper in
+                            ArxivPaperCard(
+                                paper: paper,
+                                imageURL: model.cachedArxivAssetURL(for: paper.assets.small),
+                                inLibrary: model.libraryPaper(for: paper) != nil,
+                                isBusy: model.isAddingArxivPaper,
+                                onSave: {
+                                    Task {
+                                        await model.addArxivPaperToLibrary(paper)
+                                    }
+                                },
+                                onOpen: {
+                                    Task {
+                                        await model.openArxivPaper(paper)
+                                    }
+                                }
+                            )
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+            }
+        }
+        .padding(24)
+    }
+
+    private var toolbar: some View {
+        VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Daily arXiv")
                         .font(.system(size: 28, weight: .semibold))
-                    Text(model.selectedArxivDate ?? "No date selected")
+                    Text("\(model.arxivFeed?.count ?? 0) papers · \(model.selectedArxivDate ?? "No date")")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -147,17 +165,24 @@ struct DiscoverView: View {
                 }
                 .buttonStyle(.bordered)
                 .help("Refresh")
+                Button {
+                    model.showSettings()
+                } label: {
+                    Image(systemName: "gearshape")
+                }
+                .buttonStyle(.bordered)
+                .help("Settings")
             }
 
             HStack(spacing: 10) {
-                TextField("Search title, author, tag", text: $searchText)
+                TextField("Search title, author, tag, arXiv ID", text: $searchText)
                     .textFieldStyle(.roundedBorder)
                 Button {
                     Task {
                         await model.preloadArxivAssets(includeLarge: false)
                     }
                 } label: {
-                    Label(model.isPreloadingArxivAssets ? "Preloading" : "Preload", systemImage: "photo.on.rectangle")
+                    Label(model.isPreloadingArxivAssets ? "Preloading" : "Preload thumbs", systemImage: "photo.on.rectangle")
                 }
                 .buttonStyle(.bordered)
                 .disabled(model.arxivFeed == nil || model.isPreloadingArxivAssets)
@@ -166,136 +191,11 @@ struct DiscoverView: View {
                         await model.preloadArxivAssets(includeLarge: true)
                     }
                 } label: {
-                    Label("Full", systemImage: "photo.stack")
+                    Label("Full images", systemImage: "photo.stack")
                 }
                 .buttonStyle(.bordered)
                 .disabled(model.arxivFeed == nil || model.isPreloadingArxivAssets)
             }
-
-            if model.isLoadingArxivFeed {
-                ProgressView()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if papers.isEmpty {
-                ContentUnavailableView("No Papers", systemImage: "doc.text.magnifyingglass")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                ScrollView {
-                    LazyVStack(spacing: 10) {
-                        ForEach(papers) { paper in
-                            ArxivPaperCard(
-                                paper: paper,
-                                imageURL: model.cachedArxivAssetURL(for: paper.assets.small),
-                                selected: model.selectedArxivPaper?.id == paper.id,
-                                inLibrary: model.libraryPaper(for: paper) != nil
-                            ) {
-                                model.selectedArxivPaper = paper
-                            }
-                        }
-                    }
-                    .padding(.vertical, 4)
-                }
-            }
-        }
-        .padding(24)
-    }
-
-    private var detailPane: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Preview")
-                .font(.system(size: 20, weight: .semibold))
-
-            if let paper = model.selectedArxivPaper {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 14) {
-                        ArxivPreviewImage(url: model.cachedArxivAssetURL(for: paper.assets.large) ?? model.cachedArxivAssetURL(for: paper.assets.small))
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 190)
-
-                        VStack(alignment: .leading, spacing: 7) {
-                            Text(paper.displayTitle(language: "zh"))
-                                .font(.headline)
-                            if paper.title.en != paper.title.zh {
-                                Text(paper.title.en)
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Text(paper.authors.joined(separator: ", "))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-
-                        HStack(spacing: 8) {
-                            if let existing = model.libraryPaper(for: paper) {
-                                Button {
-                                    model.openPaper(existing)
-                                } label: {
-                                    Label("Read in Library", systemImage: "book")
-                                        .frame(maxWidth: .infinity)
-                                }
-                                .buttonStyle(.borderedProminent)
-                            } else {
-                                Button {
-                                    Task {
-                                        await model.addArxivPaperToLibrary(paper)
-                                    }
-                                } label: {
-                                    Label(model.isAddingArxivPaper ? "Adding" : "Add to Library", systemImage: "plus.square.on.square")
-                                        .frame(maxWidth: .infinity)
-                                }
-                                .buttonStyle(.borderedProminent)
-                                .disabled(model.isAddingArxivPaper)
-                            }
-                        }
-
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Summary")
-                                .font(.subheadline.weight(.semibold))
-                            Text(paper.displaySummary(language: "zh"))
-                                .font(.body)
-                            if !paper.summary.en.isEmpty, paper.summary.en != paper.summary.zh {
-                                Text(paper.summary.en)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-
-                        Divider()
-
-                        metadataGrid(for: paper)
-                    }
-                    .padding(.trailing, 4)
-                }
-            } else {
-                ContentUnavailableView("Select Paper", systemImage: "sidebar.right")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-
-            Spacer(minLength: 0)
-        }
-        .padding(22)
-        .background(Color(nsColor: .controlBackgroundColor))
-    }
-
-    private func metadataGrid(for paper: ArxivFeedPaper) -> some View {
-        VStack(alignment: .leading, spacing: 9) {
-            metadataRow("arXiv", paper.id)
-            metadataRow("Published", paper.published ?? "Unknown")
-            metadataRow("Primary", paper.primaryCategory ?? "Unknown")
-            if !paper.tags.isEmpty {
-                FlowTags(tags: paper.tags)
-            }
-        }
-    }
-
-    private func metadataRow(_ label: String, _ value: String) -> some View {
-        HStack(alignment: .firstTextBaseline) {
-            Text(label)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .frame(width: 74, alignment: .leading)
-            Text(value)
-                .font(.caption)
-                .textSelection(.enabled)
         }
     }
 
@@ -336,15 +236,16 @@ struct DiscoverView: View {
 private struct ArxivPaperCard: View {
     var paper: ArxivFeedPaper
     var imageURL: URL?
-    var selected: Bool
     var inLibrary: Bool
-    var onSelect: () -> Void
+    var isBusy: Bool
+    var onSave: () -> Void
+    var onOpen: () -> Void
 
     var body: some View {
-        Button(action: onSelect) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 12) {
                 ArxivPreviewImage(url: imageURL)
-                    .frame(width: 132, height: 82)
+                    .frame(width: 142, height: 92)
 
                 VStack(alignment: .leading, spacing: 7) {
                     HStack(spacing: 6) {
@@ -355,32 +256,58 @@ private struct ArxivPaperCard: View {
                             .background(Color.teal.opacity(0.12))
                             .foregroundStyle(.teal)
                             .clipShape(RoundedRectangle(cornerRadius: 6))
+                        Text(paper.id)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                         if inLibrary {
-                            Label("Library", systemImage: "checkmark.seal.fill")
+                            Label("Saved", systemImage: "checkmark.seal.fill")
                                 .font(.caption)
                                 .foregroundStyle(.green)
                         }
-                        Spacer()
+                        Spacer(minLength: 0)
                     }
+
                     Text(paper.displayTitle(language: "zh"))
                         .font(.system(size: 15, weight: .semibold))
                         .lineLimit(2)
+                    Text(paper.title.en)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                     Text(paper.displaySummary(language: "zh"))
                         .font(.system(size: 13))
                         .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                    FlowTags(tags: Array(paper.tags.prefix(6)))
+                        .lineLimit(3)
                 }
             }
-            .padding(10)
-            .background(selected ? Color.accentColor.opacity(0.11) : Color(nsColor: .textBackgroundColor))
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(selected ? Color.accentColor.opacity(0.45) : Color.black.opacity(0.08), lineWidth: 1)
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 8))
+
+            HStack(spacing: 8) {
+                FlowTags(tags: Array(paper.tags.prefix(5)))
+                Spacer(minLength: 8)
+                Button {
+                    onSave()
+                } label: {
+                    Label(inLibrary ? "Saved" : "Add", systemImage: inLibrary ? "checkmark" : "plus")
+                }
+                .buttonStyle(.bordered)
+                .disabled(inLibrary || isBusy)
+                Button {
+                    onOpen()
+                } label: {
+                    Label("Open", systemImage: "bubble.left.and.text.bubble.right")
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(isBusy)
+            }
         }
-        .buttonStyle(.plain)
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(nsColor: .textBackgroundColor))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.black.opacity(0.08), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 }
 

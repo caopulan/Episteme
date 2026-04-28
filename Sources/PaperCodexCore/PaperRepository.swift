@@ -36,6 +36,7 @@ public final class PaperRepository {
           authors_json TEXT NOT NULL,
           year INTEGER,
           source_url TEXT,
+          is_saved INTEGER NOT NULL DEFAULT 1,
           imported_at TEXT NOT NULL,
           updated_at TEXT NOT NULL
         );
@@ -128,12 +129,18 @@ public final class PaperRepository {
           created_at TEXT NOT NULL
         );
         """)
+        let paperColumns = try database.query("PRAGMA table_info(papers);") { row in
+            try row.text(1)
+        }
+        if !paperColumns.contains("is_saved") {
+            try database.execute("ALTER TABLE papers ADD COLUMN is_saved INTEGER NOT NULL DEFAULT 1;")
+        }
     }
 
     public func upsertPaper(_ paper: Paper) throws {
         try database.run("""
-        INSERT INTO papers (id, file_path, file_hash, title, authors_json, year, source_url, imported_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO papers (id, file_path, file_hash, title, authors_json, year, source_url, is_saved, imported_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
           file_path = excluded.file_path,
           file_hash = excluded.file_hash,
@@ -141,6 +148,7 @@ public final class PaperRepository {
           authors_json = excluded.authors_json,
           year = excluded.year,
           source_url = excluded.source_url,
+          is_saved = excluded.is_saved,
           updated_at = excluded.updated_at;
         """, bindings: [
             .text(paper.id),
@@ -150,6 +158,7 @@ public final class PaperRepository {
             .text(try jsonString(paper.authors)),
             paper.year.map(SQLiteValue.int) ?? .null,
             paper.sourceURL.map(SQLiteValue.text) ?? .null,
+            .int(paper.isSaved ? 1 : 0),
             .text(dates.string(from: paper.importedAt)),
             .text(dates.string(from: paper.updatedAt))
         ])
@@ -157,8 +166,8 @@ public final class PaperRepository {
 
     public func fetchPapers() throws -> [Paper] {
         try database.query("""
-        SELECT id, file_path, file_hash, title, authors_json, year, source_url, imported_at, updated_at
-        FROM papers ORDER BY title, id;
+        SELECT id, file_path, file_hash, title, authors_json, year, source_url, is_saved, imported_at, updated_at
+        FROM papers WHERE is_saved = 1 ORDER BY title, id;
         """) { row in
             try paper(from: row)
         }
@@ -170,7 +179,7 @@ public final class PaperRepository {
         }
         let placeholders = ids.map { _ in "?" }.joined(separator: ", ")
         let fetched = try database.query("""
-        SELECT id, file_path, file_hash, title, authors_json, year, source_url, imported_at, updated_at
+        SELECT id, file_path, file_hash, title, authors_json, year, source_url, is_saved, imported_at, updated_at
         FROM papers WHERE id IN (\(placeholders));
         """, bindings: ids.map(SQLiteValue.text)) { row in
             try paper(from: row)
@@ -181,11 +190,19 @@ public final class PaperRepository {
 
     public func fetchPaper(fileHash: String) throws -> Paper? {
         try database.query("""
-        SELECT id, file_path, file_hash, title, authors_json, year, source_url, imported_at, updated_at
+        SELECT id, file_path, file_hash, title, authors_json, year, source_url, is_saved, imported_at, updated_at
         FROM papers WHERE file_hash = ? LIMIT 1;
         """, bindings: [.text(fileHash)]) { row in
             try paper(from: row)
         }.first
+    }
+
+    public func deleteUnsavedPapers() throws {
+        try database.run("DELETE FROM papers WHERE is_saved = 0;")
+        try database.run("""
+        DELETE FROM sessions
+        WHERE id NOT IN (SELECT DISTINCT session_id FROM session_papers);
+        """)
     }
 
     public func upsertCategory(_ category: Category) throws {
@@ -527,8 +544,9 @@ public final class PaperRepository {
             authors: try decode([String].self, from: try row.text(4)),
             year: row.optionalInt(5),
             sourceURL: row.optionalText(6),
-            importedAt: try date(from: try row.text(7)),
-            updatedAt: try date(from: try row.text(8))
+            isSaved: row.int(7) != 0,
+            importedAt: try date(from: try row.text(8)),
+            updatedAt: try date(from: try row.text(9))
         )
     }
 

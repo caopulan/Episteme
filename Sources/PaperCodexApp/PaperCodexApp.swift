@@ -24,6 +24,8 @@ struct RootView: View {
                 LibraryView()
             case .discover:
                 DiscoverView()
+            case .settings:
+                SettingsView()
             case .reader:
                 ReaderView()
             }

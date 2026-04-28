@@ -5,7 +5,30 @@ import SwiftUI
 enum AppRoute {
     case library
     case discover
+    case settings
     case reader
+}
+
+enum ArxivSaveOrganization: String, CaseIterable, Identifiable {
+    case primaryCategory = "primary-category"
+    case firstTag = "first-tag"
+    case date = "date"
+    case flat = "flat"
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .primaryCategory:
+            "Primary category"
+        case .firstTag:
+            "First tag"
+        case .date:
+            "Feed date"
+        case .flat:
+            "Flat library"
+        }
+    }
 }
 
 struct PDFSelectionInfo: Equatable {
@@ -45,6 +68,7 @@ private let codexModelOverrideDefaultsKey = "PaperCodexCodexModelOverride"
 private let codexReasoningEffortDefaultsKey = "PaperCodexCodexReasoningEffort"
 private let arxivFeedBaseURLDefaultsKey = "PaperCodexArxivFeedBaseURL"
 private let arxivFeedTokenDefaultsKey = "PaperCodexArxivFeedToken"
+private let arxivSaveOrganizationDefaultsKey = "PaperCodexArxivSaveOrganization"
 
 @MainActor
 final class AppModel: ObservableObject {
@@ -74,6 +98,10 @@ final class AppModel: ObservableObject {
     @Published var isScanningWatchedFolders = false
     @Published var arxivFeedBaseURL: String = UserDefaults.standard.string(forKey: arxivFeedBaseURLDefaultsKey) ?? "http://nas.pucao.cn:20003"
     @Published var arxivFeedToken: String = UserDefaults.standard.string(forKey: arxivFeedTokenDefaultsKey) ?? ""
+    @Published var arxivSaveOrganization: ArxivSaveOrganization = {
+        let stored = UserDefaults.standard.string(forKey: arxivSaveOrganizationDefaultsKey)
+        return stored.flatMap(ArxivSaveOrganization.init(rawValue:)) ?? .primaryCategory
+    }()
     @Published var arxivDates: [String] = []
     @Published var selectedArxivDate: String?
     @Published var arxivFeed: ArxivFeedResponse?
@@ -90,6 +118,14 @@ final class AppModel: ObservableObject {
     private var watchedFolderAutoScanTask: Task<Void, Never>?
     private var activeCodexRunHandle: CodexRunHandle?
     private var isCancellingCodexRun = false
+
+    var arxivDisposableCachePath: String {
+        supportRoot.appendingPathComponent("cache", isDirectory: true).path
+    }
+
+    var paperLibraryRootPath: String {
+        supportRoot.appendingPathComponent("papers", isDirectory: true).path
+    }
 
     init() {
         let root = PaperCodexPaths.supportRoot()
@@ -231,6 +267,16 @@ final class AppModel: ObservableObject {
         pdfJumpTarget = nil
     }
 
+    func showSettings() {
+        route = .settings
+        selectedPaper = nil
+        selectedSession = nil
+        sessions = []
+        messages = []
+        currentSelection = nil
+        pdfJumpTarget = nil
+    }
+
     func setArxivFeedConnection(baseURL: String, token: String) {
         let trimmedBaseURL = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedToken = token.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -238,6 +284,11 @@ final class AppModel: ObservableObject {
         arxivFeedToken = trimmedToken
         UserDefaults.standard.set(trimmedBaseURL, forKey: arxivFeedBaseURLDefaultsKey)
         UserDefaults.standard.set(trimmedToken, forKey: arxivFeedTokenDefaultsKey)
+    }
+
+    func setArxivSaveOrganization(_ organization: ArxivSaveOrganization) {
+        arxivSaveOrganization = organization
+        UserDefaults.standard.set(organization.rawValue, forKey: arxivSaveOrganizationDefaultsKey)
     }
 
     func refreshArxivDatesAndFeed() async {
@@ -318,39 +369,84 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func addArxivPaperToLibrary(_ arxivPaper: ArxivFeedPaper) async {
+    func openArxivPaper(_ arxivPaper: ArxivFeedPaper) async {
         if let existing = libraryPaper(for: arxivPaper) {
             openPaper(existing)
             return
         }
         do {
+            let paper = try await importArxivPaper(arxivPaper, isSaved: false)
+            try reloadLibrary()
+            openPaper(paper)
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func addArxivPaperToLibrary(_ arxivPaper: ArxivFeedPaper) async {
+        do {
+            if let existing = libraryPaper(for: arxivPaper) {
+                openPaper(existing)
+                return
+            }
+            _ = try await importArxivPaper(arxivPaper, isSaved: true)
+            try reloadLibrary()
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func saveCachedPaperToLibrary(_ paper: Paper) {
+        do {
             guard let repository else {
                 throw AppModelError.repositoryUnavailable
             }
-            isAddingArxivPaper = true
-            defer {
-                isAddingArxivPaper = false
+            guard !paper.isSaved else {
+                return
             }
-            let client = try makeArxivFeedClient()
-            let pdfData = try await client.fetchPDF(for: arxivPaper)
-            guard pdfData.starts(with: Data("%PDF-".utf8)) else {
-                throw AppModelError.downloadedFileIsNotPDF(arxivPaper.id)
-            }
-            let downloadDir = supportRoot.appendingPathComponent("arxiv-downloads", isDirectory: true)
-            try FileManager.default.createDirectory(at: downloadDir, withIntermediateDirectories: true)
-            let pdfURL = downloadDir.appendingPathComponent("\(arxivPaper.id).pdf")
-            try pdfData.write(to: pdfURL, options: [.atomic])
             let metadata = PaperImportMetadata(
-                title: arxivPaper.displayTitle(language: "en"),
-                authors: arxivPaper.authors,
-                year: arxivPaper.publishedYear,
-                sourceURL: arxivPaper.links.abs
+                title: paper.title,
+                authors: paper.authors,
+                year: paper.year,
+                sourceURL: paper.sourceURL
             )
             let result = try PaperLibraryImporter(repository: repository, supportRoot: supportRoot)
-                .importPDF(from: pdfURL, metadata: metadata)
-            try? FileManager.default.removeItem(at: pdfURL)
+                .importPDF(
+                    from: URL(fileURLWithPath: paper.filePath),
+                    metadata: metadata,
+                    isSaved: true,
+                    storageSubpath: arxivSaveOrganization == .flat ? nil : "arxiv"
+                )
             try reloadLibrary()
-            openPaper(result.paper)
+            selectedLibraryPaper = result.paper
+            selectedPaper = result.paper
+            if let session = selectedSession {
+                let context = try loadSessionPaperContext(session: session, fallbackPaper: result.paper, repository: repository)
+                try workspaceManager.writeWorkspace(
+                    session: session,
+                    papers: context.papers,
+                    pagesByPaperID: context.pagesByPaperID,
+                    spansByPaperID: context.spansByPaperID,
+                    anchorsByPaperID: context.anchorsByPaperID
+                )
+            }
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func clearArxivCaches() {
+        do {
+            guard let repository else {
+                throw AppModelError.repositoryUnavailable
+            }
+            try repository.deleteUnsavedPapers()
+            try removeDirectoryIfExists(supportRoot.appendingPathComponent("cache", isDirectory: true))
+            try removeDirectoryIfExists(supportRoot.appendingPathComponent("arxiv-cache", isDirectory: true))
+            arxivFeed = nil
+            selectedArxivPaper = nil
+            arxivAssetURLs = [:]
+            try reloadLibrary()
         } catch {
             errorMessage = String(describing: error)
         }
@@ -929,6 +1025,63 @@ final class AppModel: ObservableObject {
             }
         }
         arxivAssetURLs = urls
+    }
+
+    private func importArxivPaper(_ arxivPaper: ArxivFeedPaper, isSaved: Bool) async throws -> Paper {
+        guard let repository else {
+            throw AppModelError.repositoryUnavailable
+        }
+        isAddingArxivPaper = true
+        defer {
+            isAddingArxivPaper = false
+        }
+
+        let client = try makeArxivFeedClient()
+        let pdfData = try await client.fetchPDF(for: arxivPaper)
+        guard pdfData.starts(with: Data("%PDF-".utf8)) else {
+            throw AppModelError.downloadedFileIsNotPDF(arxivPaper.id)
+        }
+        let downloadDir = supportRoot.appendingPathComponent("cache/downloads", isDirectory: true)
+        try FileManager.default.createDirectory(at: downloadDir, withIntermediateDirectories: true)
+        let pdfURL = downloadDir.appendingPathComponent("\(arxivPaper.id).pdf")
+        try pdfData.write(to: pdfURL, options: [.atomic])
+        defer {
+            try? FileManager.default.removeItem(at: pdfURL)
+        }
+
+        let metadata = PaperImportMetadata(
+            title: arxivPaper.displayTitle(language: "en"),
+            authors: arxivPaper.authors,
+            year: arxivPaper.publishedYear,
+            sourceURL: arxivPaper.links.abs
+        )
+        let result = try PaperLibraryImporter(repository: repository, supportRoot: supportRoot)
+            .importPDF(
+                from: pdfURL,
+                metadata: metadata,
+                isSaved: isSaved,
+                storageSubpath: isSaved ? arxivStorageSubpath(for: arxivPaper) : nil
+            )
+        return result.paper
+    }
+
+    private func arxivStorageSubpath(for paper: ArxivFeedPaper) -> String? {
+        switch arxivSaveOrganization {
+        case .primaryCategory:
+            return paper.primaryCategory ?? paper.categories.first ?? "arxiv"
+        case .firstTag:
+            return paper.tags.first ?? paper.primaryCategory ?? "arxiv"
+        case .date:
+            return paper.listDate ?? selectedArxivDate ?? "arxiv"
+        case .flat:
+            return nil
+        }
+    }
+
+    private func removeDirectoryIfExists(_ url: URL) throws {
+        if FileManager.default.fileExists(atPath: url.path) {
+            try FileManager.default.removeItem(at: url)
+        }
     }
 
     private func makeArxivFeedClient() throws -> ArxivFeedClient {

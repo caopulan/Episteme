@@ -928,6 +928,35 @@ func runArxivFeedChecks() throws {
     try check(enrichedDuplicate.paper.authors == paper.authors, "duplicate arXiv import should enrich authors")
     try check(enrichedDuplicate.paper.year == 2026, "duplicate arXiv import should enrich year")
     try check(enrichedDuplicate.paper.sourceURL == "https://arxiv.org/abs/2604.18586", "duplicate arXiv import should enrich source URL")
+
+    let cacheRoot = FileManager.default.temporaryDirectory
+        .appendingPathComponent("paper-codex-arxiv-cache-import-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: cacheRoot, withIntermediateDirectories: true)
+    let cachePDFURL = cacheRoot.appendingPathComponent("2604.18586.pdf")
+    try FileManager.default.copyItem(at: importPDFURL, to: cachePDFURL)
+    let cacheRepository = try PaperRepository(databasePath: cacheRoot.appendingPathComponent("store.sqlite").path)
+    try cacheRepository.migrate()
+    let cacheImporter = PaperLibraryImporter(repository: cacheRepository, supportRoot: cacheRoot)
+    let cachedImport = try cacheImporter.importPDF(from: cachePDFURL, metadata: metadata, isSaved: false)
+    try check(!cachedImport.paper.isSaved, "opening an arXiv paper should create an unsaved cached paper")
+    try check(cachedImport.paper.filePath.contains("/cache/papers/"), "unsaved arXiv paper should live under disposable cache")
+    let savedPapersAfterCacheOpen = try cacheRepository.fetchPapers()
+    let cachedPapersByID = try cacheRepository.fetchPapers(ids: [cachedImport.paper.id])
+    try check(savedPapersAfterCacheOpen.isEmpty, "unsaved cached paper should not appear in the library list")
+    try check(cachedPapersByID.first?.id == cachedImport.paper.id, "cached paper should remain addressable for reader sessions")
+    try check(cachedPapersByID.first?.isSaved == false, "cached paper fetched by ID should remain unsaved")
+    let oldCachedPath = cachedImport.paper.filePath
+    let promotedImport = try cacheImporter.importPDF(
+        from: cachePDFURL,
+        metadata: metadata,
+        isSaved: true,
+        storageSubpath: "cs.AI"
+    )
+    try check(!promotedImport.didImport, "saving a cached arXiv paper should reuse the cached import")
+    try check(promotedImport.paper.isSaved, "saving a cached arXiv paper should promote it into the library")
+    try check(promotedImport.paper.filePath.contains("/papers/cs-ai/"), "saved arXiv paper should follow the configured organization path")
+    try check(FileManager.default.fileExists(atPath: promotedImport.paper.filePath), "promoted arXiv PDF should exist at the library path")
+    try check(!FileManager.default.fileExists(atPath: oldCachedPath), "promoted arXiv PDF should be moved out of disposable cache")
 }
 
 func runArxivLiveFeedChecks() async throws {

@@ -103,6 +103,13 @@ struct LibraryView: View {
                 ) {
                     model.showDiscover()
                 }
+                filterButton(
+                    title: "Settings",
+                    systemImage: "gearshape",
+                    isSelected: false
+                ) {
+                    model.showSettings()
+                }
             }
 
             Divider()
