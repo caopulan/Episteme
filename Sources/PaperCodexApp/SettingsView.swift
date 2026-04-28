@@ -325,21 +325,7 @@ struct SettingsView: View {
     }
 
     private func navButton(title: String, systemImage: String, selected: Bool = false, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 8) {
-                Image(systemName: systemImage)
-                    .frame(width: 18)
-                Text(title)
-                Spacer()
-            }
-            .padding(.horizontal, 9)
-            .padding(.vertical, 7)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
-            .background(selected ? Color.accentColor.opacity(0.14) : Color.clear)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-        }
-        .buttonStyle(.plain)
+        SidebarRowButton(title: title, systemImage: systemImage, selected: selected, action: action)
     }
 
     private func syncCodeArxivDrafts() {

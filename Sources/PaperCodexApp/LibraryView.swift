@@ -38,7 +38,7 @@ struct LibraryView: View {
     }
 
     var body: some View {
-        SidebarSplitLayout(minContentWidth: 820) {
+        SidebarSplitLayout(minContentWidth: 720) {
             sidebar
         } content: {
             HSplitView {
@@ -210,7 +210,7 @@ struct LibraryView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
-                    LazyVStack(spacing: 10) {
+                    LazyVStack(spacing: 5) {
                         ForEach(filteredPapers) { paper in
                             PaperRow(
                                 paper: paper,
@@ -369,23 +369,13 @@ struct LibraryView: View {
         depth: Int = 0,
         action: @escaping () -> Void
     ) -> some View {
-        Button(action: action) {
-            HStack(spacing: 8) {
-                Image(systemName: systemImage)
-                    .frame(width: 18)
-                Text(title)
-                    .lineLimit(1)
-                Spacer()
-            }
-            .padding(.leading, CGFloat(depth * 14))
-            .padding(.horizontal, 9)
-            .padding(.vertical, 7)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
-            .background(isSelected ? Color.accentColor.opacity(0.14) : Color.clear)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-        }
-        .buttonStyle(.plain)
+        SidebarRowButton(
+            title: title,
+            systemImage: systemImage,
+            selected: isSelected,
+            depth: depth,
+            action: action
+        )
     }
 
     private func categories(for paper: Paper) -> [PaperCodexCore.Category] {
@@ -590,7 +580,8 @@ private struct PaperRow: View {
             .buttonStyle(.borderless)
             .help("Read")
         }
-        .padding(14)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 18)
         .background(isSelected ? Color.accentColor.opacity(0.12) : Color(nsColor: .controlBackgroundColor))
         .overlay(
             RoundedRectangle(cornerRadius: 8)

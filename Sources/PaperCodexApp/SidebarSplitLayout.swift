@@ -21,31 +21,45 @@ struct SidebarSplitLayout<Sidebar: View, Content: View>: View {
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 0) {
-            sidebar()
-                .frame(width: liveSidebarWidth ?? model.librarySidebarWidth)
-                .frame(maxHeight: .infinity, alignment: .topLeading)
-                .clipped()
-            SplitterHandle()
-                .frame(maxHeight: .infinity)
-                .gesture(
-                    DragGesture()
-                        .onChanged { value in
-                            if dragStartWidth == nil {
-                                dragStartWidth = model.librarySidebarWidth
+        GeometryReader { proxy in
+            let handleWidth: CGFloat = 10
+            let sidebarWidth = clampedSidebarWidth(
+                liveSidebarWidth ?? model.librarySidebarWidth,
+                totalWidth: proxy.size.width,
+                handleWidth: handleWidth
+            )
+
+            HStack(alignment: .top, spacing: 0) {
+                sidebar()
+                    .frame(width: sidebarWidth)
+                    .frame(maxHeight: .infinity, alignment: .topLeading)
+                    .clipped()
+                SplitterHandle()
+                    .frame(width: handleWidth)
+                    .frame(maxHeight: .infinity)
+                    .gesture(
+                        DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                            .onChanged { value in
+                                if dragStartWidth == nil {
+                                    dragStartWidth = sidebarWidth
+                                }
+                                liveSidebarWidth = clampedSidebarWidth(
+                                    (dragStartWidth ?? sidebarWidth) + value.translation.width,
+                                    totalWidth: proxy.size.width,
+                                    handleWidth: handleWidth
+                                )
                             }
-                            liveSidebarWidth = clampedSidebarWidth((dragStartWidth ?? model.librarySidebarWidth) + value.translation.width)
-                        }
-                        .onEnded { _ in
-                            if let liveSidebarWidth {
-                                model.setLibrarySidebarWidth(liveSidebarWidth)
+                            .onEnded { _ in
+                                if let liveSidebarWidth {
+                                    model.setLibrarySidebarWidth(liveSidebarWidth)
+                                }
+                                dragStartWidth = nil
+                                liveSidebarWidth = nil
                             }
-                            dragStartWidth = nil
-                            liveSidebarWidth = nil
-                        }
-                )
-            content()
-                .frame(minWidth: minContentWidth, maxWidth: .infinity, maxHeight: .infinity)
+                    )
+                content()
+                    .frame(minWidth: minContentWidth, maxWidth: .infinity, maxHeight: .infinity)
+            }
         }
         .transaction { transaction in
             transaction.animation = nil
@@ -54,8 +68,9 @@ struct SidebarSplitLayout<Sidebar: View, Content: View>: View {
         .background(Color(nsColor: .windowBackgroundColor))
     }
 
-    private func clampedSidebarWidth(_ width: CGFloat) -> CGFloat {
-        min(max(width, 220), 420)
+    private func clampedSidebarWidth(_ width: CGFloat, totalWidth: CGFloat, handleWidth: CGFloat) -> CGFloat {
+        let maxWidth = max(220, min(420, totalWidth - minContentWidth - handleWidth))
+        return min(max(width, 220), maxWidth)
     }
 }
 
@@ -72,7 +87,6 @@ struct SplitterHandle: View {
                 .frame(width: 3, height: 52)
                 .shadow(color: isHovering ? Color.accentColor.opacity(0.32) : .clear, radius: 6)
         }
-        .frame(width: 10)
         .overlay(
             Rectangle()
                 .fill(Color.clear)

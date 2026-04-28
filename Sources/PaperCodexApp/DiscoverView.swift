@@ -84,7 +84,7 @@ struct DiscoverView: View {
     }
 
     private var mainLayout: some View {
-        SidebarSplitLayout(minContentWidth: 760) {
+        SidebarSplitLayout(minContentWidth: 720) {
             sidebar
         } content: {
             feed
@@ -178,34 +178,36 @@ struct DiscoverView: View {
                 ContentUnavailableView("No Papers", systemImage: "doc.text.magnifyingglass")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                ScrollView {
-                    LazyVGrid(
-                        columns: gridColumns,
-                        alignment: .leading,
-                        spacing: 14
-                    ) {
-                        ForEach(papers) { paper in
-                            ArxivPaperCard(
-                                paper: paper,
-                                imageURL: model.cachedArxivAssetURL(for: paper.assets.small),
-                                inLibrary: model.libraryPaper(for: paper) != nil,
-                                isBusy: model.isDownloadingArxivPaper(paper),
-                                downloadProgress: model.arxivDownloadProgress(for: paper),
-                                onPreview: {
-                                    previewPaper = paper
-                                },
-                                onSave: {
-                                    paperPendingSave = paper
-                                },
-                                onOpen: {
-                                    Task {
-                                        await model.openArxivPaper(paper)
+                GeometryReader { proxy in
+                    ScrollView {
+                        LazyVGrid(
+                            columns: gridColumns(for: proxy.size.width),
+                            alignment: .leading,
+                            spacing: 14
+                        ) {
+                            ForEach(papers) { paper in
+                                ArxivPaperCard(
+                                    paper: paper,
+                                    imageURL: model.cachedArxivAssetURL(for: paper.assets.small),
+                                    inLibrary: model.libraryPaper(for: paper) != nil,
+                                    isBusy: model.isDownloadingArxivPaper(paper),
+                                    downloadProgress: model.arxivDownloadProgress(for: paper),
+                                    onPreview: {
+                                        previewPaper = paper
+                                    },
+                                    onSave: {
+                                        paperPendingSave = paper
+                                    },
+                                    onOpen: {
+                                        Task {
+                                            await model.openArxivPaper(paper)
+                                        }
                                     }
-                                }
-                            )
+                                )
+                            }
                         }
+                        .padding(.vertical, 2)
                     }
-                    .padding(.vertical, 2)
                 }
             }
         }
@@ -213,14 +215,19 @@ struct DiscoverView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
-    private var gridColumns: [GridItem] {
-        [
-            GridItem(
-                .adaptive(minimum: 380, maximum: 560),
-                spacing: 16,
-                alignment: .top
-            )
-        ]
+    private func gridColumns(for width: CGFloat) -> [GridItem] {
+        let count: Int
+        if width >= 1280 {
+            count = 3
+        } else if width >= 700 {
+            count = 2
+        } else {
+            count = 1
+        }
+        return Array(
+            repeating: GridItem(.flexible(minimum: 320), spacing: 16, alignment: .top),
+            count: count
+        )
     }
 
     private var toolbar: some View {
@@ -308,55 +315,11 @@ struct DiscoverView: View {
     }
 
     private func navButton(title: String, systemImage: String, selected: Bool = false, action: @escaping () -> Void) -> some View {
-        SidebarNavButton(title: title, systemImage: systemImage, selected: selected, action: action)
+        SidebarRowButton(title: title, systemImage: systemImage, selected: selected, action: action)
     }
 
     private func filterButton(title: String, detail: String? = nil, selected: Bool, action: @escaping () -> Void) -> some View {
         SidebarFilterButton(title: title, detail: detail, selected: selected, action: action)
-    }
-}
-
-private struct SidebarNavButton: View {
-    @State private var isHovering = false
-
-    var title: String
-    var systemImage: String
-    var selected: Bool
-    var action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 8) {
-                Image(systemName: systemImage)
-                    .frame(width: 18)
-                    .foregroundStyle(selected ? Color.accentColor : Color.primary.opacity(0.78))
-                Text(title)
-                Spacer()
-            }
-            .padding(.horizontal, 9)
-            .padding(.vertical, 7)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
-            .background(rowBackground)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-            .shadow(color: isHovering ? Color.black.opacity(0.08) : .clear, radius: 7, y: 3)
-            .scaleEffect(isHovering ? 1.015 : 1, anchor: .center)
-        }
-        .buttonStyle(.plain)
-        .onHover { hovering in
-            withAnimation(.easeOut(duration: 0.12)) {
-                isHovering = hovering
-            }
-        }
-    }
-
-    private var rowBackground: some View {
-        RoundedRectangle(cornerRadius: 8)
-            .fill(selected ? Color.accentColor.opacity(0.14) : (isHovering ? Color(nsColor: .textBackgroundColor) : Color.clear))
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(isHovering ? Color.accentColor.opacity(0.25) : Color.clear, lineWidth: 1)
-            )
     }
 }
 
@@ -483,7 +446,7 @@ private struct ArxivPaperCard: View {
     var onOpen: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
             Button {
                 onPreview()
             } label: {
@@ -498,14 +461,14 @@ private struct ArxivPaperCard: View {
                 metadataRow
 
                 Text(paper.displayTitle(language: "zh"))
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.system(size: 16, weight: .semibold))
                     .fixedSize(horizontal: false, vertical: true)
                 Text(paper.title.en)
-                    .font(.caption)
+                    .font(.system(size: 13))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 Text(paper.displaySummary(language: "zh"))
-                    .font(.system(size: 12.5))
+                    .font(.system(size: 13.5))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
@@ -532,6 +495,7 @@ private struct ArxivPaperCard: View {
         .contentShape(RoundedRectangle(cornerRadius: 8))
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(nsColor: .textBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(
             RoundedRectangle(cornerRadius: 8)
                 .stroke(isHovering ? Color.accentColor.opacity(0.36) : Color.black.opacity(0.08), lineWidth: isHovering ? 1.3 : 1)
@@ -539,7 +503,6 @@ private struct ArxivPaperCard: View {
         .shadow(color: isHovering ? Color.black.opacity(0.15) : Color.black.opacity(0.035), radius: isHovering ? 14 : 2, y: isHovering ? 7 : 1)
         .scaleEffect(isHovering ? 1.008 : 1)
         .offset(y: isHovering ? -1 : 0)
-        .clipShape(RoundedRectangle(cornerRadius: 8))
         .onHover { hovering in
             withAnimation(.easeOut(duration: 0.14)) {
                 isHovering = hovering
@@ -550,18 +513,18 @@ private struct ArxivPaperCard: View {
     private var metadataRow: some View {
         FlowLayout(spacing: 6) {
             Text(paper.primaryCategory ?? paper.categories.first ?? "arXiv")
-                .font(.caption.weight(.semibold))
+                .font(.system(size: 12, weight: .semibold))
                 .padding(.horizontal, 7)
                 .padding(.vertical, 3)
                 .background(Color.teal.opacity(0.12))
                 .foregroundStyle(.teal)
                 .clipShape(RoundedRectangle(cornerRadius: 6))
             Text(paper.id)
-                .font(.caption)
+                .font(.system(size: 12))
                 .foregroundStyle(.secondary)
             if inLibrary {
                 Label("Saved", systemImage: "checkmark.seal.fill")
-                    .font(.caption)
+                    .font(.system(size: 12))
                     .foregroundStyle(.green)
                     .fixedSize()
             }
@@ -582,7 +545,7 @@ private struct SaveActionButton: View {
     var body: some View {
         Button(action: action) {
             Label("Add", systemImage: "tray.and.arrow.down")
-                .font(.system(size: 12, weight: .semibold))
+                .font(.system(size: 13, weight: .semibold))
                 .padding(.horizontal, 10)
                 .frame(height: 26)
                 .foregroundStyle(isBusy ? Color.secondary.opacity(0.6) : (isHovering ? Color(nsColor: .systemGreen) : Color.primary.opacity(0.86)))
@@ -618,7 +581,7 @@ private struct StableOpenButton: View {
     var body: some View {
         Button(action: action) {
             Label("Open", systemImage: "book")
-                .font(.system(size: 12, weight: .semibold))
+                .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(.white)
                 .padding(.horizontal, 11)
                 .frame(height: 26)
@@ -669,7 +632,7 @@ private struct SimilarityMeter: View {
             }
             .frame(width: 34, height: 5)
             Text("\(Int((clampedValue * 100).rounded()))%")
-                .font(.caption.weight(.semibold))
+                .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(color)
         }
         .padding(.horizontal, 7)
@@ -699,7 +662,7 @@ private struct ArxivPreviewImage: View {
                 .aspectRatio(4.7, contentMode: .fit)
             }
         }
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(Color(nsColor: .textBackgroundColor))
     }
 
     private func imageAspectRatio(_ image: NSImage) -> CGFloat {
@@ -781,6 +744,23 @@ private struct ResourceLinkButton: View {
             labelContent
         }
         .buttonStyle(.plain)
+        .overlay(alignment: .top) {
+            if compact && isHovering {
+                Text(link.title)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(
+                        Capsule()
+                            .fill(Color(nsColor: .textBackgroundColor))
+                            .shadow(color: Color.black.opacity(0.16), radius: 7, y: 3)
+                    )
+                    .offset(y: -28)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .zIndex(isHovering ? 10 : 0)
         .help("Open \(link.title)")
         .onHover { hovering in
             withAnimation(.easeOut(duration: 0.12)) {
@@ -865,7 +845,7 @@ private struct FlowTags: View {
         FlowLayout(spacing: 5) {
             ForEach(tags, id: \.self) { tag in
                 Text(tag)
-                    .font(.caption2)
+                    .font(.system(size: 12))
                     .padding(.horizontal, 7)
                     .padding(.vertical, 3)
                     .background(Color.orange.opacity(0.12))
