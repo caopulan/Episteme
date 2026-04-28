@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct SidebarSplitLayout<Sidebar: View, Content: View>: View {
@@ -59,15 +60,40 @@ struct SidebarSplitLayout<Sidebar: View, Content: View>: View {
 }
 
 struct SplitterHandle: View {
+    @State private var isHovering = false
+
     var body: some View {
-        Rectangle()
-            .fill(Color(nsColor: .separatorColor).opacity(0.55))
-            .frame(width: 5)
-            .overlay(
-                Rectangle()
-                    .fill(Color.accentColor.opacity(0.0))
-                    .frame(width: 18)
-            )
-            .contentShape(Rectangle())
+        ZStack {
+            Rectangle()
+                .fill(Color(nsColor: .separatorColor).opacity(isHovering ? 0.80 : 0.55))
+                .frame(width: 5)
+            Capsule()
+                .fill(isHovering ? Color.accentColor.opacity(0.72) : Color.clear)
+                .frame(width: 3, height: 52)
+                .shadow(color: isHovering ? Color.accentColor.opacity(0.32) : .clear, radius: 6)
+        }
+        .frame(width: 10)
+        .overlay(
+            Rectangle()
+                .fill(Color.clear)
+                .frame(width: 22)
+        )
+        .contentShape(Rectangle())
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.12)) {
+                isHovering = hovering
+            }
+            if hovering {
+                NSCursor.resizeLeftRight.set()
+            } else {
+                NSCursor.arrow.set()
+            }
+        }
+        .onDisappear {
+            if isHovering {
+                NSCursor.arrow.set()
+            }
+        }
+        .help("Resize sidebar")
     }
 }

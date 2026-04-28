@@ -260,38 +260,46 @@ struct DiscoverView: View {
                     .labelsHidden()
                     .frame(width: 132)
                     .controlSize(.small)
-                    Button {
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(Color(nsColor: .controlBackgroundColor))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(Color.black.opacity(0.08), lineWidth: 1)
+                            )
+                    )
+
+                    ArxivSourceBadge()
+
+                    ToolbarActionButton(title: "Refresh", systemImage: "arrow.clockwise", tint: .blue) {
                         Task {
                             await model.refreshArxivDatesAndFeed()
                         }
-                    } label: {
-                        Image(systemName: "arrow.clockwise")
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .help("Refresh")
 
-                    Button {
+                    ToolbarActionButton(
+                        title: model.isPreloadingArxivAssets ? "Loading" : "Thumbs",
+                        systemImage: "photo.on.rectangle.angled",
+                        tint: .teal,
+                        disabled: model.arxivFeed == nil || model.isPreloadingArxivAssets
+                    ) {
                         Task {
                             await model.preloadArxivAssets(includeLarge: false)
                         }
-                    } label: {
-                        Label(model.isPreloadingArxivAssets ? "Loading" : "Thumbs", systemImage: "photo.on.rectangle")
                     }
-                    .buttonStyle(.bordered)
-                    .disabled(model.arxivFeed == nil || model.isPreloadingArxivAssets)
-                    .help("Preload thumbnails")
 
-                    Button {
+                    ToolbarActionButton(
+                        title: "Full Images",
+                        systemImage: "photo.stack",
+                        tint: .indigo,
+                        disabled: model.arxivFeed == nil || model.isPreloadingArxivAssets
+                    ) {
                         Task {
                             await model.preloadArxivAssets(includeLarge: true)
                         }
-                    } label: {
-                        Label("Full", systemImage: "photo.stack")
                     }
-                    .buttonStyle(.bordered)
-                    .disabled(model.arxivFeed == nil || model.isPreloadingArxivAssets)
-                    .help("Preload full images")
 
                     Spacer()
                 }
@@ -300,10 +308,28 @@ struct DiscoverView: View {
     }
 
     private func navButton(title: String, systemImage: String, selected: Bool = false, action: @escaping () -> Void) -> some View {
+        SidebarNavButton(title: title, systemImage: systemImage, selected: selected, action: action)
+    }
+
+    private func filterButton(title: String, detail: String? = nil, selected: Bool, action: @escaping () -> Void) -> some View {
+        SidebarFilterButton(title: title, detail: detail, selected: selected, action: action)
+    }
+}
+
+private struct SidebarNavButton: View {
+    @State private var isHovering = false
+
+    var title: String
+    var systemImage: String
+    var selected: Bool
+    var action: () -> Void
+
+    var body: some View {
         Button(action: action) {
             HStack(spacing: 8) {
                 Image(systemName: systemImage)
                     .frame(width: 18)
+                    .foregroundStyle(selected ? Color.accentColor : Color.primary.opacity(0.78))
                 Text(title)
                 Spacer()
             }
@@ -311,17 +337,43 @@ struct DiscoverView: View {
             .padding(.vertical, 7)
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
-            .background(selected ? Color.accentColor.opacity(0.14) : Color.clear)
+            .background(rowBackground)
             .clipShape(RoundedRectangle(cornerRadius: 8))
+            .shadow(color: isHovering ? Color.black.opacity(0.08) : .clear, radius: 7, y: 3)
+            .scaleEffect(isHovering ? 1.015 : 1, anchor: .center)
         }
         .buttonStyle(.plain)
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.12)) {
+                isHovering = hovering
+            }
+        }
     }
 
-    private func filterButton(title: String, detail: String? = nil, selected: Bool, action: @escaping () -> Void) -> some View {
+    private var rowBackground: some View {
+        RoundedRectangle(cornerRadius: 8)
+            .fill(selected ? Color.accentColor.opacity(0.14) : (isHovering ? Color(nsColor: .textBackgroundColor) : Color.clear))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(isHovering ? Color.accentColor.opacity(0.25) : Color.clear, lineWidth: 1)
+            )
+    }
+}
+
+private struct SidebarFilterButton: View {
+    @State private var isHovering = false
+
+    var title: String
+    var detail: String?
+    var selected: Bool
+    var action: () -> Void
+
+    var body: some View {
         Button(action: action) {
             HStack(spacing: 8) {
                 Image(systemName: selected ? "checkmark.circle.fill" : "circle")
                     .frame(width: 18)
+                    .foregroundStyle(selected ? Color.accentColor : Color.secondary)
                 Text(title)
                     .lineLimit(1)
                 Spacer()
@@ -335,14 +387,92 @@ struct DiscoverView: View {
             .padding(.vertical, 6)
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
-            .background(selected ? Color.accentColor.opacity(0.12) : Color.clear)
+            .background(rowBackground)
             .clipShape(RoundedRectangle(cornerRadius: 8))
+            .shadow(color: isHovering ? Color.black.opacity(0.06) : .clear, radius: 5, y: 2)
         }
         .buttonStyle(.plain)
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.12)) {
+                isHovering = hovering
+            }
+        }
+    }
+
+    private var rowBackground: some View {
+        RoundedRectangle(cornerRadius: 8)
+            .fill(selected ? Color.accentColor.opacity(0.12) : (isHovering ? Color(nsColor: .textBackgroundColor) : Color.clear))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(isHovering ? Color.accentColor.opacity(0.20) : Color.clear, lineWidth: 1)
+            )
+    }
+}
+
+private struct ArxivSourceBadge: View {
+    var body: some View {
+        HStack(spacing: 5) {
+            Text("ar")
+                .font(.system(size: 11, weight: .bold, design: .serif))
+            Text("Xiv")
+                .font(.system(size: 12, weight: .semibold))
+        }
+        .foregroundStyle(Color(nsColor: .systemRed))
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color(nsColor: .systemRed).opacity(0.09))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color(nsColor: .systemRed).opacity(0.24), lineWidth: 1)
+                )
+        )
+        .help("Daily arXiv source")
+    }
+}
+
+private struct ToolbarActionButton: View {
+    @State private var isHovering = false
+
+    var title: String
+    var systemImage: String
+    var tint: Color
+    var disabled = false
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Label(title, systemImage: systemImage)
+                .font(.system(size: 12.5, weight: .semibold))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .foregroundStyle(disabled ? Color.secondary.opacity(0.55) : (isHovering ? tint : Color.primary.opacity(0.82)))
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(disabled ? Color(nsColor: .controlBackgroundColor).opacity(0.55) : (isHovering ? tint.opacity(0.12) : Color(nsColor: .controlBackgroundColor)))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(disabled ? Color.black.opacity(0.06) : (isHovering ? tint.opacity(0.45) : Color.black.opacity(0.10)), lineWidth: 1)
+                        )
+                )
+                .shadow(color: isHovering && !disabled ? tint.opacity(0.18) : .clear, radius: 7, y: 3)
+                .scaleEffect(isHovering && !disabled ? 1.035 : 1)
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+        .help(title)
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.12)) {
+                isHovering = hovering
+            }
+        }
     }
 }
 
 private struct ArxivPaperCard: View {
+    @State private var isHovering = false
+
     var paper: ArxivFeedPaper
     var imageURL: URL?
     var inLibrary: Bool
@@ -381,8 +511,10 @@ private struct ArxivPaperCard: View {
 
                 FlowTags(tags: Array(paper.tags.prefix(5)))
 
-                HStack(spacing: 8) {
+                HStack(alignment: .bottom, spacing: 8) {
                     ResourceLinkButtons(links: paper.externalLinks, compact: true)
+                        .layoutPriority(0)
+                    Spacer(minLength: 10)
                     if isBusy {
                         ProgressView(value: downloadProgress)
                             .frame(width: 78)
@@ -391,7 +523,6 @@ private struct ArxivPaperCard: View {
                         SaveActionButton(isBusy: isBusy, action: onSave)
                     }
                     StableOpenButton(isBusy: isBusy, action: onOpen)
-                    Spacer(minLength: 0)
                 }
             }
             .padding(.horizontal, 12)
@@ -403,9 +534,17 @@ private struct ArxivPaperCard: View {
         .background(Color(nsColor: .textBackgroundColor))
         .overlay(
             RoundedRectangle(cornerRadius: 8)
-                .stroke(Color.black.opacity(0.08), lineWidth: 1)
+                .stroke(isHovering ? Color.accentColor.opacity(0.36) : Color.black.opacity(0.08), lineWidth: isHovering ? 1.3 : 1)
         )
+        .shadow(color: isHovering ? Color.black.opacity(0.15) : Color.black.opacity(0.035), radius: isHovering ? 14 : 2, y: isHovering ? 7 : 1)
+        .scaleEffect(isHovering ? 1.008 : 1)
+        .offset(y: isHovering ? -1 : 0)
         .clipShape(RoundedRectangle(cornerRadius: 8))
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.14)) {
+                isHovering = hovering
+            }
+        }
     }
 
     private var metadataRow: some View {
@@ -435,35 +574,57 @@ private struct ArxivPaperCard: View {
 }
 
 private struct SaveActionButton: View {
+    @State private var isHovering = false
+
     var isBusy: Bool
     var action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            Label("Add", systemImage: "plus")
+            Label("Add", systemImage: "tray.and.arrow.down")
                 .font(.system(size: 12, weight: .semibold))
-                .frame(width: 46, height: 22)
+                .padding(.horizontal, 10)
+                .frame(height: 26)
+                .foregroundStyle(isBusy ? Color.secondary.opacity(0.6) : (isHovering ? Color(nsColor: .systemGreen) : Color.primary.opacity(0.86)))
+                .background(
+                    RoundedRectangle(cornerRadius: 7)
+                        .fill(isHovering && !isBusy ? Color(nsColor: .systemGreen).opacity(0.13) : Color(nsColor: .controlBackgroundColor))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 7)
+                                .stroke(isHovering && !isBusy ? Color(nsColor: .systemGreen).opacity(0.44) : Color.black.opacity(0.12), lineWidth: 1)
+                        )
+                )
+                .shadow(color: isHovering && !isBusy ? Color(nsColor: .systemGreen).opacity(0.18) : .clear, radius: 7, y: 3)
         }
-        .buttonStyle(.bordered)
-        .controlSize(.small)
+        .buttonStyle(.plain)
         .disabled(isBusy)
         .help("Add to Library")
+        .fixedSize()
         .layoutPriority(1)
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.12)) {
+                isHovering = hovering
+            }
+        }
     }
 }
 
 private struct StableOpenButton: View {
+    @State private var isHovering = false
+
     var isBusy: Bool
     var action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            Text("Open")
+            Label("Open", systemImage: "book")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.white)
-                .frame(width: 48, height: 24)
-                .background(isBusy ? Color.gray.opacity(0.55) : Color(nsColor: .systemBlue))
-                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .padding(.horizontal, 11)
+                .frame(height: 26)
+                .background(isBusy ? Color.gray.opacity(0.55) : (isHovering ? Color(nsColor: .systemBlue).opacity(0.92) : Color(nsColor: .systemBlue)))
+                .clipShape(RoundedRectangle(cornerRadius: 7))
+                .shadow(color: isHovering && !isBusy ? Color(nsColor: .systemBlue).opacity(0.26) : .clear, radius: 8, y: 3)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -472,6 +633,11 @@ private struct StableOpenButton: View {
         .help("Open in reader")
         .fixedSize()
         .layoutPriority(2)
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.12)) {
+                isHovering = hovering
+            }
+        }
     }
 }
 
