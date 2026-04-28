@@ -464,6 +464,23 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func ensureArxivAssetCached(_ asset: ArxivFeedAsset?) async {
+        do {
+            guard let asset else {
+                return
+            }
+            if let url = try arxivCache.cachedAssetURL(path: asset.path) {
+                arxivAssetURLs[asset.path] = url
+                return
+            }
+            let client = try makeArxivFeedClient()
+            let data = try await client.fetchAsset(asset)
+            arxivAssetURLs[asset.path] = try arxivCache.saveAsset(data, path: asset.path)
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
     func cachedArxivAssetURL(for asset: ArxivFeedAsset?) -> URL? {
         guard let asset else {
             return nil

@@ -7,6 +7,7 @@ struct DiscoverView: View {
     @State private var searchText = ""
     @State private var selectedCategory: String?
     @State private var paperPendingSave: ArxivFeedPaper?
+    @State private var previewPaper: ArxivFeedPaper?
 
     private var papers: [ArxivFeedPaper] {
         var result = model.arxivFeed?.papers ?? []
@@ -66,6 +67,10 @@ struct DiscoverView: View {
                 }
             )
         }
+        .sheet(item: $previewPaper) { paper in
+            ArxivLargePreviewSheet(paper: paper)
+                .environmentObject(model)
+        }
     }
 
     private var sidebar: some View {
@@ -124,6 +129,9 @@ struct DiscoverView: View {
                                 inLibrary: model.libraryPaper(for: paper) != nil,
                                 isBusy: model.isDownloadingArxivPaper(paper),
                                 downloadProgress: model.arxivDownloadProgress(for: paper),
+                                onPreview: {
+                                    previewPaper = paper
+                                },
                                 onSave: {
                                     paperPendingSave = paper
                                 },
@@ -256,51 +264,21 @@ private struct ArxivPaperCard: View {
     var inLibrary: Bool
     var isBusy: Bool
     var downloadProgress: Double?
+    var onPreview: () -> Void
     var onSave: () -> Void
     var onOpen: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 12) {
+            HStack(alignment: .top, spacing: 16) {
                 ArxivPreviewImage(url: imageURL)
-                    .frame(width: 164, height: 112)
+                    .frame(width: 236, height: 158)
 
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 6) {
-                        Text(paper.primaryCategory ?? paper.categories.first ?? "arXiv")
-                            .font(.caption.weight(.semibold))
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 3)
-                            .background(Color.teal.opacity(0.12))
-                            .foregroundStyle(.teal)
-                            .clipShape(RoundedRectangle(cornerRadius: 6))
-                        Text(paper.id)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        if inLibrary {
-                            Label("Saved", systemImage: "checkmark.seal.fill")
-                                .font(.caption)
-                                .foregroundStyle(.green)
-                        }
-                        if let groupLabel {
-                            Text(groupLabel)
-                                .font(.caption.weight(.semibold))
-                                .padding(.horizontal, 7)
-                                .padding(.vertical, 3)
-                                .background(groupColor.opacity(0.12))
-                                .foregroundStyle(groupColor)
-                                .clipShape(RoundedRectangle(cornerRadius: 6))
-                        }
-                        if let similarity = paper.similarity {
-                            Text("\(Int((similarity * 100).rounded()))%")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer(minLength: 0)
-                    }
+                VStack(alignment: .leading, spacing: 10) {
+                    metadataRow
 
                     Text(paper.displayTitle(language: "zh"))
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(.system(size: 16, weight: .semibold))
                         .lineLimit(2)
                     Text(paper.title.en)
                         .font(.caption)
@@ -310,12 +288,26 @@ private struct ArxivPaperCard: View {
                         .font(.system(size: 13))
                         .foregroundStyle(.secondary)
                         .lineLimit(3)
+
+                    Spacer(minLength: 0)
+
+                    HStack(alignment: .center, spacing: 8) {
+                        FlowTags(tags: Array(paper.tags.prefix(5)))
+                        Spacer(minLength: 8)
+                        ResourceLinkButtons(links: paper.externalLinks, compact: true)
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             HStack(spacing: 8) {
-                FlowTags(tags: Array(paper.tags.prefix(5)))
+                Button {
+                    onPreview()
+                } label: {
+                    Label("Preview", systemImage: "magnifyingglass")
+                }
+                .buttonStyle(.bordered)
+                .disabled(paper.assets.large == nil && paper.assets.small == nil)
                 Spacer(minLength: 8)
                 if isBusy {
                     VStack(alignment: .trailing, spacing: 4) {
@@ -344,13 +336,48 @@ private struct ArxivPaperCard: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .frame(minHeight: 168, alignment: .top)
+        .frame(minHeight: 222, alignment: .top)
         .background(Color(nsColor: .textBackgroundColor))
         .overlay(
             RoundedRectangle(cornerRadius: 8)
                 .stroke(Color.black.opacity(0.08), lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private var metadataRow: some View {
+        HStack(spacing: 6) {
+            Text(paper.primaryCategory ?? paper.categories.first ?? "arXiv")
+                .font(.caption.weight(.semibold))
+                .padding(.horizontal, 7)
+                .padding(.vertical, 3)
+                .background(Color.teal.opacity(0.12))
+                .foregroundStyle(.teal)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+            Text(paper.id)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if inLibrary {
+                Label("Saved", systemImage: "checkmark.seal.fill")
+                    .font(.caption)
+                    .foregroundStyle(.green)
+            }
+            if let groupLabel {
+                Text(groupLabel)
+                    .font(.caption.weight(.semibold))
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(groupColor.opacity(0.12))
+                    .foregroundStyle(groupColor)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
+            if let similarity = paper.similarity {
+                Text("\(Int((similarity * 100).rounded()))%")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+        }
     }
 
     private var groupLabel: String? {
@@ -392,6 +419,141 @@ private struct ArxivPreviewImage: View {
         .background(Color(nsColor: .windowBackgroundColor))
         .clipShape(RoundedRectangle(cornerRadius: 7))
     }
+}
+
+private struct ArxivLargePreviewSheet: View {
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+    var paper: ArxivFeedPaper
+
+    private var imageURL: URL? {
+        model.cachedArxivAssetURL(for: paper.assets.large) ?? model.cachedArxivAssetURL(for: paper.assets.small)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(paper.displayTitle(language: "zh"))
+                        .font(.title3.weight(.semibold))
+                        .lineLimit(2)
+                    Text("\(paper.id) · \(paper.authors.prefix(4).joined(separator: ", "))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer()
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark")
+                        .frame(width: 18, height: 18)
+                }
+                .buttonStyle(.bordered)
+                .help("Close")
+            }
+
+            ZStack {
+                if let imageURL, let image = NSImage(contentsOf: imageURL) {
+                    Image(nsImage: image)
+                        .resizable()
+                        .scaledToFit()
+                        .padding(12)
+                } else {
+                    ProgressView("Loading preview")
+                }
+            }
+            .frame(minWidth: 760, idealWidth: 900, maxWidth: .infinity, minHeight: 460, idealHeight: 560)
+            .background(Color(nsColor: .textBackgroundColor))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color.black.opacity(0.08), lineWidth: 1)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+
+            HStack(spacing: 8) {
+                ResourceLinkButtons(links: paper.externalLinks, compact: false)
+                Spacer()
+                Button {
+                    dismiss()
+                } label: {
+                    Label("Done", systemImage: "checkmark")
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(20)
+        .task(id: paper.id) {
+            await model.ensureArxivAssetCached(paper.assets.large ?? paper.assets.small)
+        }
+    }
+}
+
+private struct ResourceLinkButtons: View {
+    var links: [PaperResourceLink]
+    var compact: Bool
+
+    var body: some View {
+        if !links.isEmpty {
+            HStack(spacing: compact ? 5 : 8) {
+                ForEach(links) { link in
+                    Button {
+                        openExternalURL(link.urlString)
+                    } label: {
+                        if compact {
+                            Label(link.title, systemImage: link.systemImage)
+                                .labelStyle(.iconOnly)
+                        } else {
+                            Label(link.title, systemImage: link.systemImage)
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(compact ? .small : .regular)
+                    .help(link.title)
+                }
+            }
+        }
+    }
+}
+
+private struct PaperResourceLink: Identifiable {
+    var id: String
+    var title: String
+    var systemImage: String
+    var urlString: String
+}
+
+private extension ArxivFeedPaper {
+    var externalLinks: [PaperResourceLink] {
+        var result: [PaperResourceLink] = []
+        var seen: Set<String> = []
+
+        func append(id: String, title: String, systemImage: String, urlString: String?) {
+            guard let urlString, !urlString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                return
+            }
+            let key = urlString.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard !seen.contains(key) else {
+                return
+            }
+            seen.insert(key)
+            result.append(PaperResourceLink(id: id, title: title, systemImage: systemImage, urlString: urlString))
+        }
+
+        append(id: "github", title: "GitHub", systemImage: "chevron.left.forwardslash.chevron.right", urlString: links.github ?? links.code)
+        append(id: "project", title: "Project", systemImage: "globe", urlString: links.project)
+        append(id: "hf", title: "HF", systemImage: "shippingbox", urlString: links.huggingFace)
+        append(id: "arxiv", title: "arXiv", systemImage: "doc.text", urlString: links.abs)
+        append(id: "pdf", title: "PDF", systemImage: "doc.richtext", urlString: links.pdf)
+        return result
+    }
+}
+
+private func openExternalURL(_ urlString: String) {
+    guard let url = URL(string: urlString) else {
+        return
+    }
+    NSWorkspace.shared.open(url)
 }
 
 private struct FlowTags: View {

@@ -211,10 +211,34 @@ public struct ArxivLocalizedText: Codable, Equatable, Sendable {
 public struct ArxivFeedLinks: Codable, Equatable, Sendable {
     public var abs: String?
     public var pdf: String?
+    public var github: String?
+    public var code: String?
+    public var project: String?
+    public var huggingFace: String?
 
-    public init(abs: String?, pdf: String?) {
+    public init(
+        abs: String?,
+        pdf: String?,
+        github: String? = nil,
+        code: String? = nil,
+        project: String? = nil,
+        huggingFace: String? = nil
+    ) {
         self.abs = abs
         self.pdf = pdf
+        self.github = github
+        self.code = code
+        self.project = project
+        self.huggingFace = huggingFace
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case abs
+        case pdf
+        case github
+        case code
+        case project
+        case huggingFace = "hugging_face"
     }
 }
 

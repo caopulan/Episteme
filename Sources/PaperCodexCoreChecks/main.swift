@@ -881,7 +881,11 @@ func runArxivFeedChecks() throws {
           "is_favorite": true,
           "links": {
             "abs": "https://arxiv.org/abs/2604.18586",
-            "pdf": "https://arxiv.org/pdf/2604.18586.pdf"
+            "pdf": "https://arxiv.org/pdf/2604.18586.pdf",
+            "github": "https://github.com/example/paper-code",
+            "code": "https://github.com/example/paper-code",
+            "project": "https://example.org/paper",
+            "hugging_face": "https://huggingface.co/example/paper"
           },
           "assets": {
             "small": {"path": "images/2026-04-22/2604.18586_small.png", "url": "/api/v1/assets/2026-04-22/2604.18586_small.png"},
@@ -905,6 +909,9 @@ func runArxivFeedChecks() throws {
     try check(paper.displayTitle(language: "zh") == "谁塑造了巴西的疫苗辩论？", "arXiv paper should prefer Chinese title in zh mode")
     try check(paper.displaySummary(language: "en") == "Semi-supervised stance detection over YouTube comments.", "arXiv paper should prefer English summary in en mode")
     try check(paper.assets.small?.path == "images/2026-04-22/2604.18586_small.png", "arXiv paper should decode small asset path")
+    try check(paper.links.github == "https://github.com/example/paper-code", "CodeArXiv paper should decode GitHub link")
+    try check(paper.links.project == "https://example.org/paper", "CodeArXiv paper should decode project link")
+    try check(paper.links.huggingFace == "https://huggingface.co/example/paper", "CodeArXiv paper should decode Hugging Face link")
     try check(paper.similarity == 0.91, "CodeArXiv paper should decode similarity score")
     try check(paper.filterGroup == "white", "CodeArXiv paper should decode filter group")
     try check(paper.isFavorite == true, "CodeArXiv paper should decode favorite membership")
