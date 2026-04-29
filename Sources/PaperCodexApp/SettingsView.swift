@@ -9,6 +9,7 @@ struct SettingsView: View {
     @State private var draftSimilaritySources = ""
     @State private var draftAutoEnrichOnOpen = false
     @State private var draftAutoEnrichOnSave = false
+    @State private var draftCodexSystemPrompt = PromptBuilder.defaultSystemPrompt
     @State private var draftDiscoverCodexModel = ""
     @State private var draftDiscoverCodexConcurrency = 10
     @State private var draftEmbeddingEnabled = false
@@ -28,6 +29,7 @@ struct SettingsView: View {
                     arxivFeedSettings
                     localRankingSettings
                     codexEnrichmentSettings
+                    codexSystemPromptSettings
                     discoverCodexProcessingSettings
                     embeddingProviderSettings
                     quickPromptSettings
@@ -47,6 +49,9 @@ struct SettingsView: View {
         }
         .onChange(of: model.localDiscoverPreferences) { _, _ in
             syncLocalDrafts()
+        }
+        .onChange(of: model.codexSystemPrompt) { _, newValue in
+            draftCodexSystemPrompt = newValue
         }
     }
 
@@ -215,6 +220,58 @@ struct SettingsView: View {
         }
     }
 
+    private var codexSystemPromptSettings: some View {
+        settingsSection(title: "Codex System Prompt", systemImage: "text.quote") {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text("Template")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text("Workspace placeholder: \(PromptBuilder.workspacePathPlaceholder)")
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                }
+
+                TextEditor(text: $draftCodexSystemPrompt)
+                    .font(.system(size: 13, design: .monospaced))
+                    .frame(height: 240)
+                    .scrollContentBackground(.hidden)
+                    .background(Color(nsColor: .controlBackgroundColor))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Color.black.opacity(0.08), lineWidth: 1)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+
+                HStack {
+                    Button {
+                        model.setCodexSystemPrompt(draftCodexSystemPrompt)
+                    } label: {
+                        Label("Save", systemImage: "checkmark")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .help("Save System Prompt")
+
+                    Button {
+                        model.resetCodexSystemPrompt()
+                        draftCodexSystemPrompt = model.codexSystemPrompt
+                    } label: {
+                        Label("Default", systemImage: "arrow.counterclockwise")
+                    }
+                    .buttonStyle(.bordered)
+                    .help("Restore Default System Prompt")
+
+                    Spacer()
+
+                    Text(draftCodexSystemPrompt == model.codexSystemPrompt ? "Saved" : "Unsaved")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
     private var embeddingProviderSettings: some View {
         settingsSection(title: "Embedding Provider", systemImage: "point.3.connected.trianglepath.dotted") {
             Toggle("Enable embedding similarity", isOn: $draftEmbeddingEnabled)
@@ -370,6 +427,7 @@ struct SettingsView: View {
         draftSimilaritySources = preferences.similaritySourceTagIDs.joined(separator: ", ")
         draftAutoEnrichOnOpen = preferences.enrichment.autoEnrichOnOpen
         draftAutoEnrichOnSave = preferences.enrichment.autoEnrichOnSave
+        draftCodexSystemPrompt = model.codexSystemPrompt
         draftDiscoverCodexModel = model.discoverCodexModelOverride
         draftDiscoverCodexConcurrency = model.discoverCodexConcurrency
         draftEmbeddingEnabled = preferences.embedding.enabled

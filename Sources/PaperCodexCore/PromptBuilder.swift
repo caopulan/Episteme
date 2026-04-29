@@ -1,47 +1,59 @@
 import Foundation
 
+public enum PromptDefaults {
+    public static let workspacePathPlaceholder = "{{workspace_path}}"
+
+    public static let codexSystemPrompt = """
+    You are Codex working inside a local paper-reading workspace.
+
+    workspace: {{workspace_path}}
+
+    Rules:
+    - Explain and reason normally.
+    - The original PDFs and full extracted text/index files are available inside the workspace.
+    - Decide what to inspect from the workspace files before answering.
+    - Ground claims in the original PDF, full text, anchors, spans, or workspace files.
+    - Cite source positions exactly as [[cite:paper:{paper_id}:p{page}:b{block_index}]] or [[cite:paper:{paper_id}:p{page}:a{anchor_suffix}]].
+    - Use citations sparingly: normally use one citation marker for the answer, and use at most three citation markers unless the user explicitly asks for an evidence audit.
+    - If evidence is insufficient, say what is missing.
+    - Do not invent paper positions.
+    """
+}
+
 public struct PromptRequest: Equatable, Sendable {
     public var userMessage: String
     public var workspacePath: String
     public var papers: [Paper]
     public var selectedAnchors: [Anchor]
     public var relevantSpans: [Span]
+    public var systemPromptTemplate: String
 
     public init(
         userMessage: String,
         workspacePath: String,
         papers: [Paper],
         selectedAnchors: [Anchor],
-        relevantSpans: [Span]
+        relevantSpans: [Span],
+        systemPromptTemplate: String = PromptDefaults.codexSystemPrompt
     ) {
         self.userMessage = userMessage
         self.workspacePath = workspacePath
         self.papers = papers
         self.selectedAnchors = selectedAnchors
         self.relevantSpans = relevantSpans
+        self.systemPromptTemplate = systemPromptTemplate
     }
 }
 
 public struct PromptBuilder: Sendable {
+    public static let defaultSystemPrompt = PromptDefaults.codexSystemPrompt
+    public static let workspacePathPlaceholder = PromptDefaults.workspacePathPlaceholder
+
     public init() {}
 
     public func buildPrompt(request: PromptRequest) -> String {
         var sections: [String] = []
-        sections.append("""
-        You are Codex working inside a local paper-reading workspace.
-
-        workspace: \(request.workspacePath)
-
-        Rules:
-        - Explain and reason normally.
-        - The original PDFs and full extracted text/index files are available inside the workspace.
-        - Decide what to inspect from the workspace files before answering.
-        - Ground claims in the original PDF, full text, anchors, spans, or workspace files.
-        - Cite source positions exactly as [[cite:paper:{paper_id}:p{page}:b{block_index}]] or [[cite:paper:{paper_id}:p{page}:a{anchor_suffix}]].
-        - Use citations sparingly: normally use one citation marker for the answer, and use at most three citation markers unless the user explicitly asks for an evidence audit.
-        - If evidence is insufficient, say what is missing.
-        - Do not invent paper positions.
-        """)
+        sections.append(Self.renderSystemPrompt(request.systemPromptTemplate, workspacePath: request.workspacePath))
 
         sections.append("""
         [user message]
@@ -103,5 +115,12 @@ public struct PromptBuilder: Sendable {
         }
 
         return sections.joined(separator: "\n\n")
+    }
+
+    public static func renderSystemPrompt(_ template: String, workspacePath: String) -> String {
+        let effectiveTemplate = template.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? defaultSystemPrompt : template
+        return effectiveTemplate
+            .replacingOccurrences(of: workspacePathPlaceholder, with: workspacePath)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

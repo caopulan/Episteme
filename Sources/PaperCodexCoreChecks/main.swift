@@ -320,6 +320,8 @@ func runUILayoutSourceChecks() throws {
 
     let appModelURL = root.appendingPathComponent("Sources/PaperCodexApp/AppModel.swift")
     let appModelSource = try String(contentsOf: appModelURL)
+    let settingsViewURL = root.appendingPathComponent("Sources/PaperCodexApp/SettingsView.swift")
+    let settingsViewSource = try String(contentsOf: settingsViewURL)
     try check(
         appModelSource.contains("assignPapers(_ paperIDs: [String], toCategory categoryID: String)"),
         "AppModel should provide a batch paper-to-category assignment path for drag and drop"
@@ -351,6 +353,26 @@ func runUILayoutSourceChecks() throws {
     try check(
         librarySource.contains("isConfirmingBulkDelete"),
         "library should confirm destructive bulk deletes"
+    )
+    try check(
+        appModelSource.contains("codexSystemPromptDefaultsKey"),
+        "AppModel should persist the configurable Codex system prompt"
+    )
+    try check(
+        appModelSource.contains("systemPromptTemplate: codexSystemPrompt"),
+        "AppModel should pass the configured Codex system prompt into prompt building"
+    )
+    try check(
+        settingsViewSource.contains("codexSystemPromptSettings"),
+        "settings should include a dedicated Codex system prompt section"
+    )
+    try check(
+        settingsViewSource.contains("TextEditor(text: $draftCodexSystemPrompt)"),
+        "settings should expose the Codex system prompt in an editable text area"
+    )
+    try check(
+        settingsViewSource.contains("model.resetCodexSystemPrompt()"),
+        "settings should let users restore the default Codex system prompt"
     )
 
     let chatViewURL = root.appendingPathComponent("Sources/PaperCodexApp/ChatView.swift")
@@ -1147,6 +1169,21 @@ func runPromptChecks() throws {
     try check(prompt.contains("at most three citation markers"), "prompt should hard-limit normal citation count")
     try check(!prompt.contains("[relevant span]"), "prompt should not inline a limited curated span list")
     try check(!prompt.contains("This curated span should stay in workspace files"), "prompt should make Codex inspect workspace files instead of reading a narrowed prompt excerpt")
+
+    try check(PromptBuilder.defaultSystemPrompt.contains("{{workspace_path}}"), "default Codex system prompt should be editable as a workspace-aware template")
+    let customPrompt = PromptBuilder().buildPrompt(
+        request: PromptRequest(
+            userMessage: "Explain Figure 2.",
+            workspacePath: "/tmp/custom-session",
+            papers: [paper],
+            selectedAnchors: [],
+            relevantSpans: [],
+            systemPromptTemplate: "CUSTOM CODEX SYSTEM\nworkspace: {{workspace_path}}\nAnswer in Chinese."
+        )
+    )
+    try check(customPrompt.hasPrefix("CUSTOM CODEX SYSTEM"), "custom Codex system prompt should replace the built-in default")
+    try check(customPrompt.contains("workspace: /tmp/custom-session"), "custom Codex system prompt should render the workspace placeholder")
+    try check(!customPrompt.contains("Use citations sparingly"), "custom Codex system prompt should not silently append the default instructions")
 }
 
 func runWorkspaceChecks() throws {

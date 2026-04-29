@@ -108,6 +108,7 @@ private struct SessionPaperContext {
 
 private let codexModelOverrideDefaultsKey = "PaperCodexCodexModelOverride"
 private let codexReasoningEffortDefaultsKey = "PaperCodexCodexReasoningEffort"
+private let codexSystemPromptDefaultsKey = "PaperCodexCodexSystemPrompt"
 private let discoverCodexModelOverrideDefaultsKey = "PaperCodexDiscoverCodexModelOverride"
 private let discoverCodexConcurrencyDefaultsKey = "PaperCodexDiscoverCodexConcurrency"
 private let localDiscoverPreferencesDefaultsKey = "PaperCodexLocalDiscoverPreferences"
@@ -140,6 +141,14 @@ private func saveQuickPromptsToDefaults(_ prompts: [QuickPrompt]) {
     if let data = try? JSONEncoder().encode(prompts) {
         UserDefaults.standard.set(data, forKey: quickPromptsDefaultsKey)
     }
+}
+
+private func loadCodexSystemPromptFromDefaults() -> String {
+    guard let stored = UserDefaults.standard.string(forKey: codexSystemPromptDefaultsKey),
+          !stored.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        return PromptBuilder.defaultSystemPrompt
+    }
+    return stored
 }
 
 private func loadLocalDiscoverPreferencesFromDefaults() -> LocalDiscoverPreferences {
@@ -248,6 +257,7 @@ final class AppModel: ObservableObject {
         let stored = UserDefaults.standard.string(forKey: codexReasoningEffortDefaultsKey)
         return stored.flatMap(CodexReasoningEffort.init(rawValue:)) ?? .default
     }()
+    @Published var codexSystemPrompt: String = loadCodexSystemPromptFromDefaults()
     @Published var activeCodexRun: ActiveCodexRun?
     @Published var errorMessage: String?
     @Published var isSending = false
@@ -540,6 +550,21 @@ final class AppModel: ObservableObject {
         }
         UserDefaults.standard.set(discoverCodexConcurrency, forKey: discoverCodexConcurrencyDefaultsKey)
         mergeAvailableCodexModelIDs([trimmedModel])
+    }
+
+    func setCodexSystemPrompt(_ prompt: String) {
+        let normalized = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        if normalized.isEmpty || normalized == PromptBuilder.defaultSystemPrompt {
+            resetCodexSystemPrompt()
+            return
+        }
+        codexSystemPrompt = normalized
+        UserDefaults.standard.set(normalized, forKey: codexSystemPromptDefaultsKey)
+    }
+
+    func resetCodexSystemPrompt() {
+        codexSystemPrompt = PromptBuilder.defaultSystemPrompt
+        UserDefaults.standard.removeObject(forKey: codexSystemPromptDefaultsKey)
     }
 
     func setArxivSaveOrganization(_ organization: ArxivSaveOrganization) {
@@ -3017,7 +3042,8 @@ final class AppModel: ObservableObject {
                 workspacePath: session.workspacePath,
                 papers: context.papers,
                 selectedAnchors: selectedAnchors,
-                relevantSpans: []
+                relevantSpans: [],
+                systemPromptTemplate: codexSystemPrompt
             )
         )
         appendCodexRunEvent(
