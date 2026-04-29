@@ -220,6 +220,24 @@ public final class PaperRepository {
         """)
     }
 
+    public func deletePapers(ids: [String]) throws {
+        let uniqueIDs = Array(Set(ids.filter { !$0.isEmpty })).sorted()
+        guard !uniqueIDs.isEmpty else {
+            return
+        }
+        let placeholders = Array(repeating: "?", count: uniqueIDs.count).joined(separator: ",")
+        try database.transaction {
+            try database.run(
+                "DELETE FROM papers WHERE id IN (\(placeholders));",
+                bindings: uniqueIDs.map(SQLiteValue.text)
+            )
+            try database.run("""
+            DELETE FROM sessions
+            WHERE id NOT IN (SELECT DISTINCT session_id FROM session_papers);
+            """)
+        }
+    }
+
     public func upsertCategory(_ category: Category) throws {
         try database.transaction {
             try database.run("""

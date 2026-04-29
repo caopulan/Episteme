@@ -1225,6 +1225,103 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func movePapers(_ paperIDs: [String], toCategory categoryID: String?) {
+        do {
+            guard let repository else {
+                throw AppModelError.repositoryUnavailable
+            }
+            if let categoryID, !categories.contains(where: { $0.id == categoryID }) {
+                throw AppModelError.categoryNotFound(categoryID)
+            }
+            let validPaperIDs = Set(papers.map(\.id))
+            var movedPaperIDs = Set<String>()
+            for paperID in paperIDs where validPaperIDs.contains(paperID) && !movedPaperIDs.contains(paperID) {
+                for existingCategoryID in paperCategoryIDsByID[paperID, default: []] {
+                    try repository.removePaper(paperID, fromCategory: existingCategoryID)
+                }
+                if let categoryID {
+                    try repository.assignPaper(paperID, toCategory: categoryID)
+                }
+                movedPaperIDs.insert(paperID)
+            }
+            guard !movedPaperIDs.isEmpty else {
+                return
+            }
+            try reloadLibrary()
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func assignPapers(_ paperIDs: [String], toTags tagIDs: [String]) {
+        do {
+            guard let repository else {
+                throw AppModelError.repositoryUnavailable
+            }
+            let validPaperIDs = Set(papers.map(\.id))
+            let validTagIDs = Set(tags.map(\.id))
+            let assignableTagIDs = Array(Set(tagIDs).intersection(validTagIDs)).sorted()
+            guard !assignableTagIDs.isEmpty else {
+                return
+            }
+            var assignedPaperIDs = Set<String>()
+            for paperID in paperIDs where validPaperIDs.contains(paperID) && !assignedPaperIDs.contains(paperID) {
+                for tagID in assignableTagIDs {
+                    try repository.assignPaper(paperID, toTag: tagID)
+                }
+                assignedPaperIDs.insert(paperID)
+            }
+            guard !assignedPaperIDs.isEmpty else {
+                return
+            }
+            try reloadLibrary()
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func deletePapers(_ paperIDs: [String]) {
+        do {
+            guard let repository else {
+                throw AppModelError.repositoryUnavailable
+            }
+            let requestedIDs = Set(paperIDs)
+            let papersToDelete = papers.filter { requestedIDs.contains($0.id) }
+            guard !papersToDelete.isEmpty else {
+                return
+            }
+            let deletedIDs = Set(papersToDelete.map(\.id))
+            try repository.deletePapers(ids: Array(deletedIDs))
+            for paper in papersToDelete {
+                try removeManagedPaperStorage(for: paper)
+            }
+            if let selectedLibraryPaper, deletedIDs.contains(selectedLibraryPaper.id) {
+                self.selectedLibraryPaper = nil
+            }
+            if let selectedPaper, deletedIDs.contains(selectedPaper.id) {
+                self.selectedPaper = nil
+                selectedSession = nil
+                sessions = []
+                messages = []
+                currentSelection = nil
+                pdfJumpTarget = nil
+                readerPosition = nil
+                activeCodexRun = nil
+                if route == .reader {
+                    route = .library
+                }
+            }
+            var tabState = readerTabState
+            for paperID in deletedIDs {
+                _ = tabState.close(paperID)
+            }
+            readerTabState = tabState
+            try reloadLibrary()
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
     func setTag(_ tagID: String, assigned: Bool, for paper: Paper) {
         do {
             guard let repository else {
@@ -2318,6 +2415,22 @@ final class AppModel: ObservableObject {
         if FileManager.default.fileExists(atPath: url.path) {
             try FileManager.default.removeItem(at: url)
         }
+    }
+
+    private func removeManagedPaperStorage(for paper: Paper) throws {
+        let paperDirectory = URL(fileURLWithPath: paper.filePath)
+            .standardizedFileURL
+            .deletingLastPathComponent()
+        let managedRoots = [
+            supportRoot.appendingPathComponent("papers", isDirectory: true).standardizedFileURL,
+            supportRoot.appendingPathComponent("cache/papers", isDirectory: true).standardizedFileURL
+        ]
+        guard managedRoots.contains(where: { root in
+            paperDirectory.path == root.path || paperDirectory.path.hasPrefix(root.path + "/")
+        }) else {
+            return
+        }
+        try removeDirectoryIfExists(paperDirectory)
     }
 
     private func discoverRankingVersion() -> String {

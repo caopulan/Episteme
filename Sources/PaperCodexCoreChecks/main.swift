@@ -324,6 +324,34 @@ func runUILayoutSourceChecks() throws {
         appModelSource.contains("assignPapers(_ paperIDs: [String], toCategory categoryID: String)"),
         "AppModel should provide a batch paper-to-category assignment path for drag and drop"
     )
+    try check(
+        appModelSource.contains("assignPapers(_ paperIDs: [String], toTags tagIDs: [String])"),
+        "AppModel should provide a batch paper-to-tags assignment path"
+    )
+    try check(
+        appModelSource.contains("deletePapers(_ paperIDs: [String])"),
+        "AppModel should provide a batch library delete path"
+    )
+    try check(
+        librarySource.contains("selectedPaperIDs"),
+        "library should keep explicit multi-selection state"
+    )
+    try check(
+        librarySource.contains("BulkLibraryActionBar"),
+        "library should show a contextual bulk action bar for selected papers"
+    )
+    try check(
+        librarySource.contains("LibraryBulkMoveSheet"),
+        "library should provide a bulk move sheet"
+    )
+    try check(
+        librarySource.contains("LibraryBulkTagSheet"),
+        "library should provide a bulk tag sheet"
+    )
+    try check(
+        librarySource.contains("isConfirmingBulkDelete"),
+        "library should confirm destructive bulk deletes"
+    )
 
     let chatViewURL = root.appendingPathComponent("Sources/PaperCodexApp/ChatView.swift")
     let chatSource = try String(contentsOf: chatViewURL)
@@ -502,6 +530,18 @@ func runRepositoryChecks() throws {
     let removedTags = try repository.fetchTags(forPaperID: "paper-a")
     try check(removedCategoryIDs.isEmpty, "paper category links should be removable")
     try check(removedTags.isEmpty, "paper tag links should be removable")
+
+    try repository.assignPaper("paper-a", toCategory: "cat-vae")
+    try repository.assignPaper("paper-a", toTag: "tag-control")
+    try repository.deletePapers(ids: ["paper-a", "missing-paper"])
+    let papersAfterDelete = try repository.fetchPapers(ids: ["paper-a", "paper-b"])
+    let deletedPaperCategoryIDs = try repository.fetchCategoryIDs(forPaperID: "paper-a")
+    let deletedPaperTags = try repository.fetchTags(forPaperID: "paper-a")
+    let sessionsAfterPaperDelete = try repository.fetchSessions(paperID: "paper-a")
+    try check(papersAfterDelete == [paperB], "repository should delete requested papers while preserving others")
+    try check(deletedPaperCategoryIDs.isEmpty, "repository should remove category links for deleted papers")
+    try check(deletedPaperTags.isEmpty, "repository should remove tag links for deleted papers")
+    try check(sessionsAfterPaperDelete.isEmpty, "repository should remove session paper links for deleted papers")
 }
 
 func runLocalStoreV2MigrationChecks() throws {

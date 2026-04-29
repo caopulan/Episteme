@@ -17,6 +17,11 @@ struct LibraryView: View {
     @State private var selectedTagID: String?
     @State private var activePaperDrag: ActiveLibraryPaperDrag?
     @State private var categoryDropFrames: [String: CGRect] = [:]
+    @State private var selectedPaperIDs: Set<String> = []
+    @State private var lastSelectedPaperID: String?
+    @State private var isShowingBulkMove = false
+    @State private var isShowingBulkTag = false
+    @State private var isConfirmingBulkDelete = false
     @AppStorage("PaperCodexLibrarySortOption") private var librarySortRawValue = LibrarySortOption.addedNewest.rawValue
 
     private var filteredPapers: [Paper] {
@@ -46,6 +51,11 @@ struct LibraryView: View {
         return option.sorted(filteredPapers)
     }
 
+    private var selectedPaperIDsInOrder: [String] {
+        let selected = selectedPaperIDs
+        return sortedPapers.map(\.id).filter { selected.contains($0) }
+    }
+
     var body: some View {
         SidebarSplitLayout(minContentWidth: 840) {
             sidebar
@@ -65,6 +75,17 @@ struct LibraryView: View {
         }
         .overlay(alignment: .topLeading) {
             activePaperDragPreview
+        }
+        .onChange(of: sortedPapers.map(\.id)) { _, _ in
+            prunePaperSelection()
+        }
+        .alert("Delete selected papers?", isPresented: $isConfirmingBulkDelete) {
+            Button("Delete", role: .destructive) {
+                deleteSelectedPapers()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes \(selectedPaperIDs.count) papers from the local library and deletes app-managed PDF/cache files. This cannot be undone.")
         }
         .sheet(isPresented: $isCreatingCategory) {
             CategoryEditorSheet(
@@ -108,6 +129,36 @@ struct LibraryView: View {
                 isShowingArxivImport = false
             }
             .environmentObject(model)
+        }
+        .sheet(isPresented: $isShowingBulkMove) {
+            LibraryBulkMoveSheet(
+                categoryItems: flattenedCategoryItems(),
+                selectedCount: selectedPaperIDs.count
+            ) { categoryID in
+                model.movePapers(selectedPaperIDsInOrder, toCategory: categoryID)
+                selectedPaperIDs.removeAll()
+                lastSelectedPaperID = nil
+                if let categoryID {
+                    selectedCategoryID = categoryID
+                    selectedTagID = nil
+                }
+                isShowingBulkMove = false
+            } onCancel: {
+                isShowingBulkMove = false
+            }
+        }
+        .sheet(isPresented: $isShowingBulkTag) {
+            LibraryBulkTagSheet(
+                tags: model.tags,
+                selectedCount: selectedPaperIDs.count
+            ) { tagIDs in
+                model.assignPapers(selectedPaperIDsInOrder, toTags: tagIDs)
+                selectedPaperIDs.removeAll()
+                lastSelectedPaperID = nil
+                isShowingBulkTag = false
+            } onCancel: {
+                isShowingBulkTag = false
+            }
         }
     }
 
@@ -248,6 +299,27 @@ struct LibraryView: View {
                 .textFieldStyle(.roundedBorder)
                 .font(.system(size: 15))
 
+            if !selectedPaperIDs.isEmpty {
+                BulkLibraryActionBar(
+                    selectedCount: selectedPaperIDs.count,
+                    canMove: true,
+                    canTag: !model.tags.isEmpty,
+                    onMove: {
+                        isShowingBulkMove = true
+                    },
+                    onTag: {
+                        isShowingBulkTag = true
+                    },
+                    onDelete: {
+                        isConfirmingBulkDelete = true
+                    },
+                    onClear: {
+                        selectedPaperIDs.removeAll()
+                        lastSelectedPaperID = nil
+                    }
+                )
+            }
+
             if selectedCategoryID != nil || selectedTagID != nil {
                 Button {
                     selectedCategoryID = nil
@@ -270,7 +342,12 @@ struct LibraryView: View {
                                 categories: categories(for: paper),
                                 tags: model.paperTagsByID[paper.id, default: []],
                                 thumbnailURLs: model.paperThumbnailURLsByID[paper.id, default: []],
-                                isSelected: model.selectedLibraryPaper?.id == paper.id
+                                isSelected: model.selectedLibraryPaper?.id == paper.id,
+                                isMultiSelected: selectedPaperIDs.contains(paper.id),
+                                selectionModeActive: !selectedPaperIDs.isEmpty,
+                                onSelectionToggle: {
+                                    togglePaperSelection(paper)
+                                }
                             ) {
                                 model.openPaper(paper)
                             }
@@ -281,7 +358,7 @@ struct LibraryView: View {
                                 PaperDragPreview(paper: paper)
                             }
                             .onTapGesture {
-                                model.selectLibraryPaper(paper)
+                                handlePaperRowTap(paper)
                             }
                             .highPriorityGesture(paperDragGesture(for: paper))
                         }
@@ -440,6 +517,73 @@ struct LibraryView: View {
     private func startCreatingCategory(parentID: String?) {
         newCategoryParentID = parentID ?? ""
         isCreatingCategory = true
+    }
+
+    private func handlePaperRowTap(_ paper: Paper) {
+        let modifiers = NSEvent.modifierFlags.intersection([.command, .shift])
+        if modifiers.contains(.shift) {
+            selectPaperRange(through: paper)
+        } else if modifiers.contains(.command) {
+            togglePaperSelection(paper)
+        } else if selectedPaperIDs.isEmpty {
+            model.selectLibraryPaper(paper)
+            lastSelectedPaperID = paper.id
+        } else {
+            selectedPaperIDs = [paper.id]
+            lastSelectedPaperID = paper.id
+            model.selectLibraryPaper(paper)
+        }
+    }
+
+    private func togglePaperSelection(_ paper: Paper) {
+        if selectedPaperIDs.contains(paper.id) {
+            selectedPaperIDs.remove(paper.id)
+            if lastSelectedPaperID == paper.id {
+                lastSelectedPaperID = selectedPaperIDsInOrder.last
+            }
+        } else {
+            selectedPaperIDs.insert(paper.id)
+            lastSelectedPaperID = paper.id
+            model.selectLibraryPaper(paper)
+        }
+    }
+
+    private func selectPaperRange(through paper: Paper) {
+        let visibleIDs = sortedPapers.map(\.id)
+        guard let currentIndex = visibleIDs.firstIndex(of: paper.id) else {
+            togglePaperSelection(paper)
+            return
+        }
+        let anchorID = lastSelectedPaperID ?? paper.id
+        guard let anchorIndex = visibleIDs.firstIndex(of: anchorID) else {
+            selectedPaperIDs.insert(paper.id)
+            lastSelectedPaperID = paper.id
+            model.selectLibraryPaper(paper)
+            return
+        }
+        let lower = min(anchorIndex, currentIndex)
+        let upper = max(anchorIndex, currentIndex)
+        selectedPaperIDs.formUnion(visibleIDs[lower...upper])
+        lastSelectedPaperID = paper.id
+        model.selectLibraryPaper(paper)
+    }
+
+    private func prunePaperSelection() {
+        let visibleIDs = Set(sortedPapers.map(\.id))
+        selectedPaperIDs = selectedPaperIDs.intersection(visibleIDs)
+        if let lastSelectedPaperID, !selectedPaperIDs.contains(lastSelectedPaperID) {
+            self.lastSelectedPaperID = selectedPaperIDsInOrder.last
+        }
+    }
+
+    private func deleteSelectedPapers() {
+        let paperIDs = selectedPaperIDsInOrder
+        guard !paperIDs.isEmpty else {
+            return
+        }
+        model.deletePapers(paperIDs)
+        selectedPaperIDs.removeAll()
+        lastSelectedPaperID = nil
     }
 
     private var activePaperDragPreview: some View {
@@ -694,10 +838,24 @@ private struct PaperRow: View {
     var tags: [PaperTag]
     var thumbnailURLs: [URL]
     var isSelected: Bool
+    var isMultiSelected: Bool
+    var selectionModeActive: Bool
+    var onSelectionToggle: () -> Void
     var onRead: () -> Void
 
     var body: some View {
         HStack(alignment: .center, spacing: 14) {
+            Button(action: onSelectionToggle) {
+                Image(systemName: isMultiSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 17, weight: .semibold))
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(isMultiSelected ? Color.accentColor : Color.secondary)
+                    .frame(width: 22, height: 54)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(isMultiSelected ? "Remove from selection" : "Add to selection")
+
             ThumbnailStrip(urls: Array(thumbnailURLs.prefix(5)))
                 .frame(width: 132, height: 54)
 
@@ -729,12 +887,32 @@ private struct PaperRow: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 18)
-        .background(isSelected ? Color.accentColor.opacity(0.12) : Color(nsColor: .controlBackgroundColor))
+        .background(rowBackground)
         .overlay(
             RoundedRectangle(cornerRadius: 8)
-                .stroke(isSelected ? Color.accentColor.opacity(0.45) : Color.clear, lineWidth: 1)
+                .stroke(rowBorderColor, lineWidth: isMultiSelected ? 1.5 : 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private var rowBackground: Color {
+        if isMultiSelected {
+            return Color.accentColor.opacity(0.16)
+        }
+        if isSelected {
+            return Color.accentColor.opacity(0.10)
+        }
+        return Color(nsColor: .controlBackgroundColor)
+    }
+
+    private var rowBorderColor: Color {
+        if isMultiSelected {
+            return Color.accentColor.opacity(0.62)
+        }
+        if isSelected {
+            return Color.accentColor.opacity(0.38)
+        }
+        return Color.clear
     }
 }
 
@@ -845,6 +1023,149 @@ private struct SidebarEmptyText: View {
         Text(text)
             .foregroundStyle(.secondary)
             .padding(.vertical, 5)
+    }
+}
+
+private struct BulkLibraryActionBar: View {
+    var selectedCount: Int
+    var canMove: Bool
+    var canTag: Bool
+    var onMove: () -> Void
+    var onTag: () -> Void
+    var onDelete: () -> Void
+    var onClear: () -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Label("\(selectedCount) selected", systemImage: "checkmark.circle.fill")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Color.accentColor)
+            Spacer()
+            Button(action: onMove) {
+                Label("Move", systemImage: "folder")
+            }
+            .disabled(!canMove)
+            .help("Move selected papers to a folder")
+            Button(action: onTag) {
+                Label("Tag", systemImage: "tag")
+            }
+            .disabled(!canTag)
+            .help("Add tags to selected papers")
+            Button(role: .destructive, action: onDelete) {
+                Label("Delete", systemImage: "trash")
+            }
+            .help("Delete selected papers")
+            Button(action: onClear) {
+                Label("Clear", systemImage: "xmark.circle")
+            }
+            .help("Clear selection")
+        }
+        .buttonStyle(.bordered)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .background(
+            RoundedRectangle(cornerRadius: 9)
+                .fill(Color.accentColor.opacity(0.08))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 9)
+                .stroke(Color.accentColor.opacity(0.22), lineWidth: 1)
+        )
+    }
+}
+
+private struct LibraryBulkMoveSheet: View {
+    var categoryItems: [CategoryListItem]
+    var selectedCount: Int
+    var onMove: (String?) -> Void
+    var onCancel: () -> Void
+
+    @State private var targetCategoryID = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Label("Move Papers", systemImage: "folder")
+                .font(.title3.weight(.semibold))
+            Text("\(selectedCount) selected papers")
+                .foregroundStyle(.secondary)
+            Picker("Destination", selection: $targetCategoryID) {
+                Text("No folder").tag("")
+                ForEach(categoryItems) { item in
+                    Text(String(repeating: "  ", count: item.depth) + item.category.name)
+                        .tag(item.category.id)
+                }
+            }
+            HStack {
+                Spacer()
+                Button("Cancel", action: onCancel)
+                Button {
+                    onMove(targetCategoryID.isEmpty ? nil : targetCategoryID)
+                } label: {
+                    Label("Move", systemImage: "arrow.right.folder")
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(22)
+        .frame(width: 420)
+    }
+}
+
+private struct LibraryBulkTagSheet: View {
+    var tags: [PaperTag]
+    var selectedCount: Int
+    var onApply: ([String]) -> Void
+    var onCancel: () -> Void
+
+    @State private var selectedTagIDs: Set<String> = []
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Label("Add Tags", systemImage: "tag")
+                .font(.title3.weight(.semibold))
+            Text("\(selectedCount) selected papers")
+                .foregroundStyle(.secondary)
+            if tags.isEmpty {
+                ContentUnavailableView("No Tags", systemImage: "tag")
+                    .frame(width: 380, height: 120)
+            } else {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 126), spacing: 8)], alignment: .leading, spacing: 8) {
+                    ForEach(tags) { tag in
+                        Button {
+                            toggle(tag.id)
+                        } label: {
+                            Label(tag.name, systemImage: selectedTagIDs.contains(tag.id) ? "checkmark.circle.fill" : "circle")
+                                .lineLimit(1)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(selectedTagIDs.contains(tag.id) ? .accentColor : .secondary)
+                    }
+                }
+                .frame(width: 420)
+            }
+            HStack {
+                Spacer()
+                Button("Cancel", action: onCancel)
+                Button {
+                    onApply(Array(selectedTagIDs))
+                } label: {
+                    Label("Apply", systemImage: "checkmark")
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(selectedTagIDs.isEmpty)
+            }
+        }
+        .padding(22)
+        .frame(width: 470)
+    }
+
+    private func toggle(_ tagID: String) {
+        if selectedTagIDs.contains(tagID) {
+            selectedTagIDs.remove(tagID)
+        } else {
+            selectedTagIDs.insert(tagID)
+        }
     }
 }
 
