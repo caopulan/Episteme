@@ -279,10 +279,20 @@ struct DiscoverView: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                             }
                         }
-                        .padding(.vertical, 2)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
                         .onPreferenceChange(DiscoverRowHeightPreferenceKey.self) { values in
-                            if discoverRowHeights != values {
-                                discoverRowHeights = values
+                            var updated = discoverRowHeights
+                            var didChange = false
+                            for (rowIndex, height) in values where height > 0 {
+                                let roundedHeight = (height * 2).rounded() / 2
+                                if abs((updated[rowIndex] ?? 0) - roundedHeight) > 0.5 {
+                                    updated[rowIndex] = roundedHeight
+                                    didChange = true
+                                }
+                            }
+                            if didChange {
+                                discoverRowHeights = updated
                             }
                         }
                         .onChange(of: layoutSignature) { _, _ in
@@ -984,11 +994,20 @@ private struct ArxivPaperCard: View {
                 }
 
                 FlowTags(tags: Array(displayTags.prefix(7)))
-
-                cardFooter
             }
             .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.bottom, footerReservedHeight)
+            .frame(
+                maxWidth: .infinity,
+                minHeight: contentMinimumHeight,
+                alignment: .topLeading
+            )
+            .overlay(alignment: .bottomLeading) {
+                cardFooter
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, 14)
+            }
         }
         .contentShape(RoundedRectangle(cornerRadius: 8))
         .frame(maxWidth: .infinity, minHeight: minimumHeight, alignment: .topLeading)
@@ -1010,14 +1029,14 @@ private struct ArxivPaperCard: View {
 
     private var cardFooter: some View {
         ViewThatFits(in: .horizontal) {
-            HStack(alignment: .center, spacing: 8) {
+            HStack(alignment: .bottom, spacing: 8) {
                 ResourceLinkButtons(links: resourceLinks, compact: true)
                 Spacer(minLength: 10)
                 actionGroup
             }
             VStack(alignment: .leading, spacing: 8) {
                 ResourceLinkButtons(links: resourceLinks, compact: true)
-                HStack {
+                HStack(alignment: .bottom) {
                     Spacer(minLength: 0)
                     actionGroup
                 }
@@ -1039,6 +1058,21 @@ private struct ArxivPaperCard: View {
             StableOpenButton(isBusy: isBusy, action: onOpen)
         }
         .fixedSize()
+    }
+
+    private var footerReservedHeight: CGFloat {
+        38
+    }
+
+    private var previewHeight: CGFloat {
+        guard imageURL != nil || !thumbnailURLs.isEmpty else {
+            return 0
+        }
+        return imageURL != nil ? 150 : 154
+    }
+
+    private var contentMinimumHeight: CGFloat {
+        max(0, minimumHeight - previewHeight)
     }
 
     private var metadataRow: some View {
@@ -1358,6 +1392,70 @@ private struct SimilarityMeter: View {
     }
 }
 
+@MainActor
+private final class DiscoverLocalImageCache {
+    static let shared = DiscoverLocalImageCache()
+
+    private let cache = NSCache<NSURL, NSImage>()
+
+    func image(for url: URL) -> NSImage? {
+        cache.object(forKey: url as NSURL)
+    }
+
+    func insert(_ image: NSImage, for url: URL) {
+        cache.setObject(image, forKey: url as NSURL)
+    }
+}
+
+private struct LocalCachedImage<Placeholder: View>: View {
+    var url: URL
+    var contentMode: ContentMode = .fill
+    @ViewBuilder var placeholder: () -> Placeholder
+
+    @State private var image: NSImage?
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: contentMode)
+            } else {
+                placeholder()
+            }
+        }
+        .task(id: url) {
+            await load()
+        }
+    }
+
+    @MainActor
+    private func load() async {
+        if let cached = DiscoverLocalImageCache.shared.image(for: url) {
+            image = cached
+            return
+        }
+
+        let data: Data
+        let imageURL = url
+        do {
+            data = try await Task.detached(priority: .utility) {
+                try Data(contentsOf: imageURL, options: [.mappedIfSafe])
+            }.value
+        } catch {
+            image = nil
+            return
+        }
+
+        guard let loaded = NSImage(data: data) else {
+            image = nil
+            return
+        }
+        DiscoverLocalImageCache.shared.insert(loaded, for: url)
+        image = loaded
+    }
+}
+
 private struct DiscoverPDFThumbnailHero: View {
     var urls: [URL]
 
@@ -1369,21 +1467,17 @@ private struct DiscoverPDFThumbnailHero: View {
 
             HStack(spacing: 0) {
                 ForEach(Array(visibleURLs.enumerated()), id: \.offset) { _, url in
-                    if let image = NSImage(contentsOf: url) {
-                        Image(nsImage: image)
-                            .resizable()
-                            .scaledToFill()
-                            .frame(width: itemWidth, height: proxy.size.height)
-                            .clipped()
-                            .overlay(alignment: .trailing) {
-                                Rectangle()
-                                    .fill(Color.black.opacity(0.06))
-                                    .frame(width: 1)
-                            }
-                    } else {
+                    LocalCachedImage(url: url, contentMode: .fill) {
                         Color(nsColor: .controlBackgroundColor)
                             .frame(width: itemWidth, height: proxy.size.height)
-                        }
+                    }
+                    .frame(width: itemWidth, height: proxy.size.height)
+                    .clipped()
+                    .overlay(alignment: .trailing) {
+                        Rectangle()
+                            .fill(Color.black.opacity(0.06))
+                            .frame(width: 1)
+                    }
                 }
             }
             .frame(width: proxy.size.width, height: proxy.size.height, alignment: .leading)
@@ -1407,10 +1501,15 @@ private struct ArxivPreviewImage: View {
 
     var body: some View {
         Group {
-            if let url, let image = NSImage(contentsOf: url) {
-                Image(nsImage: image)
-                    .resizable()
-                    .aspectRatio(imageAspectRatio(image), contentMode: .fill)
+            if let url {
+                LocalCachedImage(url: url, contentMode: .fill) {
+                    ZStack {
+                        Color(nsColor: .separatorColor).opacity(0.22)
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                    .aspectRatio(4.7, contentMode: .fit)
+                }
             } else {
                 ZStack {
                     Color(nsColor: .separatorColor).opacity(0.22)
@@ -1422,13 +1521,6 @@ private struct ArxivPreviewImage: View {
             }
         }
         .background(Color(nsColor: .textBackgroundColor))
-    }
-
-    private func imageAspectRatio(_ image: NSImage) -> CGFloat {
-        guard image.size.width > 0, image.size.height > 0 else {
-            return 4.7
-        }
-        return image.size.width / image.size.height
     }
 }
 
