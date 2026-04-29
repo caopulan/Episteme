@@ -144,6 +144,38 @@ func runLocalStoreV2ModelChecks() throws {
     try check(PaperStorageState.feedPDFCache.rawValue == "feed_pdf_cache", "feed PDF cache state should be stable")
 }
 
+func runReaderTabStateChecks() throws {
+    var state = ReaderTabState()
+    let paperA = ReaderPaperTab(paperID: "paper-a", title: "Paper A", detail: "/tmp/a.pdf", isSaved: true)
+    let paperB = ReaderPaperTab(paperID: "paper-b", title: "Paper B", detail: "/tmp/b.pdf", isSaved: true)
+    let paperC = ReaderPaperTab(paperID: "paper-c", title: "Paper C", detail: "/tmp/c.pdf", isSaved: true)
+
+    state.open(paperA)
+    state.open(paperB)
+    state.open(paperA)
+    try check(state.tabs.map(\.paperID) == ["paper-a", "paper-b"], "opening an existing reader tab should focus it without duplicating it")
+    try check(state.activePaperID == "paper-a", "opening an existing reader tab should make it active")
+
+    state.open(paperC)
+    _ = state.select("paper-a")
+    let nextAfterClosingMiddle = state.close("paper-b")
+    try check(nextAfterClosingMiddle == "paper-a", "closing an inactive tab should keep the current tab active")
+    try check(state.tabs.map(\.paperID) == ["paper-a", "paper-c"], "closing a reader tab should remove only that tab")
+
+    let nextAfterClosingActive = state.close("paper-a")
+    try check(nextAfterClosingActive == "paper-c", "closing the active reader tab should select the nearest remaining tab")
+    try check(state.activePaperID == "paper-c", "reader tab state should update the active paper after close")
+
+    let savedPaperC = ReaderPaperTab(paperID: "paper-c-saved", title: "Paper C", detail: "/library/c.pdf", isSaved: true)
+    state.replace("paper-c", with: savedPaperC)
+    try check(state.tabs.map(\.paperID) == ["paper-c-saved"], "saving a cached paper should replace the existing reader tab")
+    try check(state.activePaperID == "paper-c-saved", "replacing the active reader tab should keep it active under the new paper id")
+
+    let last = state.close("paper-c-saved")
+    try check(last == nil, "closing the last reader tab should leave no active paper")
+    try check(state.tabs.isEmpty, "closing the last reader tab should clear open tabs")
+}
+
 func runRepositoryChecks() throws {
     let tempRoot = FileManager.default.temporaryDirectory
         .appendingPathComponent("paper-codex-repository-\(UUID().uuidString)", isDirectory: true)
@@ -1972,6 +2004,10 @@ do {
     if selectedChecks.isEmpty || selectedChecks.contains("local-store-v2-models") {
         try runLocalStoreV2ModelChecks()
         print("local-store-v2-models: pass")
+    }
+    if selectedChecks.isEmpty || selectedChecks.contains("reader-tabs") {
+        try runReaderTabStateChecks()
+        print("reader-tabs: pass")
     }
     if selectedChecks.isEmpty || selectedChecks.contains("repository") {
         try runRepositoryChecks()

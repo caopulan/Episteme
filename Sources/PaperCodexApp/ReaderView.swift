@@ -9,6 +9,8 @@ struct ReaderView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
+            ReaderTabBar()
+                .environmentObject(model)
             Divider()
             HSplitView {
                 pdfPane
@@ -96,6 +98,110 @@ struct ReaderView: View {
             }
         }
         .background(Color(nsColor: .textBackgroundColor))
+    }
+}
+
+private struct ReaderTabBar: View {
+    @EnvironmentObject private var model: AppModel
+
+    var body: some View {
+        ScrollView(.horizontal) {
+            HStack(spacing: 8) {
+                ForEach(model.readerTabState.tabs) { tab in
+                    ReaderTabItem(
+                        tab: tab,
+                        isActive: model.selectedPaper?.id == tab.paperID
+                            || model.readerTabState.activePaperID == tab.paperID
+                    )
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 7)
+        }
+        .scrollIndicators(.hidden)
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+}
+
+private struct ReaderTabItem: View {
+    @EnvironmentObject private var model: AppModel
+    var tab: ReaderPaperTab
+    var isActive: Bool
+    @State private var isHovering = false
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Button {
+                model.selectReaderTab(tab)
+            } label: {
+                HStack(spacing: 7) {
+                    Image(systemName: isActive ? "doc.text.fill" : "doc.text")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(isActive ? Color.accentColor : Color.secondary)
+
+                    Text(tab.title)
+                        .font(.system(size: 13, weight: isActive ? .semibold : .medium))
+                        .foregroundStyle(isActive ? Color.primary : Color.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+
+                    if !tab.isSaved {
+                        Circle()
+                            .fill(Color.orange)
+                            .frame(width: 6, height: 6)
+                            .help("Cached paper")
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(tab.detail.isEmpty ? tab.title : "\(tab.title)\n\(tab.detail)")
+
+            Button {
+                model.closeReaderTab(tab)
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(isActive ? Color.secondary : Color.secondary.opacity(0.58))
+                    .frame(width: 18, height: 18)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .help("Close tab")
+        }
+        .padding(.leading, 10)
+        .padding(.trailing, 6)
+        .frame(width: isActive ? 268 : 224, height: 34)
+        .background(tabBackground)
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(tabBorder, lineWidth: isActive ? 1.1 : 0.8)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .shadow(
+            color: isHovering ? Color.black.opacity(0.12) : Color.black.opacity(0.04),
+            radius: isHovering ? 6 : 2,
+            x: 0,
+            y: isHovering ? 2 : 1
+        )
+        .onHover { hovering in
+            isHovering = hovering
+        }
+    }
+
+    private var tabBackground: Color {
+        if isActive {
+            return Color(nsColor: .textBackgroundColor)
+        }
+        return isHovering ? Color(nsColor: .controlBackgroundColor) : Color(nsColor: .windowBackgroundColor)
+    }
+
+    private var tabBorder: Color {
+        if isActive {
+            return Color.accentColor.opacity(0.38)
+        }
+        return isHovering ? Color.primary.opacity(0.16) : Color.primary.opacity(0.08)
     }
 }
 
