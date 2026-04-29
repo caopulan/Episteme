@@ -92,6 +92,17 @@ private func saveQuickPromptsToDefaults(_ prompts: [QuickPrompt]) {
     }
 }
 
+private func isCancellationError(_ error: any Error) -> Bool {
+    if error is CancellationError {
+        return true
+    }
+    if let urlError = error as? URLError, urlError.code == .cancelled {
+        return true
+    }
+    let nsError = error as NSError
+    return nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled
+}
+
 @MainActor
 final class AppModel: ObservableObject {
     @Published var route: AppRoute = .library
@@ -460,6 +471,9 @@ final class AppModel: ObservableObject {
             }
             reloadCachedArxivAssets()
         } catch {
+            if isCancellationError(error) {
+                return
+            }
             errorMessage = String(describing: error)
         }
     }
@@ -477,6 +491,9 @@ final class AppModel: ObservableObject {
             let data = try await client.fetchAsset(asset)
             arxivAssetURLs[asset.path] = try arxivCache.saveAsset(data, path: asset.path)
         } catch {
+            if isCancellationError(error) {
+                return
+            }
             errorMessage = String(describing: error)
         }
     }

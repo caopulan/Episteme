@@ -482,7 +482,9 @@ private struct ArxivPaperCard: View {
                         ProgressView(value: downloadProgress)
                             .frame(width: 78)
                     }
-                    if !inLibrary {
+                    if inLibrary {
+                        SavedActionBadge()
+                    } else {
                         SaveActionButton(isBusy: isBusy, action: onSave)
                     }
                     StableOpenButton(isBusy: isBusy, action: onOpen)
@@ -511,28 +513,79 @@ private struct ArxivPaperCard: View {
     }
 
     private var metadataRow: some View {
-        FlowLayout(spacing: 6) {
-            Text(paper.primaryCategory ?? paper.categories.first ?? "arXiv")
-                .font(.system(size: 12, weight: .semibold))
-                .padding(.horizontal, 7)
-                .padding(.vertical, 3)
-                .background(Color.teal.opacity(0.12))
-                .foregroundStyle(.teal)
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-            Text(paper.id)
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
-            if inLibrary {
-                Label("Saved", systemImage: "checkmark.seal.fill")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.green)
-                    .fixedSize()
+        HStack(alignment: .center, spacing: 8) {
+            HStack(alignment: .center, spacing: 6) {
+                MetadataPill(
+                    title: paper.primaryCategory ?? paper.categories.first ?? "arXiv",
+                    foreground: .teal,
+                    background: Color.teal.opacity(0.12)
+                )
+                ArxivIDPill(id: paper.id)
             }
+            .layoutPriority(1)
+
+            Spacer(minLength: 8)
+
             if let similarity = paper.similarity {
                 SimilarityMeter(value: similarity)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct MetadataPill: View {
+    var title: String
+    var foreground: Color
+    var background: Color
+
+    var body: some View {
+        Text(title)
+            .font(.system(size: 12, weight: .semibold))
+            .lineLimit(1)
+            .padding(.horizontal, 7)
+            .frame(height: 23)
+            .background(background)
+            .foregroundStyle(foreground)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+}
+
+private struct ArxivIDPill: View {
+    var id: String
+
+    var body: some View {
+        Text(id)
+            .font(.system(size: 12, weight: .medium))
+            .monospacedDigit()
+            .lineLimit(1)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 6)
+            .frame(height: 23)
+            .background(Color(nsColor: .controlBackgroundColor).opacity(0.72))
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .help("arXiv ID")
+    }
+}
+
+private struct SavedActionBadge: View {
+    var body: some View {
+        Label("Saved", systemImage: "checkmark.seal.fill")
+            .font(.system(size: 13, weight: .semibold))
+            .padding(.horizontal, 10)
+            .frame(height: 26)
+            .foregroundStyle(Color(nsColor: .systemGreen))
+            .background(
+                RoundedRectangle(cornerRadius: 7)
+                    .fill(Color(nsColor: .systemGreen).opacity(0.12))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 7)
+                            .stroke(Color(nsColor: .systemGreen).opacity(0.34), lineWidth: 1)
+                    )
+            )
+            .help("Already in Library")
+            .fixedSize()
+            .layoutPriority(1)
     }
 }
 
