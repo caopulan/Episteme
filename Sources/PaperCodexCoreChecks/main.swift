@@ -252,6 +252,21 @@ func runReaderPositionRepositoryChecks() throws {
     try check(reopenedPositionA == positionA, "reader position should survive repository reopen")
 }
 
+func runUILayoutSourceChecks() throws {
+    let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+    let libraryViewURL = root.appendingPathComponent("Sources/PaperCodexApp/LibraryView.swift")
+    let source = try String(contentsOf: libraryViewURL)
+
+    try check(
+        source.contains("static let splitPaneTopInset: CGFloat"),
+        "library split panes should use an explicit titlebar compensation inset"
+    )
+    try check(
+        source.components(separatedBy: "LibraryLayout.splitPaneTopInset").count - 1 >= 2,
+        "library list and inspector panes should share the same top inset constant"
+    )
+}
+
 func runRepositoryChecks() throws {
     let tempRoot = FileManager.default.temporaryDirectory
         .appendingPathComponent("paper-codex-repository-\(UUID().uuidString)", isDirectory: true)
@@ -2088,6 +2103,10 @@ do {
     if selectedChecks.isEmpty || selectedChecks.contains("reader-positions") {
         try runReaderPositionRepositoryChecks()
         print("reader-positions: pass")
+    }
+    if selectedChecks.isEmpty || selectedChecks.contains("ui-layout-source") {
+        try runUILayoutSourceChecks()
+        print("ui-layout-source: pass")
     }
     if selectedChecks.isEmpty || selectedChecks.contains("repository") {
         try runRepositoryChecks()

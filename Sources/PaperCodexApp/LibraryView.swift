@@ -43,8 +43,10 @@ struct LibraryView: View {
         } content: {
             HSplitView {
                 paperList
+                    .padding(.top, LibraryLayout.splitPaneTopInset)
                     .frame(minWidth: 500)
                 inspector
+                    .padding(.top, LibraryLayout.splitPaneTopInset)
                     .frame(minWidth: 300, idealWidth: 340, maxWidth: 420)
             }
         }
@@ -539,6 +541,10 @@ private struct CategoryListItem: Identifiable {
     var depth: Int
 
     var id: String { category.id }
+}
+
+private enum LibraryLayout {
+    static let splitPaneTopInset: CGFloat = 24
 }
 
 private struct PaperRow: View {
