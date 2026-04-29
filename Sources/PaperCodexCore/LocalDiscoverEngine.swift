@@ -5,6 +5,11 @@ public enum LocalDiscoverEngineError: Error, CustomStringConvertible, Equatable 
     case invalidDate(String)
     case invertedDateRange(start: String, end: String)
     case unsafeCacheKey(String)
+    case invalidEmbeddingBaseURL(String)
+    case missingEmbeddingModel
+    case missingEmbeddingAPIKey
+    case embeddingHTTPStatus(Int, String)
+    case embeddingResponseCountMismatch(expected: Int, actual: Int)
 
     public var description: String {
         switch self {
@@ -14,6 +19,16 @@ public enum LocalDiscoverEngineError: Error, CustomStringConvertible, Equatable 
             "Discover date range start \(start) is after end \(end)."
         case let .unsafeCacheKey(value):
             "Unsafe discover cache key: \(value)"
+        case let .invalidEmbeddingBaseURL(value):
+            "Invalid embedding provider base URL: \(value)"
+        case .missingEmbeddingModel:
+            "Embedding provider model is required."
+        case .missingEmbeddingAPIKey:
+            "Embedding provider API key is required."
+        case let .embeddingHTTPStatus(statusCode, body):
+            "Embedding provider returned HTTP \(statusCode): \(body)"
+        case let .embeddingResponseCountMismatch(expected, actual):
+            "Embedding provider returned \(actual) vectors for \(expected) inputs."
         }
     }
 }
@@ -216,6 +231,159 @@ public struct DiscoverPaperEnrichment: Codable, Equatable, Sendable {
     }
 }
 
+public struct DiscoverEmbeddingRecord: Codable, Equatable, Sendable {
+    public var sourceID: String
+    public var model: String
+    public var textHash: String
+    public var vector: [Double]
+    public var generatedAt: Date
+
+    public init(sourceID: String, model: String, textHash: String, vector: [Double], generatedAt: Date) {
+        self.sourceID = sourceID
+        self.model = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.textHash = textHash
+        self.vector = vector
+        self.generatedAt = generatedAt
+    }
+}
+
+public struct DiscoverEmbeddingInput: Codable, Equatable, Sendable {
+    public var sourceID: String
+    public var text: String
+
+    public init(sourceID: String, text: String) {
+        self.sourceID = sourceID
+        self.text = text
+    }
+}
+
+public enum DiscoverEmbeddingText {
+    public static func hash(_ text: String) -> String {
+        let normalizedText = normalized(text)
+        let digest = SHA256.hash(data: Data(normalizedText.utf8))
+        return digest.map { String(format: "%02x", $0) }.joined()
+    }
+
+    public static func arxivPaperText(_ paper: ArxivFeedPaper) -> String {
+        normalized([
+            paper.title.en,
+            paper.abstract.en,
+            paper.authors.joined(separator: ", "),
+            paper.primaryCategory ?? "",
+            paper.categories.joined(separator: ", "),
+            paper.comment
+        ].joined(separator: "\n"))
+    }
+
+    public static func libraryPaperText(
+        title: String,
+        authors: [String],
+        tags: [String],
+        categories: [String],
+        indexedText: String
+    ) -> String {
+        normalized([
+            title,
+            authors.joined(separator: ", "),
+            categories.joined(separator: ", "),
+            tags.joined(separator: ", "),
+            indexedText
+        ].joined(separator: "\n"))
+    }
+
+    public static func normalized(_ text: String) -> String {
+        text
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+    }
+}
+
+public final class OpenAICompatibleEmbeddingClient: @unchecked Sendable {
+    private let endpoint: URL
+    private let model: String
+    private let apiKey: String
+    private let session: URLSession
+    private let encoder = JSONEncoder()
+    private let decoder = JSONDecoder()
+
+    public init(settings: EmbeddingProviderSettings, apiKey: String, session: URLSession = .shared) throws {
+        let normalizedSettings = settings.normalized
+        let trimmedModel = normalizedSettings.model.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedAPIKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedModel.isEmpty else {
+            throw LocalDiscoverEngineError.missingEmbeddingModel
+        }
+        guard !trimmedAPIKey.isEmpty else {
+            throw LocalDiscoverEngineError.missingEmbeddingAPIKey
+        }
+        endpoint = try Self.endpointURL(for: normalizedSettings.baseURL)
+        model = trimmedModel
+        self.apiKey = trimmedAPIKey
+        self.session = session
+    }
+
+    public static func endpointURL(for baseURL: String) throws -> URL {
+        let trimmed = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalized = trimmed.replacingOccurrences(of: #"/+$"#, with: "", options: .regularExpression)
+        guard var url = URL(string: normalized), url.scheme != nil, url.host != nil else {
+            throw LocalDiscoverEngineError.invalidEmbeddingBaseURL(baseURL)
+        }
+        let lowercasedPath = url.path.lowercased()
+        if lowercasedPath.hasSuffix("/embeddings") {
+            return url
+        }
+        if lowercasedPath.hasSuffix("/v1") {
+            url.appendPathComponent("embeddings")
+        } else {
+            url.appendPathComponent("v1")
+            url.appendPathComponent("embeddings")
+        }
+        return url
+    }
+
+    public func embed(texts: [String]) async throws -> [[Double]] {
+        guard !texts.isEmpty else {
+            return []
+        }
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.httpBody = try encoder.encode(EmbeddingRequest(model: model, input: texts))
+
+        let (data, response) = try await session.data(for: request)
+        if let httpResponse = response as? HTTPURLResponse,
+           !(200..<300).contains(httpResponse.statusCode) {
+            let body = String(data: data, encoding: .utf8) ?? ""
+            throw LocalDiscoverEngineError.embeddingHTTPStatus(httpResponse.statusCode, body)
+        }
+
+        let decoded = try decoder.decode(EmbeddingResponse.self, from: data)
+        let vectors = decoded.data
+            .sorted { $0.index < $1.index }
+            .map(\.embedding)
+        guard vectors.count == texts.count else {
+            throw LocalDiscoverEngineError.embeddingResponseCountMismatch(expected: texts.count, actual: vectors.count)
+        }
+        return vectors
+    }
+}
+
+private struct EmbeddingRequest: Encodable {
+    var model: String
+    var input: [String]
+}
+
+private struct EmbeddingResponse: Decodable {
+    var data: [EmbeddingResponseItem]
+}
+
+private struct EmbeddingResponseItem: Decodable {
+    var index: Int
+    var embedding: [Double]
+}
+
 public enum DiscoverEnrichmentParser {
     public static func parse(
         _ text: String,
@@ -308,6 +476,25 @@ public final class LocalDiscoverCache {
         return try decoder.decode(DiscoverPaperEnrichment.self, from: Data(contentsOf: url))
     }
 
+    public func saveEmbedding(_ record: DiscoverEmbeddingRecord) throws {
+        try writeJSON(record, to: embeddingURL(sourceID: record.sourceID, model: record.model))
+    }
+
+    public func loadEmbedding(sourceID: String, model: String, text: String) throws -> DiscoverEmbeddingRecord? {
+        let trimmedModel = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        let url = embeddingURL(sourceID: sourceID, model: trimmedModel)
+        guard fileManager.fileExists(atPath: url.path) else {
+            return nil
+        }
+        let record = try decoder.decode(DiscoverEmbeddingRecord.self, from: Data(contentsOf: url))
+        guard record.sourceID == sourceID,
+              record.model == trimmedModel,
+              record.textHash == DiscoverEmbeddingText.hash(text) else {
+            return nil
+        }
+        return record
+    }
+
     private func queryResultURL(cacheKey: String) throws -> URL {
         guard cacheKey.range(of: #"^[a-f0-9]{64}$"#, options: .regularExpression) != nil else {
             throw LocalDiscoverEngineError.unsafeCacheKey(cacheKey)
@@ -321,6 +508,13 @@ public final class LocalDiscoverCache {
         root
             .appendingPathComponent("enrichments", isDirectory: true)
             .appendingPathComponent("\(safeFilename(arxivID)).json")
+    }
+
+    private func embeddingURL(sourceID: String, model: String) -> URL {
+        root
+            .appendingPathComponent("embeddings", isDirectory: true)
+            .appendingPathComponent(safeFilename(model), isDirectory: true)
+            .appendingPathComponent("\(safeFilename(sourceID)).json")
     }
 
     private func writeJSON<T: Encodable>(_ value: T, to url: URL) throws {

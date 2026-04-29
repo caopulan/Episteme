@@ -134,7 +134,9 @@ struct DiscoverView: View {
         }
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear {
-            guard model.arxivFeed == nil, !model.isSearchingDiscover else {
+            let expectedDate = "\(model.discoverStartDate)...\(model.discoverEndDate)"
+            guard !model.isSearchingDiscover,
+                  model.arxivFeed == nil || model.selectedArxivDate != expectedDate else {
                 return
             }
             Task {

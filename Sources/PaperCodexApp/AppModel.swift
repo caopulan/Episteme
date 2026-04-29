@@ -527,12 +527,13 @@ final class AppModel: ObservableObject {
 
             let range = try DiscoverDateRange(start: discoverStartDate, end: discoverEndDate)
             let categories = discoverSelectedCategories.isEmpty ? [localDiscoverPreferences.normalized.categories.first ?? "cs.CV"] : discoverSelectedCategories
+            let similaritySourceIDs = effectiveDiscoverSimilaritySourceIDs()
             let query = DiscoverQuery(
                 keyword: discoverKeyword,
                 dateRange: range,
                 categories: categories,
-                similaritySourceIDs: discoverSelectedSimilaritySourceIDs,
-                rankingVersion: "local-rank-v1"
+                similaritySourceIDs: similaritySourceIDs,
+                rankingVersion: discoverRankingVersion()
             ).normalized
             discoverStartDate = query.dateRange.start
             discoverEndDate = query.dateRange.end
@@ -548,8 +549,11 @@ final class AppModel: ObservableObject {
 
             let client = makeLocalArxivClient(categories: categories)
             let liveFeed = try await client.fetchFeed(range: range)
-            let filteredFeed = filterDiscoverFeed(liveFeed, keyword: query.keyword)
-            try displayDiscoverFeed(filteredFeed, query: query, progressTitle: "Search results cached")
+            let rankedFeed = try await applyDiscoverRanking(to: liveFeed, query: query)
+            try arxivCache.saveFeed(rankedFeed)
+            try mergeAndSaveArxivDate(rankedFeed.date)
+            let filteredFeed = filterDiscoverFeed(rankedFeed, keyword: query.keyword)
+            try displayDiscoverFeed(filteredFeed, query: query, progressTitle: "Search results cached", cacheRangeFeed: false)
         } catch {
             if (try? loadCachedDiscoverSearch()) == true {
                 errorMessage = "Using cached Discover results. Search failed: \(error)"
@@ -1432,9 +1436,16 @@ final class AppModel: ObservableObject {
         reloadCachedArxivAssets()
     }
 
-    private func displayDiscoverFeed(_ liveFeed: ArxivFeedResponse, query: DiscoverQuery, progressTitle: String) throws {
+    private func displayDiscoverFeed(
+        _ liveFeed: ArxivFeedResponse,
+        query: DiscoverQuery,
+        progressTitle: String,
+        cacheRangeFeed: Bool = true
+    ) throws {
         let feed = applyLocalDiscoverPreferences(to: liveFeed)
-        try arxivCache.saveFeed(feed)
+        if cacheRangeFeed {
+            try arxivCache.saveFeed(feed)
+        }
         try mergeAndSaveArxivDate(feed.date)
         try localDiscoverCache.saveQueryResult(
             DiscoverQueryResult(query: query.normalized, arxivIDs: feed.papers.map(\.id), generatedAt: Date())
@@ -1491,18 +1502,19 @@ final class AppModel: ObservableObject {
     private func loadCachedDiscoverSearch() throws -> Bool {
         let range = try DiscoverDateRange(start: discoverStartDate, end: discoverEndDate)
         let categories = discoverSelectedCategories.isEmpty ? [localDiscoverPreferences.normalized.categories.first ?? "cs.CV"] : discoverSelectedCategories
+        let similaritySourceIDs = effectiveDiscoverSimilaritySourceIDs()
         let query = DiscoverQuery(
             keyword: discoverKeyword,
             dateRange: range,
             categories: categories,
-            similaritySourceIDs: discoverSelectedSimilaritySourceIDs,
-            rankingVersion: "local-rank-v1"
+            similaritySourceIDs: similaritySourceIDs,
+            rankingVersion: discoverRankingVersion()
         ).normalized
         guard let cachedFeed = try arxivCache.loadFeed(date: "\(range.start)...\(range.end)") else {
             return false
         }
         let filteredFeed = filterDiscoverFeed(cachedFeed, keyword: query.keyword)
-        try displayDiscoverFeed(filteredFeed, query: query, progressTitle: "Cached search")
+        try displayDiscoverFeed(filteredFeed, query: query, progressTitle: "Cached search", cacheRangeFeed: false)
         return true
     }
 
@@ -1760,6 +1772,253 @@ final class AppModel: ObservableObject {
         if FileManager.default.fileExists(atPath: url.path) {
             try FileManager.default.removeItem(at: url)
         }
+    }
+
+    private func discoverRankingVersion() -> String {
+        let embedding = localDiscoverPreferences.normalized.embedding
+        let model = embedding.model.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard embedding.enabled, !model.isEmpty else {
+            return "local-rank-v2-no-embedding"
+        }
+        return "local-rank-v2-\(model)"
+    }
+
+    private func applyDiscoverRanking(to feed: ArxivFeedResponse, query: DiscoverQuery) async throws -> ArxivFeedResponse {
+        let preferences = localDiscoverPreferences.normalized
+        let sourceIDs = query.similaritySourceIDs
+        guard preferences.embedding.enabled, !sourceIDs.isEmpty else {
+            return applyLocalDiscoverPreferences(to: feed)
+        }
+
+        let embeddingSettings = preferences.embedding
+        let model = embeddingSettings.model.trimmingCharacters(in: .whitespacesAndNewlines)
+        let apiKey = embeddingProviderAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !embeddingSettings.baseURL.isEmpty, !model.isEmpty, !apiKey.isEmpty else {
+            errorMessage = "Embedding similarity is enabled, but Base URL, API key, or model is missing."
+            return applyLocalDiscoverPreferences(to: feed)
+        }
+
+        let sourcePapers = similaritySourcePapers(for: sourceIDs)
+        guard !sourcePapers.isEmpty else {
+            errorMessage = "No library papers matched the selected similarity source."
+            return applyLocalDiscoverPreferences(to: feed)
+        }
+
+        guard let repository else {
+            throw AppModelError.repositoryUnavailable
+        }
+
+        arxivCacheProgress = ArxivCacheProgress(
+            date: feed.date,
+            title: "Embedding ranking",
+            detail: "Preparing \(sourcePapers.count) library sources",
+            completed: 0,
+            total: sourcePapers.count + feed.papers.count
+        )
+
+        let client = try OpenAICompatibleEmbeddingClient(settings: embeddingSettings, apiKey: apiKey)
+        let interestInputs = try sourcePapers.map { paper in
+            DiscoverEmbeddingInput(
+                sourceID: "paper:\(paper.id)",
+                text: try libraryEmbeddingText(for: paper, repository: repository)
+            )
+        }
+        let interestVectors = try await cachedEmbeddings(
+            inputs: interestInputs,
+            model: model,
+            client: client,
+            progressDate: feed.date,
+            progressTitle: "Embedding library sources",
+            totalOffset: 0
+        )
+        guard !interestVectors.isEmpty else {
+            return applyLocalDiscoverPreferences(to: feed)
+        }
+
+        let paperInputs = feed.papers.map { paper in
+            DiscoverEmbeddingInput(
+                sourceID: "arxiv:\(paper.id)",
+                text: trimmedEmbeddingText(DiscoverEmbeddingText.arxivPaperText(paper))
+            )
+        }
+        let paperVectors = try await cachedEmbeddings(
+            inputs: paperInputs,
+            model: model,
+            client: client,
+            progressDate: feed.date,
+            progressTitle: "Embedding arXiv results",
+            totalOffset: interestInputs.count
+        )
+
+        let vectorsByID = Dictionary(uniqueKeysWithValues: zip(paperInputs.map(\.sourceID), paperVectors))
+        let papersWithEmbeddings = feed.papers.map { paper -> ArxivFeedPaper in
+            var rankedPaper = paper
+            rankedPaper.embedding = vectorsByID["arxiv:\(paper.id)"]
+            return rankedPaper
+        }
+        let rankedPapers = SimilarityRanker.rank(
+            papers: papersWithEmbeddings,
+            whitelistTags: preferences.whitelistTags,
+            blacklistTags: preferences.blacklistTags,
+            interestVectors: interestVectors
+        )
+        arxivCacheProgress = ArxivCacheProgress(
+            date: feed.date,
+            title: "Embedding ranking ready",
+            detail: "\(rankedPapers.filter { $0.similarity != nil }.count)/\(rankedPapers.count) scored",
+            completed: rankedPapers.count,
+            total: rankedPapers.count
+        )
+        return ArxivFeedResponse(
+            date: feed.date,
+            count: rankedPapers.count,
+            papers: rankedPapers,
+            groups: [
+                ArxivFeedGroup(key: "white", count: rankedPapers.filter { $0.filterGroup == "white" }.count),
+                ArxivFeedGroup(key: "neutral", count: rankedPapers.filter { $0.filterGroup == "neutral" }.count),
+                ArxivFeedGroup(key: "black", count: rankedPapers.filter { $0.filterGroup == "black" }.count)
+            ],
+            tagOptions: Array(Set(rankedPapers.flatMap(\.tags))).sorted()
+        )
+    }
+
+    private func cachedEmbeddings(
+        inputs: [DiscoverEmbeddingInput],
+        model: String,
+        client: OpenAICompatibleEmbeddingClient,
+        progressDate: String,
+        progressTitle: String,
+        totalOffset: Int
+    ) async throws -> [[Double]] {
+        guard !inputs.isEmpty else {
+            return []
+        }
+        var vectorsBySourceID: [String: [Double]] = [:]
+        var missing: [DiscoverEmbeddingInput] = []
+        for input in inputs {
+            if let cached = try localDiscoverCache.loadEmbedding(sourceID: input.sourceID, model: model, text: input.text) {
+                vectorsBySourceID[input.sourceID] = cached.vector
+            } else {
+                missing.append(input)
+            }
+        }
+
+        arxivCacheProgress = ArxivCacheProgress(
+            date: progressDate,
+            title: progressTitle,
+            detail: "\(inputs.count - missing.count)/\(inputs.count) cached",
+            completed: totalOffset + inputs.count - missing.count,
+            total: totalOffset + inputs.count
+        )
+
+        if !missing.isEmpty {
+            let vectors = try await client.embed(texts: missing.map(\.text))
+            for (input, vector) in zip(missing, vectors) {
+                let record = DiscoverEmbeddingRecord(
+                    sourceID: input.sourceID,
+                    model: model,
+                    textHash: DiscoverEmbeddingText.hash(input.text),
+                    vector: vector,
+                    generatedAt: Date()
+                )
+                try localDiscoverCache.saveEmbedding(record)
+                vectorsBySourceID[input.sourceID] = vector
+            }
+        }
+
+        arxivCacheProgress = ArxivCacheProgress(
+            date: progressDate,
+            title: progressTitle,
+            detail: "\(inputs.count)/\(inputs.count) ready",
+            completed: totalOffset + inputs.count,
+            total: totalOffset + inputs.count
+        )
+        return inputs.compactMap { vectorsBySourceID[$0.sourceID] }
+    }
+
+    private func effectiveDiscoverSimilaritySourceIDs() -> [String] {
+        let selected = normalizedSimilaritySourceIDs(discoverSelectedSimilaritySourceIDs)
+        if !selected.isEmpty {
+            return selected
+        }
+        return normalizedSimilaritySourceIDs(localDiscoverPreferences.normalized.similaritySourceTagIDs)
+    }
+
+    private func normalizedSimilaritySourceIDs(_ values: [String]) -> [String] {
+        var seen: Set<String> = []
+        var result: [String] = []
+        for value in values {
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else {
+                continue
+            }
+            let normalized = similaritySourceID(from: trimmed)
+            guard !seen.contains(normalized) else {
+                continue
+            }
+            seen.insert(normalized)
+            result.append(normalized)
+        }
+        return result
+    }
+
+    private func similaritySourceID(from value: String) -> String {
+        if value.hasPrefix("tag:") || value.hasPrefix("category:") {
+            return value
+        }
+        if let tag = tags.first(where: { $0.id == value || $0.name.localizedCaseInsensitiveCompare(value) == .orderedSame }) {
+            return "tag:\(tag.id)"
+        }
+        if let category = categories.first(where: { $0.id == value || $0.name.localizedCaseInsensitiveCompare(value) == .orderedSame }) {
+            return "category:\(category.id)"
+        }
+        return value
+    }
+
+    private func similaritySourcePapers(for sourceIDs: [String]) -> [Paper] {
+        var selectedPaperIDs: Set<String> = []
+        for sourceID in sourceIDs {
+            if sourceID.hasPrefix("tag:") {
+                let tagID = String(sourceID.dropFirst("tag:".count))
+                for paper in papers where paperTagsByID[paper.id, default: []].contains(where: { $0.id == tagID || $0.name == tagID }) {
+                    selectedPaperIDs.insert(paper.id)
+                }
+            } else if sourceID.hasPrefix("category:") {
+                let categoryID = String(sourceID.dropFirst("category:".count))
+                for paper in papers where paperCategoryIDsByID[paper.id, default: []].contains(categoryID) {
+                    selectedPaperIDs.insert(paper.id)
+                }
+            } else {
+                for paper in papers where paper.id == sourceID || paper.title.localizedCaseInsensitiveContains(sourceID) {
+                    selectedPaperIDs.insert(paper.id)
+                }
+            }
+        }
+        return papers.filter { selectedPaperIDs.contains($0.id) }
+    }
+
+    private func libraryEmbeddingText(for paper: Paper, repository: PaperRepository) throws -> String {
+        let pageText = try repository.fetchPages(paperID: paper.id)
+            .prefix(5)
+            .map(\.text)
+            .joined(separator: "\n")
+        let categoryNames = paperCategoryIDsByID[paper.id, default: []].compactMap { categoryID in
+            categories.first { $0.id == categoryID }?.name
+        }
+        let tagNames = paperTagsByID[paper.id, default: []].map(\.name)
+        return trimmedEmbeddingText(
+            DiscoverEmbeddingText.libraryPaperText(
+                title: paper.title,
+                authors: paper.authors,
+                tags: tagNames,
+                categories: categoryNames,
+                indexedText: pageText
+            )
+        )
+    }
+
+    private func trimmedEmbeddingText(_ text: String) -> String {
+        String(DiscoverEmbeddingText.normalized(text).prefix(12_000))
     }
 
     private func applyLocalDiscoverPreferences(to feed: ArxivFeedResponse) -> ArxivFeedResponse {

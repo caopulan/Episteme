@@ -1519,6 +1519,35 @@ func runLocalDiscoverEngineChecks() throws {
     try check(cachedQuery?.arxivIDs == ["2604.18803"], "discover query cache should round-trip ordered ids")
     try check(cachedEnrichment?.titleZH == "本地论文阅读器", "discover enrichment cache should round-trip processed metadata")
 
+    let embeddingText = "Recursive multi-agent systems coordinate latent-state reasoning."
+    let embeddingRecord = DiscoverEmbeddingRecord(
+        sourceID: "arxiv:2604.18803",
+        model: "text-embedding-v4",
+        textHash: DiscoverEmbeddingText.hash(embeddingText),
+        vector: [0.1, 0.2, 0.3],
+        generatedAt: enrichment.generatedAt
+    )
+    try cache.saveEmbedding(embeddingRecord)
+    let cachedEmbedding = try cache.loadEmbedding(
+        sourceID: "arxiv:2604.18803",
+        model: "text-embedding-v4",
+        text: embeddingText
+    )
+    let staleEmbedding = try cache.loadEmbedding(
+        sourceID: "arxiv:2604.18803",
+        model: "text-embedding-v4",
+        text: "\(embeddingText) changed"
+    )
+    try check(cachedEmbedding?.vector == [0.1, 0.2, 0.3], "discover embedding cache should round-trip vectors keyed by text hash")
+    try check(staleEmbedding == nil, "discover embedding cache should ignore stale text hashes")
+
+    let embeddingEndpointA = try OpenAICompatibleEmbeddingClient.endpointURL(for: "https://api.openai.com")
+    let embeddingEndpointB = try OpenAICompatibleEmbeddingClient.endpointURL(for: "https://dashscope.aliyuncs.com/compatible-mode/v1")
+    let embeddingEndpointC = try OpenAICompatibleEmbeddingClient.endpointURL(for: "https://example.com/custom/embeddings")
+    try check(embeddingEndpointA.absoluteString == "https://api.openai.com/v1/embeddings", "embedding endpoint should append /v1/embeddings to provider roots")
+    try check(embeddingEndpointB.absoluteString == "https://dashscope.aliyuncs.com/compatible-mode/v1/embeddings", "embedding endpoint should append /embeddings to /v1 base URLs")
+    try check(embeddingEndpointC.absoluteString == "https://example.com/custom/embeddings", "embedding endpoint should preserve explicit embeddings URLs")
+
     let codexJSON = """
     {
       "title_zh": "本地优先的发现引擎",
