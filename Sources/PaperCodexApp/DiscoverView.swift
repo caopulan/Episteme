@@ -171,7 +171,7 @@ struct DiscoverView: View {
         VStack(alignment: .leading, spacing: 14) {
             toolbar
 
-            if model.isLoadingArxivFeed {
+            if model.isLoadingArxivFeed && model.arxivFeed == nil {
                 ProgressView()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if papers.isEmpty {
@@ -249,34 +249,8 @@ struct DiscoverView: View {
                     .layoutPriority(-1)
 
                 HStack(spacing: 8) {
-                    Picker("Date", selection: Binding(
-                        get: { model.selectedArxivDate ?? "" },
-                        set: { date in
-                            guard !date.isEmpty else {
-                                return
-                            }
-                            Task {
-                                await model.loadArxivFeed(date: date)
-                            }
-                        }
-                    )) {
-                        ForEach(model.arxivDates, id: \.self) { date in
-                            Text(date).tag(date)
-                        }
-                    }
-                    .labelsHidden()
-                    .frame(width: 132)
-                    .controlSize(.small)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(Color(nsColor: .controlBackgroundColor))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .stroke(Color.black.opacity(0.08), lineWidth: 1)
-                            )
-                    )
+                    DateMenuButton()
+                        .environmentObject(model)
 
                     ArxivSourceBadge()
 
@@ -309,6 +283,10 @@ struct DiscoverView: View {
                     }
 
                     Spacer()
+                }
+
+                if let progress = model.arxivCacheProgress {
+                    ArxivCacheProgressStrip(progress: progress)
                 }
             }
         }
@@ -430,6 +408,111 @@ private struct ToolbarActionButton: View {
                 isHovering = hovering
             }
         }
+    }
+}
+
+private struct DateMenuButton: View {
+    @EnvironmentObject private var model: AppModel
+    @State private var isHovering = false
+
+    var body: some View {
+        Menu {
+            Button {
+                Task {
+                    await model.refreshArxivDates()
+                }
+            } label: {
+                Label(model.isRefreshingArxivDates ? "Refreshing dates" : "Refresh dates", systemImage: "arrow.clockwise")
+            }
+            Divider()
+            ForEach(Array(model.arxivDates.reversed()), id: \.self) { date in
+                Button {
+                    Task {
+                        await model.loadArxivFeed(date: date)
+                    }
+                } label: {
+                    if date == model.selectedArxivDate {
+                        Label(date, systemImage: "checkmark")
+                    } else {
+                        Text(date)
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 7) {
+                Image(systemName: model.isRefreshingArxivDates ? "arrow.clockwise.circle" : "calendar")
+                Text(model.selectedArxivDate ?? "Date")
+                    .monospacedDigit()
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .font(.system(size: 12.5, weight: .semibold))
+            .foregroundStyle(isHovering ? Color.accentColor : Color.primary.opacity(0.84))
+            .padding(.horizontal, 10)
+            .frame(height: 28)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(isHovering ? Color.accentColor.opacity(0.11) : Color(nsColor: .controlBackgroundColor))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(isHovering ? Color.accentColor.opacity(0.36) : Color.black.opacity(0.10), lineWidth: 1)
+                    )
+            )
+            .shadow(color: isHovering ? Color.accentColor.opacity(0.14) : .clear, radius: 7, y: 3)
+            .scaleEffect(isHovering ? 1.025 : 1)
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .help("Choose feed date")
+        .simultaneousGesture(TapGesture().onEnded {
+            Task {
+                await model.refreshArxivDates()
+            }
+        })
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.12)) {
+                isHovering = hovering
+            }
+        }
+    }
+}
+
+private struct ArxivCacheProgressStrip: View {
+    var progress: ArxivCacheProgress
+
+    var body: some View {
+        HStack(spacing: 10) {
+            if let fraction = progress.fraction {
+                ProgressView(value: fraction)
+                    .frame(width: 150)
+            } else {
+                ProgressView()
+                    .controlSize(.small)
+                    .frame(width: 150)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(progress.title)
+                    .font(.system(size: 12.5, weight: .semibold))
+                Text(progress.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Text(progress.date)
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.82))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color.black.opacity(0.08), lineWidth: 1)
+                )
+        )
     }
 }
 

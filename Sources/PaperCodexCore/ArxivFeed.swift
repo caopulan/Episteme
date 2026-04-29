@@ -252,6 +252,16 @@ public struct ArxivFeedAsset: Codable, Equatable, Sendable {
     }
 }
 
+public struct ArxivFeedAssetCacheSummary: Equatable, Sendable {
+    public var cached: Int
+    public var total: Int
+
+    public init(cached: Int, total: Int) {
+        self.cached = cached
+        self.total = total
+    }
+}
+
 public struct ArxivFeedAssets: Codable, Equatable, Sendable {
     public var small: ArxivFeedAsset?
     public var large: ArxivFeedAsset?
@@ -259,6 +269,28 @@ public struct ArxivFeedAssets: Codable, Equatable, Sendable {
     public init(small: ArxivFeedAsset?, large: ArxivFeedAsset?) {
         self.small = small
         self.large = large
+    }
+}
+
+public extension ArxivFeedResponse {
+    func uniqueAssets(includeLarge: Bool) -> [ArxivFeedAsset] {
+        var result: [ArxivFeedAsset] = []
+        var seen: Set<String> = []
+        for paper in papers {
+            var paperAssets = [paper.assets.small].compactMap { $0 }
+            if includeLarge {
+                paperAssets += [paper.assets.large].compactMap { $0 }
+            }
+            for asset in paperAssets {
+                let path = asset.path.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !path.isEmpty, !seen.contains(path) else {
+                    continue
+                }
+                seen.insert(path)
+                result.append(asset)
+            }
+        }
+        return result
     }
 }
 
@@ -449,6 +481,15 @@ public final class ArxivFeedCache {
     public func cachedAssetURL(path: String) throws -> URL? {
         let url = try assetURL(path: path)
         return fileManager.fileExists(atPath: url.path) ? url : nil
+    }
+
+    public func assetCacheSummary(for feed: ArxivFeedResponse, includeLarge: Bool) throws -> ArxivFeedAssetCacheSummary {
+        let assets = feed.uniqueAssets(includeLarge: includeLarge)
+        var cached = 0
+        for asset in assets where try cachedAssetURL(path: asset.path) != nil {
+            cached += 1
+        }
+        return ArxivFeedAssetCacheSummary(cached: cached, total: assets.count)
     }
 
     public func feedURL(date: String) -> URL {

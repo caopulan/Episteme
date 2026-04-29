@@ -1426,6 +1426,21 @@ func runArxivFeedChecks() throws {
     try check(cached == response, "arXiv feed cache should round-trip feed JSON")
     let assetURL = try cache.saveAsset(Data("small".utf8), path: "images/2026-04-22/2604.18586_small.png")
     try check(FileManager.default.fileExists(atPath: assetURL.path), "arXiv feed cache should store asset bytes")
+    try check(
+        response.uniqueAssets(includeLarge: false).map(\.path) == ["images/2026-04-22/2604.18586_small.png"],
+        "arXiv feed should expose unique small assets for preload progress"
+    )
+    try check(
+        response.uniqueAssets(includeLarge: true).map(\.path) == [
+            "images/2026-04-22/2604.18586_small.png",
+            "images/2026-04-22/2604.18586.png"
+        ],
+        "arXiv feed should expose unique small and large assets for preload progress"
+    )
+    let smallAssetSummary = try cache.assetCacheSummary(for: response, includeLarge: false)
+    let fullAssetSummary = try cache.assetCacheSummary(for: response, includeLarge: true)
+    try check(smallAssetSummary == ArxivFeedAssetCacheSummary(cached: 1, total: 1), "arXiv cache should count cached small assets")
+    try check(fullAssetSummary == ArxivFeedAssetCacheSummary(cached: 1, total: 2), "arXiv cache should count cached full image assets")
 
     let metadata = PaperImportMetadata(
         title: paper.displayTitle(language: "en"),

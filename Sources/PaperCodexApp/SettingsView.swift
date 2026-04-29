@@ -194,6 +194,16 @@ struct SettingsView: View {
                         .buttonStyle(.bordered)
                         .disabled(model.isSyncingCodeArxivFavorites || state.favorites.isEmpty)
                     }
+
+                    if let status = model.codeArxivFavoriteSyncStatus {
+                        HStack(spacing: 8) {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text(status)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                 }
             } else {
                 HStack {

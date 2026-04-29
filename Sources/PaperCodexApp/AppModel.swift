@@ -53,6 +53,21 @@ struct ActiveCodexRun: Identifiable, Equatable {
     var events: [CodexRunEvent]
 }
 
+struct ArxivCacheProgress: Equatable {
+    var date: String
+    var title: String
+    var detail: String
+    var completed: Int
+    var total: Int
+
+    var fraction: Double? {
+        guard total > 0 else {
+            return nil
+        }
+        return min(max(Double(completed) / Double(total), 0), 1)
+    }
+}
+
 private struct SessionPaperContext {
     var papers: [Paper]
     var pagesByPaperID: [String: [PageIndex]]
@@ -144,11 +159,14 @@ final class AppModel: ObservableObject {
     @Published var selectedArxivPaper: ArxivFeedPaper?
     @Published var arxivAssetURLs: [String: URL] = [:]
     @Published var isLoadingArxivFeed = false
+    @Published var isRefreshingArxivDates = false
     @Published var isPreloadingArxivAssets = false
     @Published var isAddingArxivPaper = false
     @Published var arxivDownloadingPaperIDs: Set<String> = []
     @Published var arxivDownloadProgressByID: [String: Double] = [:]
+    @Published var arxivCacheProgress: ArxivCacheProgress?
     @Published var isSyncingCodeArxivFavorites = false
+    @Published var codeArxivFavoriteSyncStatus: String?
     @Published var isSavingCodeArxivPreferences = false
     @Published var paperThumbnailURLsByID: [String: [URL]] = [:]
     @Published var librarySidebarWidth: CGFloat = {
@@ -379,19 +397,40 @@ final class AppModel: ObservableObject {
     func refreshArxivDatesAndFeed() async {
         do {
             isLoadingArxivFeed = true
+            isRefreshingArxivDates = true
             defer {
                 isLoadingArxivFeed = false
+                isRefreshingArxivDates = false
             }
             let client = try makeArxivFeedClient()
-            let dates = try await client.fetchDates()
-            try arxivCache.saveDates(dates)
-            arxivDates = dates.dates
+            let dates = try await fetchAndCacheArxivDates(client: client)
             let date = selectedArxivDate ?? dates.latest ?? dates.dates.last
             selectedArxivDate = date
             if let date {
                 try await loadArxivFeed(date: date, client: client)
             }
             try await refreshCodeArxivUserState(client: client)
+        } catch {
+            if let date = selectedArxivDate,
+               (try? loadCachedArxivFeed(date: date)) == true {
+                errorMessage = "Using cached arXiv feed for \(date). Refresh failed: \(error)"
+            } else {
+                errorMessage = String(describing: error)
+            }
+        }
+    }
+
+    func refreshArxivDates() async {
+        do {
+            isRefreshingArxivDates = true
+            defer {
+                isRefreshingArxivDates = false
+            }
+            let client = try makeArxivFeedClient()
+            let dates = try await fetchAndCacheArxivDates(client: client)
+            if selectedArxivDate == nil {
+                selectedArxivDate = dates.latest ?? dates.dates.last
+            }
         } catch {
             errorMessage = String(describing: error)
         }
@@ -441,10 +480,22 @@ final class AppModel: ObservableObject {
                 isLoadingArxivFeed = false
             }
             selectedArxivDate = date
+            arxivFeed = nil
+            arxivCacheProgress = ArxivCacheProgress(
+                date: date,
+                title: "Loading feed",
+                detail: "Fetching metadata",
+                completed: 0,
+                total: 0
+            )
             let client = try makeArxivFeedClient()
             try await loadArxivFeed(date: date, client: client)
         } catch {
-            errorMessage = String(describing: error)
+            if (try? loadCachedArxivFeed(date: date)) == true {
+                errorMessage = "Using cached arXiv feed for \(date). Refresh failed: \(error)"
+            } else {
+                errorMessage = String(describing: error)
+            }
         }
     }
 
@@ -453,23 +504,8 @@ final class AppModel: ObservableObject {
             guard let arxivFeed else {
                 return
             }
-            isPreloadingArxivAssets = true
-            defer {
-                isPreloadingArxivAssets = false
-            }
             let client = try makeArxivFeedClient()
-            var assets: [ArxivFeedAsset] = arxivFeed.papers.compactMap(\.assets.small)
-            if includeLarge {
-                assets += arxivFeed.papers.compactMap(\.assets.large)
-            }
-            for asset in assets {
-                if try arxivCache.cachedAssetURL(path: asset.path) != nil {
-                    continue
-                }
-                let data = try await client.fetchAsset(asset)
-                arxivAssetURLs[asset.path] = try arxivCache.saveAsset(data, path: asset.path)
-            }
-            reloadCachedArxivAssets()
+            try await preloadArxivAssets(includeLarge: includeLarge, feed: arxivFeed, client: client)
         } catch {
             if isCancellationError(error) {
                 return
@@ -635,14 +671,16 @@ final class AppModel: ObservableObject {
                 throw AppModelError.repositoryUnavailable
             }
             isSyncingCodeArxivFavorites = true
+            codeArxivFavoriteSyncStatus = "Loading CodeArXiv favorites"
             defer {
                 isSyncingCodeArxivFavorites = false
+                codeArxivFavoriteSyncStatus = nil
             }
             let client = try makeArxivFeedClient()
             let state = try await client.fetchUserState(username: arxivFeedUsername, includePapers: true)
             codeArxivUserState = state
             var sortOrder = categories.count + 1
-            for favorite in state.favorites {
+            for (favoriteIndex, favorite) in state.favorites.enumerated() {
                 let category = PaperCodexCore.Category(
                     id: codeArxivCategoryID(for: favorite),
                     parentID: nil,
@@ -651,19 +689,24 @@ final class AppModel: ObservableObject {
                 )
                 sortOrder += 1
                 try repository.upsertCategory(category)
-                for remotePaper in favorite.papers {
+                let remotePapers = try await resolvedFavoritePapers(favorite, client: client)
+                var assignedLocalPaperIDs: Set<String> = []
+                for (paperIndex, remotePaper) in remotePapers.enumerated() {
+                    codeArxivFavoriteSyncStatus = "Syncing \(favorite.name) \(paperIndex + 1)/\(remotePapers.count) · folder \(favoriteIndex + 1)/\(state.favorites.count)"
                     let localPaper: Paper
-                    if let existing = libraryPaper(for: remotePaper) {
+                    if let existing = try repositoryPaper(for: remotePaper, repository: repository) {
                         localPaper = existing
                     } else {
                         localPaper = try await importArxivPaper(remotePaper, isSaved: true)
                     }
+                    assignedLocalPaperIDs.insert(localPaper.id)
                     try repository.assignPaper(localPaper.id, toCategory: category.id)
                     for tagName in remotePaper.tags {
                         let tag = try ensureTag(named: tagName, repository: repository)
                         try repository.assignPaper(localPaper.id, toTag: tag.id)
                     }
                 }
+                try pruneCategory(category.id, keepingPaperIDs: assignedLocalPaperIDs, repository: repository)
             }
             try reloadLibrary()
         } catch {
@@ -1202,10 +1245,25 @@ final class AppModel: ObservableObject {
         return result
     }
 
+    private func fetchAndCacheArxivDates(client: ArxivFeedClient) async throws -> ArxivFeedDateIndex {
+        let dates = try await client.fetchDates()
+        try arxivCache.saveDates(dates)
+        arxivDates = dates.dates
+        return dates
+    }
+
     private func loadArxivFeed(date: String, client: ArxivFeedClient) async throws {
         let feed = try await client.fetchFeed(date: date, username: arxivFeedUsername)
         try arxivCache.saveFeed(feed)
         arxivFeed = feed
+        let summary = try arxivCache.assetCacheSummary(for: feed, includeLarge: false)
+        arxivCacheProgress = ArxivCacheProgress(
+            date: date,
+            title: "Metadata cached",
+            detail: "Preview images \(summary.cached)/\(summary.total)",
+            completed: summary.cached,
+            total: summary.total
+        )
         if let user = feed.user,
            let filters = feed.filters {
             codeArxivUserState = CodeArxivUserState(
@@ -1222,9 +1280,89 @@ final class AppModel: ObservableObject {
             selectedArxivPaper = feed.papers.first
         }
         reloadCachedArxivAssets()
-        Task {
-            await preloadArxivAssets(includeLarge: false)
+        try await preloadArxivAssets(includeLarge: false, feed: feed, client: client)
+    }
+
+    @discardableResult
+    private func loadCachedArxivFeed(date: String) throws -> Bool {
+        guard let cachedFeed = try arxivCache.loadFeed(date: date) else {
+            return false
         }
+        selectedArxivDate = date
+        arxivFeed = cachedFeed
+        if let selected = selectedArxivPaper,
+           cachedFeed.papers.contains(where: { $0.id == selected.id }) {
+            selectedArxivPaper = selected
+        } else {
+            selectedArxivPaper = cachedFeed.papers.first
+        }
+        reloadCachedArxivAssets()
+        let summary = try arxivCache.assetCacheSummary(for: cachedFeed, includeLarge: false)
+        arxivCacheProgress = ArxivCacheProgress(
+            date: date,
+            title: "Offline cache",
+            detail: "Preview images \(summary.cached)/\(summary.total)",
+            completed: summary.cached,
+            total: summary.total
+        )
+        return true
+    }
+
+    private func preloadArxivAssets(includeLarge: Bool, feed: ArxivFeedResponse, client: ArxivFeedClient) async throws {
+        let assets = feed.uniqueAssets(includeLarge: includeLarge)
+        guard !assets.isEmpty else {
+            arxivCacheProgress = ArxivCacheProgress(
+                date: feed.date,
+                title: includeLarge ? "Full images ready" : "Preview images ready",
+                detail: "No preview assets in this feed",
+                completed: 0,
+                total: 0
+            )
+            return
+        }
+
+        isPreloadingArxivAssets = true
+        defer {
+            isPreloadingArxivAssets = false
+        }
+
+        var cachedPaths: Set<String> = []
+        for asset in assets where try arxivCache.cachedAssetURL(path: asset.path) != nil {
+            cachedPaths.insert(asset.path)
+        }
+        var completed = cachedPaths.count
+        arxivCacheProgress = ArxivCacheProgress(
+            date: feed.date,
+            title: includeLarge ? "Caching full images" : "Caching preview images",
+            detail: "\(completed)/\(assets.count) already cached",
+            completed: completed,
+            total: assets.count
+        )
+
+        for asset in assets {
+            if cachedPaths.contains(asset.path) {
+                continue
+            }
+            let data = try await client.fetchAsset(asset)
+            arxivAssetURLs[asset.path] = try arxivCache.saveAsset(data, path: asset.path)
+            completed += 1
+            arxivCacheProgress = ArxivCacheProgress(
+                date: feed.date,
+                title: includeLarge ? "Caching full images" : "Caching preview images",
+                detail: "\(completed)/\(assets.count) cached",
+                completed: completed,
+                total: assets.count
+            )
+        }
+
+        reloadCachedArxivAssets()
+        arxivCacheProgress = ArxivCacheProgress(
+            date: feed.date,
+            title: includeLarge ? "Full images ready" : "Preview images ready",
+            detail: "\(completed)/\(assets.count) cached",
+            completed: completed,
+            total: assets.count
+        )
     }
 
     private func refreshCodeArxivUserState(client: ArxivFeedClient) async throws {
@@ -1239,11 +1377,8 @@ final class AppModel: ObservableObject {
             arxivDates = cachedDates.dates
             selectedArxivDate = cachedDates.latest ?? cachedDates.dates.last
         }
-        if let date = selectedArxivDate,
-           let cachedFeed = try? arxivCache.loadFeed(date: date) {
-            arxivFeed = cachedFeed
-            selectedArxivPaper = cachedFeed.papers.first
-            reloadCachedArxivAssets()
+        if let date = selectedArxivDate {
+            _ = try? loadCachedArxivFeed(date: date)
         }
     }
 
@@ -1322,6 +1457,58 @@ final class AppModel: ObservableObject {
         "codearxiv-favorite-\(favorite.id)-\(makeSlug(from: favorite.name))"
     }
 
+    private func resolvedFavoritePapers(_ favorite: CodeArxivFavorite, client: ArxivFeedClient) async throws -> [ArxivFeedPaper] {
+        var papersByID: [String: ArxivFeedPaper] = [:]
+        for paper in favorite.papers {
+            papersByID[paper.id] = paper
+            papersByID[paper.arxivID] = paper
+            if let versionedID = paper.arxivIDVersioned {
+                papersByID[versionedID] = paper
+            }
+        }
+
+        guard !favorite.paperIDs.isEmpty else {
+            return favorite.papers
+        }
+
+        var resolved: [ArxivFeedPaper] = []
+        for paperID in favorite.paperIDs {
+            if let paper = papersByID[paperID] {
+                resolved.append(paper)
+                continue
+            }
+            let envelope = try await client.fetchPaper(id: paperID)
+            let paper = envelope.paper
+            papersByID[paper.id] = paper
+            papersByID[paper.arxivID] = paper
+            if let versionedID = paper.arxivIDVersioned {
+                papersByID[versionedID] = paper
+            }
+            resolved.append(paper)
+        }
+        return resolved
+    }
+
+    private func repositoryPaper(for arxivPaper: ArxivFeedPaper, repository: PaperRepository) throws -> Paper? {
+        let absURL = arxivPaper.links.abs
+        let pdfURL = arxivPaper.links.pdf
+        return try repository.fetchPapers().first { paper in
+            paper.sourceURL == absURL
+                || paper.sourceURL == pdfURL
+                || paper.sourceURL?.contains(arxivPaper.id) == true
+                || paper.sourceURL?.contains(arxivPaper.arxivID) == true
+        }
+    }
+
+    private func pruneCategory(_ categoryID: String, keepingPaperIDs paperIDs: Set<String>, repository: PaperRepository) throws {
+        for paper in try repository.fetchPapers() where !paperIDs.contains(paper.id) {
+            let categoryIDs = try repository.fetchCategoryIDs(forPaperID: paper.id)
+            if categoryIDs.contains(categoryID) {
+                try repository.removePaper(paper.id, fromCategory: categoryID)
+            }
+        }
+    }
+
     private func ensureTag(named name: String, repository: PaperRepository) throws -> PaperTag {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
@@ -1396,7 +1583,10 @@ final class AppModel: ObservableObject {
         guard let url = URL(string: trimmedBaseURL), url.scheme != nil else {
             throw ArxivFeedClientError.invalidURL(trimmedBaseURL)
         }
-        return try ArxivFeedClient(baseURL: url, token: arxivFeedToken)
+        let configuration = URLSessionConfiguration.default
+        configuration.timeoutIntervalForRequest = 12
+        configuration.timeoutIntervalForResource = 30
+        return try ArxivFeedClient(baseURL: url, token: arxivFeedToken, session: URLSession(configuration: configuration))
     }
 
     private func makeManualID(prefix: String, name: String) -> String {
