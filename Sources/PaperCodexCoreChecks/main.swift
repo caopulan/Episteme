@@ -1471,6 +1471,9 @@ func runArxivFeedChecks() throws {
 func runLocalDiscoverEngineChecks() throws {
     let range = try DiscoverDateRange(start: "2026-04-27", end: "2026-04-29")
     try check(range.dates == ["2026-04-27", "2026-04-28", "2026-04-29"], "discover date range should expand inclusive dates")
+    let last7Days = try DiscoverQuickRange.last7Days.dateRange(endingAt: "2026-04-29")
+    try check(last7Days.start == "2026-04-23", "last 7 days should include the ending date")
+    try check(last7Days.end == "2026-04-29", "quick range should preserve the ending date")
 
     let queryA = DiscoverQuery(
         keyword: "diffusion policy",
@@ -1515,6 +1518,25 @@ func runLocalDiscoverEngineChecks() throws {
     let cachedEnrichment = try cache.loadEnrichment(arxivID: "2604.18803")
     try check(cachedQuery?.arxivIDs == ["2604.18803"], "discover query cache should round-trip ordered ids")
     try check(cachedEnrichment?.titleZH == "本地论文阅读器", "discover enrichment cache should round-trip processed metadata")
+
+    let codexJSON = """
+    {
+      "title_zh": "本地优先的发现引擎",
+      "summary_zh": "这个工作把 arXiv 检索、本地缓存和快速浏览结合起来。",
+      "contribution": "提出一个本地优先的新论文发现流程。",
+      "tags": ["local-first", "arxiv", "local-first"],
+      "links": {"github": "https://github.com/example/discover"}
+    }
+    """
+    let parsed = try DiscoverEnrichmentParser.parse(
+        codexJSON,
+        arxivID: "2604.18804",
+        modelIdentity: "codex-test",
+        generatedAt: Date(timeIntervalSince1970: 1_777_300_010)
+    )
+    try check(parsed.titleZH == "本地优先的发现引擎", "discover parser should read Chinese title")
+    try check(parsed.tags == ["local-first", "arxiv"], "discover parser should dedupe tags while preserving order")
+    try check(parsed.links["github"] == "https://github.com/example/discover", "discover parser should preserve extracted links")
 }
 
 func runLocalArxivClientChecks() throws {

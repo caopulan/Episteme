@@ -118,6 +118,57 @@ public struct DiscoverQueryResult: Codable, Equatable, Sendable {
     }
 }
 
+public enum DiscoverQuickRange: String, CaseIterable, Identifiable, Sendable {
+    case today
+    case thisWeek
+    case thisMonth
+    case last7Days
+    case last30Days
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .today:
+            "Today"
+        case .thisWeek:
+            "This Week"
+        case .thisMonth:
+            "This Month"
+        case .last7Days:
+            "Last 7 Days"
+        case .last30Days:
+            "Last 30 Days"
+        }
+    }
+
+    public func dateRange(endingAt value: String) throws -> DiscoverDateRange {
+        guard let endDate = discoverDateFormatter.date(from: value) else {
+            throw LocalDiscoverEngineError.invalidDate(value)
+        }
+        let calendar = Calendar(identifier: .gregorian)
+        let startDate: Date
+        switch self {
+        case .today:
+            startDate = endDate
+        case .thisWeek:
+            let components = calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: endDate)
+            startDate = calendar.date(from: components) ?? endDate
+        case .thisMonth:
+            let components = calendar.dateComponents([.year, .month], from: endDate)
+            startDate = calendar.date(from: components) ?? endDate
+        case .last7Days:
+            startDate = calendar.date(byAdding: .day, value: -6, to: endDate) ?? endDate
+        case .last30Days:
+            startDate = calendar.date(byAdding: .day, value: -29, to: endDate) ?? endDate
+        }
+        return try DiscoverDateRange(
+            start: discoverDateFormatter.string(from: startDate),
+            end: discoverDateFormatter.string(from: endDate)
+        )
+    }
+}
+
 public struct DiscoverPaperEnrichment: Codable, Equatable, Sendable {
     public static let currentProcessorVersion = "local-discover-enrichment-v1"
     public static let currentPromptVersion = "discover-metadata-zh-v1"
@@ -162,6 +213,58 @@ public struct DiscoverPaperEnrichment: Codable, Equatable, Sendable {
 
     public var isCurrent: Bool {
         processorVersion == Self.currentProcessorVersion && promptVersion == Self.currentPromptVersion
+    }
+}
+
+public enum DiscoverEnrichmentParser {
+    public static func parse(
+        _ text: String,
+        arxivID: String,
+        modelIdentity: String,
+        generatedAt: Date
+    ) throws -> DiscoverPaperEnrichment {
+        let jsonText = extractJSONObject(from: text)
+        let data = Data(jsonText.utf8)
+        let decoded = try JSONDecoder().decode(DecodedDiscoverEnrichment.self, from: data)
+        return DiscoverPaperEnrichment(
+            arxivID: arxivID,
+            processorVersion: DiscoverPaperEnrichment.currentProcessorVersion,
+            promptVersion: DiscoverPaperEnrichment.currentPromptVersion,
+            modelIdentity: modelIdentity,
+            titleZH: decoded.titleZH.trimmingCharacters(in: .whitespacesAndNewlines),
+            summaryZH: decoded.summaryZH.trimmingCharacters(in: .whitespacesAndNewlines),
+            contribution: decoded.contribution.trimmingCharacters(in: .whitespacesAndNewlines),
+            tags: normalizedOrdered(decoded.tags),
+            links: decoded.links.filter { !$0.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty },
+            generatedAt: generatedAt,
+            error: nil
+        )
+    }
+
+    private static func extractJSONObject(from text: String) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let start = trimmed.firstIndex(of: "{"),
+              let end = trimmed.lastIndex(of: "}"),
+              start <= end else {
+            return trimmed
+        }
+        return String(trimmed[start...end])
+    }
+}
+
+private struct DecodedDiscoverEnrichment: Decodable {
+    var titleZH: String
+    var summaryZH: String
+    var contribution: String
+    var tags: [String]
+    var links: [String: String]
+
+    private enum CodingKeys: String, CodingKey {
+        case titleZH = "title_zh"
+        case summaryZH = "summary_zh"
+        case contribution
+        case tags
+        case links
     }
 }
 
@@ -260,3 +363,29 @@ private func safeFilename(_ value: String) -> String {
     let filename = String(mapped).trimmingCharacters(in: CharacterSet(charactersIn: "-"))
     return filename.isEmpty ? "item" : filename
 }
+
+private func normalizedOrdered(_ values: [String]) -> [String] {
+    var seen: Set<String> = []
+    var result: [String] = []
+    for value in values {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            continue
+        }
+        let key = trimmed.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+        guard !seen.contains(key) else {
+            continue
+        }
+        seen.insert(key)
+        result.append(trimmed)
+    }
+    return result
+}
+
+private let discoverDateFormatter: DateFormatter = {
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.timeZone = TimeZone(secondsFromGMT: 0)
+    formatter.dateFormat = "yyyy-MM-dd"
+    return formatter
+}()
