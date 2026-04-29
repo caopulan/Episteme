@@ -180,6 +180,14 @@ private func isCancellationError(_ error: any Error) -> Bool {
     return nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled
 }
 
+private func currentISODate() -> String {
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.timeZone = TimeZone(secondsFromGMT: 0)
+    formatter.dateFormat = "yyyy-MM-dd"
+    return formatter.string(from: Date())
+}
+
 @MainActor
 final class AppModel: ObservableObject {
     @Published var route: AppRoute = .library
@@ -217,6 +225,16 @@ final class AppModel: ObservableObject {
     @Published var selectedArxivDate: String?
     @Published var arxivFeed: ArxivFeedResponse?
     @Published var selectedArxivPaper: ArxivFeedPaper?
+    @Published var discoverKeyword = ""
+    @Published var discoverStartDate: String = currentISODate()
+    @Published var discoverEndDate: String = currentISODate()
+    @Published var discoverSelectedCategories: [String] = ["cs.CV"]
+    @Published var discoverSelectedSimilaritySourceIDs: [String] = []
+    @Published var discoverResultIDs: [String] = []
+    @Published var discoverEnrichmentsByID: [String: DiscoverPaperEnrichment] = [:]
+    @Published var isSearchingDiscover = false
+    @Published var isProcessingDiscoverResults = false
+    @Published var discoverProcessingProgress: ArxivCacheProgress?
     @Published var arxivAssetURLs: [String: URL] = [:]
     @Published var isLoadingArxivFeed = false
     @Published var isRefreshingArxivDates = false
@@ -234,11 +252,14 @@ final class AppModel: ObservableObject {
     private var repository: PaperRepository?
     private let supportRoot: URL
     private let arxivCache: ArxivFeedCache
+    private let localDiscoverCache: LocalDiscoverCache
     private let thumbnailCache: PDFThumbnailCache
     private let workspaceManager = SessionWorkspaceManager()
     private var watchedFolderAutoScanTask: Task<Void, Never>?
     private var activeCodexRunHandle: CodexRunHandle?
+    private var activeDiscoverCodexRunHandle: CodexRunHandle?
     private var isCancellingCodexRun = false
+    private var isCancellingDiscoverProcessing = false
 
     var arxivDisposableCachePath: String {
         supportRoot.appendingPathComponent("cache", isDirectory: true).path
@@ -252,7 +273,9 @@ final class AppModel: ObservableObject {
         let root = PaperCodexPaths.supportRoot()
         supportRoot = root
         arxivCache = ArxivFeedCache(root: root.appendingPathComponent("arxiv-cache", isDirectory: true))
+        localDiscoverCache = LocalDiscoverCache(root: root.appendingPathComponent("discover-cache", isDirectory: true))
         thumbnailCache = PDFThumbnailCache(root: root.appendingPathComponent("thumbnails", isDirectory: true))
+        discoverSelectedCategories = localDiscoverPreferences.categories.isEmpty ? ["cs.CV"] : [localDiscoverPreferences.categories[0]]
         do {
             try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
             let store = try PaperRepository(databasePath: root.appendingPathComponent("store.sqlite").path)
@@ -483,6 +506,135 @@ final class AppModel: ObservableObject {
         Task {
             await sendMessage(prompt.content)
         }
+    }
+
+    func applyDiscoverQuickRange(_ preset: DiscoverQuickRange) {
+        do {
+            let range = try preset.dateRange(endingAt: discoverEndDate)
+            discoverStartDate = range.start
+            discoverEndDate = range.end
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func searchDiscover() async {
+        do {
+            isSearchingDiscover = true
+            defer {
+                isSearchingDiscover = false
+            }
+
+            let range = try DiscoverDateRange(start: discoverStartDate, end: discoverEndDate)
+            let categories = discoverSelectedCategories.isEmpty ? [localDiscoverPreferences.normalized.categories.first ?? "cs.CV"] : discoverSelectedCategories
+            let query = DiscoverQuery(
+                keyword: discoverKeyword,
+                dateRange: range,
+                categories: categories,
+                similaritySourceIDs: discoverSelectedSimilaritySourceIDs,
+                rankingVersion: "local-rank-v1"
+            ).normalized
+            discoverStartDate = query.dateRange.start
+            discoverEndDate = query.dateRange.end
+            discoverSelectedCategories = query.categories
+
+            arxivCacheProgress = ArxivCacheProgress(
+                date: "\(range.start)...\(range.end)",
+                title: "Searching arXiv",
+                detail: categories.joined(separator: ", "),
+                completed: 0,
+                total: 0
+            )
+
+            let client = makeLocalArxivClient(categories: categories)
+            let liveFeed = try await client.fetchFeed(range: range)
+            let filteredFeed = filterDiscoverFeed(liveFeed, keyword: query.keyword)
+            try displayDiscoverFeed(filteredFeed, query: query, progressTitle: "Search results cached")
+        } catch {
+            if (try? loadCachedDiscoverSearch()) == true {
+                errorMessage = "Using cached Discover results. Search failed: \(error)"
+            } else {
+                errorMessage = String(describing: error)
+            }
+        }
+    }
+
+    func processCurrentDiscoverResults(_ papers: [ArxivFeedPaper]) async {
+        guard !isProcessingDiscoverResults else {
+            return
+        }
+        isProcessingDiscoverResults = true
+        isCancellingDiscoverProcessing = false
+        defer {
+            isProcessingDiscoverResults = false
+            isCancellingDiscoverProcessing = false
+            activeDiscoverCodexRunHandle = nil
+        }
+
+        let visiblePapers = papers
+        let total = visiblePapers.count
+        var completed = 0
+        var cached = 0
+        var failed = 0
+        discoverProcessingProgress = ArxivCacheProgress(
+            date: selectedArxivDate ?? "\(discoverStartDate)...\(discoverEndDate)",
+            title: "Processing results",
+            detail: "0/\(total) processed",
+            completed: completed,
+            total: total
+        )
+
+        for paper in visiblePapers {
+            if isCancellingDiscoverProcessing || Task.isCancelled {
+                break
+            }
+            if let existing = try? localDiscoverCache.loadEnrichment(arxivID: paper.id),
+               existing.isCurrent {
+                discoverEnrichmentsByID[paper.id] = existing
+                completed += 1
+                cached += 1
+                updateDiscoverProcessingProgress(completed: completed, cached: cached, failed: failed, total: total)
+                continue
+            }
+
+            do {
+                let enrichment = try await runDiscoverCodexEnrichment(for: paper)
+                try localDiscoverCache.saveEnrichment(enrichment)
+                discoverEnrichmentsByID[paper.id] = enrichment
+            } catch {
+                if isCancellingDiscoverProcessing || Task.isCancelled {
+                    break
+                }
+                let failedEnrichment = DiscoverPaperEnrichment(
+                    arxivID: paper.id,
+                    processorVersion: DiscoverPaperEnrichment.currentProcessorVersion,
+                    promptVersion: DiscoverPaperEnrichment.currentPromptVersion,
+                    modelIdentity: "codex",
+                    titleZH: "",
+                    summaryZH: "",
+                    contribution: "",
+                    tags: [],
+                    links: [:],
+                    generatedAt: Date(),
+                    error: String(describing: error)
+                )
+                try? localDiscoverCache.saveEnrichment(failedEnrichment)
+                discoverEnrichmentsByID[paper.id] = failedEnrichment
+                failed += 1
+            }
+
+            completed += 1
+            updateDiscoverProcessingProgress(completed: completed, cached: cached, failed: failed, total: total)
+        }
+    }
+
+    func cancelDiscoverProcessing() {
+        isCancellingDiscoverProcessing = true
+        activeDiscoverCodexRunHandle?.cancel()
+    }
+
+    func discoverEnrichment(for paper: ArxivFeedPaper) -> DiscoverPaperEnrichment? {
+        discoverEnrichmentsByID[paper.id]
     }
 
     func refreshArxivDatesAndFeed() async {
@@ -1280,6 +1432,103 @@ final class AppModel: ObservableObject {
         reloadCachedArxivAssets()
     }
 
+    private func displayDiscoverFeed(_ liveFeed: ArxivFeedResponse, query: DiscoverQuery, progressTitle: String) throws {
+        let feed = applyLocalDiscoverPreferences(to: liveFeed)
+        try arxivCache.saveFeed(feed)
+        try mergeAndSaveArxivDate(feed.date)
+        try localDiscoverCache.saveQueryResult(
+            DiscoverQueryResult(query: query.normalized, arxivIDs: feed.papers.map(\.id), generatedAt: Date())
+        )
+        selectedArxivDate = feed.date
+        arxivFeed = feed
+        discoverResultIDs = feed.papers.map(\.id)
+        selectedArxivPaper = feed.papers.first
+        try loadDiscoverEnrichments(for: feed.papers)
+        arxivCacheProgress = ArxivCacheProgress(
+            date: feed.date,
+            title: progressTitle,
+            detail: "\(feed.papers.count) papers",
+            completed: feed.papers.count,
+            total: feed.papers.count
+        )
+        reloadCachedArxivAssets()
+    }
+
+    private func filterDiscoverFeed(_ feed: ArxivFeedResponse, keyword: String) -> ArxivFeedResponse {
+        let query = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else {
+            return feed
+        }
+        let terms = query.lowercased().split(separator: " ").map(String.init)
+        let papers = feed.papers.filter { paper in
+            let haystack = [
+                paper.id,
+                paper.title.en,
+                paper.title.zh,
+                paper.abstract.en,
+                paper.abstract.zh,
+                paper.summary.en,
+                paper.summary.zh,
+                paper.authors.joined(separator: " "),
+                paper.categories.joined(separator: " "),
+                paper.listCategories.joined(separator: " "),
+                paper.tags.joined(separator: " ")
+            ]
+                .joined(separator: " ")
+                .lowercased()
+            return terms.allSatisfy { haystack.contains($0) }
+        }
+        return ArxivFeedResponse(
+            date: feed.date,
+            count: papers.count,
+            papers: papers,
+            groups: feed.groups,
+            tagOptions: feed.tagOptions
+        )
+    }
+
+    @discardableResult
+    private func loadCachedDiscoverSearch() throws -> Bool {
+        let range = try DiscoverDateRange(start: discoverStartDate, end: discoverEndDate)
+        let categories = discoverSelectedCategories.isEmpty ? [localDiscoverPreferences.normalized.categories.first ?? "cs.CV"] : discoverSelectedCategories
+        let query = DiscoverQuery(
+            keyword: discoverKeyword,
+            dateRange: range,
+            categories: categories,
+            similaritySourceIDs: discoverSelectedSimilaritySourceIDs,
+            rankingVersion: "local-rank-v1"
+        ).normalized
+        guard let cachedFeed = try arxivCache.loadFeed(date: "\(range.start)...\(range.end)") else {
+            return false
+        }
+        let filteredFeed = filterDiscoverFeed(cachedFeed, keyword: query.keyword)
+        try displayDiscoverFeed(filteredFeed, query: query, progressTitle: "Cached search")
+        return true
+    }
+
+    private func loadDiscoverEnrichments(for papers: [ArxivFeedPaper]) throws {
+        var enrichments = discoverEnrichmentsByID
+        for paper in papers {
+            if let enrichment = try localDiscoverCache.loadEnrichment(arxivID: paper.id) {
+                enrichments[paper.id] = enrichment
+            }
+        }
+        discoverEnrichmentsByID = enrichments.filter { entry in
+            papers.contains { $0.id == entry.key }
+        }
+    }
+
+    private func updateDiscoverProcessingProgress(completed: Int, cached: Int, failed: Int, total: Int) {
+        let processed = max(completed - cached - failed, 0)
+        discoverProcessingProgress = ArxivCacheProgress(
+            date: selectedArxivDate ?? "\(discoverStartDate)...\(discoverEndDate)",
+            title: isCancellingDiscoverProcessing ? "Stopping processing" : "Processing results",
+            detail: "\(processed) processed · \(cached) cached · \(failed) failed · \(completed)/\(total)",
+            completed: completed,
+            total: total
+        )
+    }
+
     @discardableResult
     private func loadCachedArxivFeed(date: String) throws -> Bool {
         guard let cachedFeed = try arxivCache.loadFeed(date: date) else {
@@ -1551,9 +1800,9 @@ final class AppModel: ObservableObject {
         return data
     }
 
-    private func makeLocalArxivClient() -> LocalArxivClient {
+    private func makeLocalArxivClient(categories overrideCategories: [String]? = nil) -> LocalArxivClient {
         let preferences = localDiscoverPreferences.normalized
-        let categories = preferences.categories.isEmpty ? LocalArxivClient.defaultCategories : preferences.categories
+        let categories = overrideCategories ?? (preferences.categories.isEmpty ? LocalArxivClient.defaultCategories : preferences.categories)
         let configuration = URLSessionConfiguration.default
         configuration.timeoutIntervalForRequest = 18
         configuration.timeoutIntervalForResource = 60
@@ -1561,6 +1810,72 @@ final class AppModel: ObservableObject {
             configuration: LocalArxivClientConfiguration(categories: categories),
             session: URLSession(configuration: configuration)
         )
+    }
+
+    private func runDiscoverCodexEnrichment(for paper: ArxivFeedPaper) async throws -> DiscoverPaperEnrichment {
+        let executable = try CodexCLI.findCodexExecutable(preferWorkspaceImageOutput: false)
+        let cli = CodexCLI(executablePath: executable)
+        let workspaceURL = supportRoot
+            .appendingPathComponent("discover-processing", isDirectory: true)
+            .appendingPathComponent("\(makeSlug(from: paper.id))-\(UUID().uuidString.lowercased())", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspaceURL, withIntermediateDirectories: true)
+        let outputURL = workspaceURL.appendingPathComponent("last-message.json")
+        let eventLogURL = workspaceURL.appendingPathComponent("events.jsonl")
+        let modelOverride = effectiveModelOverride(prefersWorkspaceImageOutput: false)
+        let modelIdentity = modelOverride.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "codex" : "codex:\(modelOverride)"
+        let prompt = discoverEnrichmentPrompt(for: paper)
+        let arguments = cli.startArguments(
+            prompt: prompt,
+            workspacePath: workspaceURL.path,
+            outputLastMessagePath: outputURL.path,
+            modelOverride: modelOverride,
+            reasoningEffort: codexReasoningEffort
+        )
+        let runHandle = CodexRunHandle()
+        activeDiscoverCodexRunHandle = runHandle
+        _ = try await Task.detached(priority: .userInitiated) {
+            try cli.runStreaming(arguments: arguments, eventLogURL: eventLogURL, runHandle: runHandle) { _ in }
+        }.value
+        activeDiscoverCodexRunHandle = nil
+        let lastMessage = try String(contentsOf: outputURL, encoding: .utf8)
+        return try DiscoverEnrichmentParser.parse(
+            lastMessage,
+            arxivID: paper.id,
+            modelIdentity: modelIdentity,
+            generatedAt: Date()
+        )
+    }
+
+    private func discoverEnrichmentPrompt(for paper: ArxivFeedPaper) -> String {
+        """
+        You are helping Paper Codex enrich an arXiv discovery card.
+        Return strict JSON only. Do not wrap the JSON in Markdown.
+
+        Required JSON schema:
+        {
+          "title_zh": "Chinese translation of the title",
+          "summary_zh": "2 concise Chinese sentences summarizing the paper from title and abstract",
+          "contribution": "1 concise Chinese sentence naming the main contribution",
+          "tags": ["3-8 short lowercase tags"],
+          "links": {"github": "https://...", "project": "https://...", "hugging_face": "https://..."}
+        }
+
+        Use empty strings or omit link keys when no link is present. Tags should be useful for paper discovery.
+
+        arXiv ID: \(paper.id)
+        Primary category: \(paper.primaryCategory ?? paper.categories.first ?? "unknown")
+        Categories: \(paper.categories.joined(separator: ", "))
+        Title: \(paper.title.en)
+        Authors: \(paper.authors.joined(separator: ", "))
+        Abstract: \(paper.abstract.en)
+        Comment: \(paper.comment)
+        Known links:
+        abs: \(paper.links.abs ?? "")
+        pdf: \(paper.links.pdf ?? "")
+        github: \(paper.links.github ?? "")
+        project: \(paper.links.project ?? "")
+        hugging_face: \(paper.links.huggingFace ?? "")
+        """
     }
 
     private func makeManualID(prefix: String, name: String) -> String {
