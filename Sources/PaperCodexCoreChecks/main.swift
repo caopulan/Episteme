@@ -288,6 +288,24 @@ func runRepositoryChecks() throws {
     try check(removedTags.isEmpty, "paper tag links should be removable")
 }
 
+func runSQLiteHelperChecks() throws {
+    let databaseURL = FileManager.default.temporaryDirectory
+        .appendingPathComponent("paper-codex-sqlite-helpers-\(UUID().uuidString).sqlite")
+    let database = try SQLiteDatabase(path: databaseURL.path)
+    try database.transaction {
+        try database.execute("CREATE TABLE sample (id TEXT PRIMARY KEY, value TEXT);")
+        try database.run("INSERT INTO sample (id, value) VALUES (?, ?);", bindings: [.text("a"), .text("one")])
+    }
+
+    let columns = try database.tableColumns("sample")
+    let values = try database.query("SELECT value FROM sample WHERE id = ?;", bindings: [.text("a")]) { row in
+        try row.text(0)
+    }
+
+    try check(columns == Set(["id", "value"]), "SQLite tableColumns should read table schema")
+    try check(values == ["one"], "SQLite transaction should commit successful work")
+}
+
 func runCitationChecks() throws {
     let parsed = CitationParser.parse("Answer [[cite:paper:paper-a:p5:b17]] and [[cite:paper:paper-a:p5:asel1]].")
     try check(parsed.citations.map(\.id) == ["paper:paper-a:p5:b17", "paper:paper-a:p5:asel1"], "citation parser should preserve citation IDs")
@@ -1326,6 +1344,10 @@ do {
     if selectedChecks.isEmpty || selectedChecks.contains("repository") {
         try runRepositoryChecks()
         print("repository: pass")
+    }
+    if selectedChecks.isEmpty || selectedChecks.contains("sqlite-helpers") {
+        try runSQLiteHelperChecks()
+        print("sqlite-helpers: pass")
     }
     if selectedChecks.isEmpty || selectedChecks.contains("citations") {
         try runCitationChecks()

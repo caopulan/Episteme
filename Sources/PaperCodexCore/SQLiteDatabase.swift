@@ -88,6 +88,32 @@ public final class SQLiteDatabase {
         }
     }
 
+    public func transaction<T>(_ body: () throws -> T) throws -> T {
+        try execute("BEGIN IMMEDIATE TRANSACTION;")
+        do {
+            let value = try body()
+            try execute("COMMIT;")
+            return value
+        } catch {
+            try? execute("ROLLBACK;")
+            throw error
+        }
+    }
+
+    public func tableColumns(_ tableName: String) throws -> Set<String> {
+        let safeName = tableName.filter { character in
+            character.isLetter || character.isNumber || character == "_"
+        }
+        guard safeName == tableName, !safeName.isEmpty else {
+            throw SQLiteStoreError.prepareFailed(sql: "PRAGMA table_info", message: "Unsafe table name \(tableName)")
+        }
+
+        let columns = try query("PRAGMA table_info(\(safeName));") { row in
+            try row.text(1)
+        }
+        return Set(columns)
+    }
+
     private func prepare(_ sql: String) throws -> OpaquePointer? {
         var statement: OpaquePointer?
         if sqlite3_prepare_v2(handle, sql, -1, &statement, nil) != SQLITE_OK {
