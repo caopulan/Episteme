@@ -443,8 +443,17 @@ func runArxivCacheDataStoreChecks() throws {
     let repository = try PaperRepository(databasePath: databaseURL.path)
     try repository.migrate()
     let database = try SQLiteDatabase(path: databaseURL.path)
-    let store = ArxivCacheDataStore(database: database)
     let now = Date(timeIntervalSince1970: 1_777_300_000)
+    let future = Date(timeInterval: 3_600, since: now)
+    let past = Date(timeInterval: -3_600, since: now)
+    let dates = ISO8601DateFormatter()
+    let store = ArxivCacheDataStore(database: database, now: { now })
+
+    let missingStatus = try store.feedCacheStatus(date: "2026-04-28")
+    try check(!missingStatus.metadataCached, "arXiv cache store should report missing metadata cache")
+    try check(missingStatus.cachedAssetCount == 0, "arXiv cache store should report zero assets for missing dates")
+    try check(missingStatus.cachedPDFCount == 0, "arXiv cache store should report zero PDFs for missing dates")
+
     try store.upsertFeedDate(
         date: "2026-04-29",
         source: "codearxiv",
@@ -453,6 +462,23 @@ func runArxivCacheDataStoreChecks() throws {
         cachedAt: now,
         expiresAt: nil
     )
+    try database.run("""
+    INSERT INTO arxiv_assets (
+      asset_key, arxiv_id, date, kind, local_path, url, content_hash, byte_count, cached_at, last_accessed_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+    """, bindings: [
+        .text("asset:2604.18586:thumbnail"),
+        .text("2604.18586"),
+        .text("2026-04-29"),
+        .text("thumbnail"),
+        .text("/cache/2604.18586.png"),
+        .text("https://example.test/2604.18586.png"),
+        .text("hash-asset"),
+        .int64(321),
+        .text(dates.string(from: now)),
+        .null
+    ])
     try store.upsertPDFCache(
         arxivID: "2604.18586",
         date: "2026-04-29",
@@ -464,8 +490,99 @@ func runArxivCacheDataStoreChecks() throws {
         promotedPaperID: nil
     )
     let status = try store.feedCacheStatus(date: "2026-04-29")
-    try check(status.metadataCached, "arXiv cache store should report metadata cache")
+    try check(status.metadataCached, "arXiv cache store should report metadata cache with nil expiry")
+    try check(status.cachedAssetCount == 1, "arXiv cache store should count cached assets")
     try check(status.cachedPDFCount == 1, "arXiv cache store should count cached PDFs")
+
+    try store.upsertFeedDate(
+        date: "2026-04-30",
+        source: "codearxiv",
+        feedVersion: "v2",
+        filterSnapshotJSON: #"{"tags":["ml"]}"#,
+        cachedAt: now,
+        expiresAt: future
+    )
+    try store.upsertFeedDate(
+        date: "2026-05-01",
+        source: "codearxiv",
+        feedVersion: "v3",
+        filterSnapshotJSON: nil,
+        cachedAt: now,
+        expiresAt: past
+    )
+    try store.upsertFeedDate(
+        date: "2026-05-02",
+        source: "codearxiv",
+        feedVersion: nil,
+        filterSnapshotJSON: nil,
+        cachedAt: now,
+        expiresAt: nil
+    )
+    try store.upsertFeedDate(
+        date: "2026-05-03",
+        source: "codearxiv",
+        feedVersion: "v4",
+        filterSnapshotJSON: nil,
+        cachedAt: now,
+        expiresAt: now
+    )
+
+    let futureStatus = try store.feedCacheStatus(date: "2026-04-30")
+    let expiredStatus = try store.feedCacheStatus(date: "2026-05-01")
+    let nullableFeedStatus = try store.feedCacheStatus(date: "2026-05-02")
+    let equalExpiryStatus = try store.feedCacheStatus(date: "2026-05-03")
+    try check(futureStatus.metadataCached, "arXiv cache store should report metadata cache with future expiry")
+    try check(!expiredStatus.metadataCached, "arXiv cache store should ignore expired metadata cache")
+    try check(nullableFeedStatus.metadataCached, "arXiv cache store should accept nullable feed metadata fields")
+    try check(!equalExpiryStatus.metadataCached, "arXiv cache store should require expiry to be strictly later than now")
+
+    try store.upsertPDFCache(
+        arxivID: "2604.18586",
+        date: "2026-04-30",
+        localPath: "/cache/2604.18586-v2.pdf",
+        contentHash: "hash-pdf-updated",
+        byteCount: 456,
+        cachedAt: now,
+        lastAccessedAt: nil,
+        promotedPaperID: nil
+    )
+    try store.upsertPDFCache(
+        arxivID: "2604.18587",
+        date: "2026-05-02",
+        localPath: "/cache/2604.18587.pdf",
+        contentHash: nil,
+        byteCount: nil,
+        cachedAt: now,
+        lastAccessedAt: nil,
+        promotedPaperID: nil
+    )
+
+    let oldDateStatus = try store.feedCacheStatus(date: "2026-04-29")
+    let updatedDateStatus = try store.feedCacheStatus(date: "2026-04-30")
+    let nullablePDFStatus = try store.feedCacheStatus(date: "2026-05-02")
+    let updatedPDFRows = try database.query("""
+    SELECT date, local_path, content_hash, byte_count, last_accessed_at, promoted_paper_id
+    FROM arxiv_pdf_cache
+    WHERE arxiv_id = ?;
+    """, bindings: [.text("2604.18586")]) { row in
+        "\(try row.text(0))|\(try row.text(1))|\(row.optionalText(2) ?? "")|\(row.optionalInt(3).map(String.init) ?? "")|\(row.optionalText(4) ?? "")|\(row.optionalText(5) ?? "")"
+    }
+    let nullablePDFRows = try database.query("""
+    SELECT content_hash, byte_count, last_accessed_at, promoted_paper_id
+    FROM arxiv_pdf_cache
+    WHERE arxiv_id = ?;
+    """, bindings: [.text("2604.18587")]) { row in
+        "\(row.optionalText(0) ?? "")|\(row.optionalInt(1).map(String.init) ?? "")|\(row.optionalText(2) ?? "")|\(row.optionalText(3) ?? "")"
+    }
+
+    try check(oldDateStatus.cachedPDFCount == 0, "arXiv cache store should move updated PDFs away from old feed dates")
+    try check(updatedDateStatus.cachedPDFCount == 1, "arXiv cache store should count updated PDFs under the latest feed date")
+    try check(
+        updatedPDFRows == ["2026-04-30|/cache/2604.18586-v2.pdf|hash-pdf-updated|456||"],
+        "arXiv cache store should update cached PDF path, hash, and byte count"
+    )
+    try check(nullablePDFStatus.cachedPDFCount == 1, "arXiv cache store should count PDF caches with nullable fields")
+    try check(nullablePDFRows == ["|||"], "arXiv cache store should persist nullable PDF cache fields")
 }
 
 func runSQLiteHelperChecks() throws {

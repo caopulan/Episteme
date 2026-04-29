@@ -17,9 +17,11 @@ public struct ArxivFeedCacheStatus: Equatable, Sendable {
 public final class ArxivCacheDataStore {
     private let database: SQLiteDatabase
     private let dates = ISO8601DateFormatter()
+    private let now: () -> Date
 
-    public init(database: SQLiteDatabase) {
+    public init(database: SQLiteDatabase, now: @escaping () -> Date = Date.init) {
         self.database = database
+        self.now = now
     }
 
     public func upsertFeedDate(
@@ -85,12 +87,12 @@ public final class ArxivCacheDataStore {
     }
 
     public func feedCacheStatus(date: String) throws -> ArxivFeedCacheStatus {
-        let metadataCount = try database.query(
-            "SELECT COUNT(*) FROM arxiv_feed_dates WHERE date = ?;",
+        let metadataExpirations = try database.query(
+            "SELECT expires_at FROM arxiv_feed_dates WHERE date = ?;",
             bindings: [.text(date)]
         ) { row in
-            row.int(0)
-        }.first ?? 0
+            row.optionalText(0)
+        }
         let assetCount = try database.query(
             "SELECT COUNT(*) FROM arxiv_assets WHERE date = ? AND local_path IS NOT NULL;",
             bindings: [.text(date)]
@@ -103,12 +105,28 @@ public final class ArxivCacheDataStore {
         ) { row in
             row.int(0)
         }.first ?? 0
+        let metadataCached: Bool
+        if let metadataExpiration = metadataExpirations.first {
+            metadataCached = try metadataIsCurrent(expiresAt: metadataExpiration)
+        } else {
+            metadataCached = false
+        }
 
         return ArxivFeedCacheStatus(
             date: date,
-            metadataCached: metadataCount > 0,
+            metadataCached: metadataCached,
             cachedAssetCount: assetCount,
             cachedPDFCount: pdfCount
         )
+    }
+
+    private func metadataIsCurrent(expiresAt: String?) throws -> Bool {
+        guard let expiresAt else {
+            return true
+        }
+        guard let expirationDate = dates.date(from: expiresAt) else {
+            throw PaperRepositoryError.decodingFailed("Invalid ISO8601 date: \(expiresAt)")
+        }
+        return expirationDate > now()
     }
 }
