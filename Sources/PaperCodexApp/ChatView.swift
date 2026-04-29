@@ -1,11 +1,16 @@
 import PaperCodexCore
+import AppKit
 import SwiftUI
 import WebKit
+
+private let chatComposerTextHeightDefaultsKey = "PaperCodexChatComposerTextHeight"
 
 struct ChatView: View {
     @EnvironmentObject private var model: AppModel
     @State private var draft = ""
     @State private var isSendButtonHovered = false
+    @State private var composerTextHeight = ChatComposerLayout.loadTextHeight()
+    @State private var composerResizeStartHeight: CGFloat?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -102,13 +107,30 @@ struct ChatView: View {
                 }
             }
 
+            ComposerResizeHandle()
+                .gesture(
+                    DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                        .onChanged { value in
+                            if composerResizeStartHeight == nil {
+                                composerResizeStartHeight = composerTextHeight
+                            }
+                            let nextHeight = (composerResizeStartHeight ?? composerTextHeight) - value.translation.height
+                            composerTextHeight = ChatComposerLayout.clampedTextHeight(nextHeight)
+                        }
+                        .onEnded { _ in
+                            composerTextHeight = ChatComposerLayout.clampedTextHeight(composerTextHeight)
+                            ChatComposerLayout.saveTextHeight(composerTextHeight)
+                            composerResizeStartHeight = nil
+                        }
+                )
+
             HStack(alignment: .bottom, spacing: 8) {
                 ComposerTextView(
                     text: $draft,
                     isEnabled: !model.isSending,
                     onSubmit: sendDraft
                 )
-                    .frame(minHeight: 72, maxHeight: 110)
+                    .frame(height: composerTextHeight)
                     .background(Color(nsColor: .textBackgroundColor))
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                 Button {
@@ -151,6 +173,61 @@ struct ChatView: View {
         Task {
             await model.sendMessage(message)
         }
+    }
+}
+
+private enum ChatComposerLayout {
+    static let minimumTextHeight: CGFloat = 72
+    static let maximumTextHeight: CGFloat = 220
+    static let defaultTextHeight: CGFloat = 96
+
+    static func clampedTextHeight(_ height: CGFloat) -> CGFloat {
+        min(max(height, minimumTextHeight), maximumTextHeight)
+    }
+
+    static func loadTextHeight() -> CGFloat {
+        let stored = UserDefaults.standard.double(forKey: chatComposerTextHeightDefaultsKey)
+        guard stored > 0 else {
+            return defaultTextHeight
+        }
+        return clampedTextHeight(CGFloat(stored))
+    }
+
+    static func saveTextHeight(_ height: CGFloat) {
+        UserDefaults.standard.set(Double(clampedTextHeight(height)), forKey: chatComposerTextHeightDefaultsKey)
+    }
+}
+
+private struct ComposerResizeHandle: View {
+    @State private var isHovering = false
+
+    var body: some View {
+        HStack {
+            Spacer()
+            Capsule()
+                .fill(isHovering ? Color.accentColor.opacity(0.68) : Color.secondary.opacity(0.34))
+                .frame(width: isHovering ? 58 : 44, height: 4)
+                .shadow(color: isHovering ? Color.accentColor.opacity(0.25) : .clear, radius: 5, y: 1)
+            Spacer()
+        }
+        .frame(height: 10)
+        .contentShape(Rectangle())
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.12)) {
+                isHovering = hovering
+            }
+            if hovering {
+                NSCursor.resizeUpDown.set()
+            } else {
+                NSCursor.arrow.set()
+            }
+        }
+        .onDisappear {
+            if isHovering {
+                NSCursor.arrow.set()
+            }
+        }
+        .help("Resize input")
     }
 }
 

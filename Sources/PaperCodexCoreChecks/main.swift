@@ -255,15 +255,34 @@ func runReaderPositionRepositoryChecks() throws {
 func runUILayoutSourceChecks() throws {
     let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
     let libraryViewURL = root.appendingPathComponent("Sources/PaperCodexApp/LibraryView.swift")
-    let source = try String(contentsOf: libraryViewURL)
+    let librarySource = try String(contentsOf: libraryViewURL)
 
     try check(
-        source.contains("static let splitPaneTopInset: CGFloat"),
+        librarySource.contains("static let splitPaneTopInset: CGFloat"),
         "library split panes should use an explicit titlebar compensation inset"
     )
     try check(
-        source.components(separatedBy: "LibraryLayout.splitPaneTopInset").count - 1 >= 2,
+        librarySource.components(separatedBy: "LibraryLayout.splitPaneTopInset").count - 1 >= 2,
         "library list and inspector panes should share the same top inset constant"
+    )
+
+    let chatViewURL = root.appendingPathComponent("Sources/PaperCodexApp/ChatView.swift")
+    let chatSource = try String(contentsOf: chatViewURL)
+    try check(
+        chatSource.contains("chatComposerTextHeightDefaultsKey"),
+        "chat composer height should be persisted locally"
+    )
+    try check(
+        chatSource.contains("ComposerResizeHandle"),
+        "chat composer should expose a visible resize handle"
+    )
+    try check(
+        chatSource.contains("DragGesture(minimumDistance: 1, coordinateSpace: .global)"),
+        "chat composer resize handle should use an explicit vertical drag gesture"
+    )
+    try check(
+        chatSource.contains("ChatComposerLayout.clampedTextHeight"),
+        "chat composer height changes should be clamped through a shared layout helper"
     )
 }
 
