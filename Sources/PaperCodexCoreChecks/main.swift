@@ -585,6 +585,34 @@ func runArxivCacheDataStoreChecks() throws {
     try check(nullablePDFRows == ["|||"], "arXiv cache store should persist nullable PDF cache fields")
 }
 
+func runSyncDataStoreChecks() throws {
+    let databaseURL = FileManager.default.temporaryDirectory
+        .appendingPathComponent("paper-codex-sync-store-\(UUID().uuidString).sqlite")
+    let repository = try PaperRepository(databasePath: databaseURL.path)
+    try repository.migrate()
+    let store = SyncDataStore(database: try SQLiteDatabase(path: databaseURL.path))
+    let now = Date(timeIntervalSince1970: 1_777_300_000)
+
+    try store.markDirty(entityType: "paper", entityID: "paper-a", localRevision: 2, deleted: false, at: now)
+    try store.enqueue(
+        id: "change-a",
+        entityType: "paper",
+        entityID: "paper-a",
+        operation: "upsert",
+        payloadJSON: #"{"id":"paper-a"}"#,
+        baseRemoteRevision: nil,
+        createdAt: now
+    )
+    try store.setCursor(scope: "library", cursor: "cursor-1", updatedAt: now)
+
+    let dirtyEntityIDs = try store.fetchDirtyEntityIDs(entityType: "paper")
+    let pendingOutboxIDs = try store.fetchPendingOutboxIDs()
+    let cursor = try store.fetchCursor(scope: "library")
+    try check(dirtyEntityIDs == ["paper-a"], "SyncDataStore should track dirty entities")
+    try check(pendingOutboxIDs == ["change-a"], "SyncDataStore should track pending outbox changes")
+    try check(cursor == "cursor-1", "SyncDataStore should persist cursors")
+}
+
 func runSQLiteHelperChecks() throws {
     let databaseURL = FileManager.default.temporaryDirectory
         .appendingPathComponent("paper-codex-sqlite-helpers-\(UUID().uuidString).sqlite")
@@ -1653,6 +1681,10 @@ do {
     if selectedChecks.isEmpty || selectedChecks.contains("arxiv-cache-data-store") {
         try runArxivCacheDataStoreChecks()
         print("arxiv-cache-data-store: pass")
+    }
+    if selectedChecks.isEmpty || selectedChecks.contains("sync-data-store") {
+        try runSyncDataStoreChecks()
+        print("sync-data-store: pass")
     }
     if selectedChecks.isEmpty || selectedChecks.contains("sqlite-helpers") {
         try runSQLiteHelperChecks()
