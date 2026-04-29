@@ -1,4 +1,5 @@
 import AppKit
+import ImageIO
 import PaperCodexCore
 import SwiftUI
 
@@ -263,6 +264,7 @@ struct DiscoverView: View {
                     let columnCount = gridColumnCount(for: proxy.size.width)
                     let rows = paperRows(papers, columnCount: columnCount)
                     let layoutSignature = rowLayoutSignature(papers: papers, columnCount: columnCount)
+                    let imagePreloadURLs = discoverImagePreloadURLs(for: papers)
 
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 14) {
@@ -298,6 +300,9 @@ struct DiscoverView: View {
                         .onChange(of: layoutSignature) { _, _ in
                             discoverRowHeights = [:]
                         }
+                        .task(id: "\(layoutSignature):\(imagePreloadURLs.count)") {
+                            await warmDiscoverLocalImages(imagePreloadURLs)
+                        }
                     }
                 }
             }
@@ -325,6 +330,17 @@ struct DiscoverView: View {
 
     private func rowLayoutSignature(papers: [ArxivFeedPaper], columnCount: Int) -> String {
         "\(columnCount):\(papers.map(\.id).joined(separator: ","))"
+    }
+
+    private func discoverImagePreloadURLs(for papers: [ArxivFeedPaper]) -> [URL] {
+        papers.flatMap { paper in
+            var urls: [URL] = []
+            if let assetURL = model.cachedArxivAssetURL(for: paper.assets.small) {
+                urls.append(assetURL)
+            }
+            urls.append(contentsOf: model.cachedArxivPDFThumbnailURLs(for: paper))
+            return urls
+        }
     }
 
     private func discoverCard(for paper: ArxivFeedPaper, rowIndex: Int) -> some View {
@@ -1396,15 +1412,40 @@ private struct SimilarityMeter: View {
 private final class DiscoverLocalImageCache {
     static let shared = DiscoverLocalImageCache()
 
-    private let cache = NSCache<NSURL, NSImage>()
+    private let cache = NSCache<NSURL, CachedDiscoverImage>()
 
-    func image(for url: URL) -> NSImage? {
-        cache.object(forKey: url as NSURL)
+    private init() {
+        cache.countLimit = 420
+        cache.totalCostLimit = 180 * 1024 * 1024
     }
 
-    func insert(_ image: NSImage, for url: URL) {
-        cache.setObject(image, forKey: url as NSURL)
+    func image(for url: URL) -> CGImage? {
+        cache.object(forKey: url as NSURL)?.image
     }
+
+    func contains(_ url: URL) -> Bool {
+        cache.object(forKey: url as NSURL) != nil
+    }
+
+    func insert(_ image: CGImage, for url: URL) {
+        cache.setObject(
+            CachedDiscoverImage(image),
+            forKey: url as NSURL,
+            cost: image.bytesPerRow * image.height
+        )
+    }
+}
+
+private final class CachedDiscoverImage {
+    let image: CGImage
+
+    init(_ image: CGImage) {
+        self.image = image
+    }
+}
+
+private struct DecodedDiscoverImage: @unchecked Sendable {
+    let image: CGImage
 }
 
 private struct LocalCachedImage<Placeholder: View>: View {
@@ -1412,12 +1453,12 @@ private struct LocalCachedImage<Placeholder: View>: View {
     var contentMode: ContentMode = .fill
     @ViewBuilder var placeholder: () -> Placeholder
 
-    @State private var image: NSImage?
+    @State private var image: CGImage?
 
     var body: some View {
         Group {
             if let image {
-                Image(nsImage: image)
+                Image(decorative: image, scale: 1, orientation: .up)
                     .resizable()
                     .aspectRatio(contentMode: contentMode)
             } else {
@@ -1436,24 +1477,114 @@ private struct LocalCachedImage<Placeholder: View>: View {
             return
         }
 
-        let data: Data
         let imageURL = url
-        do {
-            data = try await Task.detached(priority: .utility) {
-                try Data(contentsOf: imageURL, options: [.mappedIfSafe])
-            }.value
-        } catch {
+        guard let decoded = await decodeDiscoverLocalImage(at: imageURL, priority: .userInitiated) else {
             image = nil
+            return
+        }
+        DiscoverLocalImageCache.shared.insert(decoded.image, for: url)
+        image = decoded.image
+    }
+}
+
+private func warmDiscoverLocalImages(_ urls: [URL], limit: Int = 360) async {
+    do {
+        try await Task.sleep(nanoseconds: 600_000_000)
+    } catch {
+        return
+    }
+
+    var seen: Set<URL> = []
+    var warmed = 0
+
+    for url in urls {
+        guard !Task.isCancelled, warmed < limit else {
+            return
+        }
+        guard seen.insert(url).inserted else {
+            continue
+        }
+        let isCached = await MainActor.run {
+            DiscoverLocalImageCache.shared.contains(url)
+        }
+        guard !isCached else {
+            continue
+        }
+        guard let decoded = await decodeDiscoverLocalImage(at: url, priority: .utility) else {
+            continue
+        }
+        await MainActor.run {
+            DiscoverLocalImageCache.shared.insert(decoded.image, for: url)
+        }
+        warmed += 1
+        do {
+            try await Task.sleep(nanoseconds: 8_000_000)
+        } catch {
+            return
+        }
+    }
+}
+
+private actor DiscoverImageDecodeGate {
+    static let shared = DiscoverImageDecodeGate(maxConcurrent: 2)
+
+    private let maxConcurrent: Int
+    private var activeCount = 0
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    init(maxConcurrent: Int) {
+        self.maxConcurrent = maxConcurrent
+    }
+
+    func wait() async {
+        if activeCount < maxConcurrent {
+            activeCount += 1
             return
         }
 
-        guard let loaded = NSImage(data: data) else {
-            image = nil
-            return
+        await withCheckedContinuation { continuation in
+            waiters.append(continuation)
         }
-        DiscoverLocalImageCache.shared.insert(loaded, for: url)
-        image = loaded
     }
+
+    func signal() {
+        if waiters.isEmpty {
+            activeCount = max(0, activeCount - 1)
+        } else {
+            waiters.removeFirst().resume()
+        }
+    }
+}
+
+private func decodeDiscoverLocalImage(at url: URL, priority: TaskPriority) async -> DecodedDiscoverImage? {
+    await DiscoverImageDecodeGate.shared.wait()
+    if Task.isCancelled {
+        await DiscoverImageDecodeGate.shared.signal()
+        return nil
+    }
+
+    let result = await Task.detached(priority: priority) { () -> DecodedDiscoverImage? in
+        let sourceOptions = [
+            kCGImageSourceShouldCache: false
+        ] as CFDictionary
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, sourceOptions) else {
+            return nil
+        }
+
+        let thumbnailOptions = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCache: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceThumbnailMaxPixelSize: 900
+        ] as CFDictionary
+        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, thumbnailOptions) else {
+            return nil
+        }
+        return DecodedDiscoverImage(image: image)
+    }.value
+    await DiscoverImageDecodeGate.shared.signal()
+    return result
 }
 
 private struct DiscoverPDFThumbnailHero: View {
