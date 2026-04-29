@@ -15,29 +15,20 @@ public struct ArxivFeedResponse: Codable, Equatable, Sendable {
     public var count: Int
     public var papers: [ArxivFeedPaper]
     public var groups: [ArxivFeedGroup]?
-    public var filters: CodeArxivUserFilters?
-    public var favorites: [CodeArxivFavorite]?
     public var tagOptions: [String]?
-    public var user: CodeArxivUser?
 
     public init(
         date: String,
         count: Int,
         papers: [ArxivFeedPaper],
         groups: [ArxivFeedGroup]? = nil,
-        filters: CodeArxivUserFilters? = nil,
-        favorites: [CodeArxivFavorite]? = nil,
-        tagOptions: [String]? = nil,
-        user: CodeArxivUser? = nil
+        tagOptions: [String]? = nil
     ) {
         self.date = date
         self.count = count
         self.papers = papers
         self.groups = groups
-        self.filters = filters
-        self.favorites = favorites
         self.tagOptions = tagOptions
-        self.user = user
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -45,10 +36,7 @@ public struct ArxivFeedResponse: Codable, Equatable, Sendable {
         case count
         case papers
         case groups
-        case filters
-        case favorites
         case tagOptions = "tag_options"
-        case user
     }
 }
 
@@ -59,132 +47,6 @@ public struct ArxivFeedGroup: Codable, Equatable, Sendable {
     public init(key: String, count: Int) {
         self.key = key
         self.count = count
-    }
-}
-
-public struct CodeArxivUser: Codable, Equatable, Sendable {
-    public var id: Int
-    public var username: String
-    public var languagePreference: String
-
-    public init(id: Int, username: String, languagePreference: String) {
-        self.id = id
-        self.username = username
-        self.languagePreference = languagePreference
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case id
-        case username
-        case languagePreference = "language_preference"
-    }
-}
-
-public struct CodeArxivTagFilters: Codable, Equatable, Sendable {
-    public var whitelist: [String]
-    public var blacklist: [String]
-
-    public init(whitelist: [String], blacklist: [String]) {
-        self.whitelist = whitelist
-        self.blacklist = blacklist
-    }
-}
-
-public struct CodeArxivUserFilters: Codable, Equatable, Sendable {
-    public var categories: [String]
-    public var tags: CodeArxivTagFilters
-    public var simFavorites: [Int]
-    public var lastDate: String?
-    public var lastPaperID: String?
-    public var lastPosition: Int
-
-    public init(
-        categories: [String],
-        tags: CodeArxivTagFilters,
-        simFavorites: [Int],
-        lastDate: String?,
-        lastPaperID: String?,
-        lastPosition: Int
-    ) {
-        self.categories = categories
-        self.tags = tags
-        self.simFavorites = simFavorites
-        self.lastDate = lastDate
-        self.lastPaperID = lastPaperID
-        self.lastPosition = lastPosition
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case categories
-        case tags
-        case simFavorites = "sim_favorites"
-        case lastDate = "last_date"
-        case lastPaperID = "last_paper_id"
-        case lastPosition = "last_position"
-    }
-}
-
-public struct CodeArxivFavorite: Codable, Equatable, Identifiable, Sendable {
-    public var id: Int
-    public var name: String
-    public var paperIDs: [String]
-    public var papers: [ArxivFeedPaper]
-    public var embedding: [Double]?
-
-    public init(id: Int, name: String, paperIDs: [String], papers: [ArxivFeedPaper], embedding: [Double]?) {
-        self.id = id
-        self.name = name
-        self.paperIDs = paperIDs
-        self.papers = papers
-        self.embedding = embedding
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case id
-        case name
-        case paperIDs = "paper_ids"
-        case papers
-        case embedding
-    }
-}
-
-public struct CodeArxivUserState: Codable, Equatable, Sendable {
-    public var user: CodeArxivUser
-    public var filters: CodeArxivUserFilters
-    public var favorites: [CodeArxivFavorite]
-    public var tagOptions: [String]
-
-    public init(
-        user: CodeArxivUser,
-        filters: CodeArxivUserFilters,
-        favorites: [CodeArxivFavorite],
-        tagOptions: [String]
-    ) {
-        self.user = user
-        self.filters = filters
-        self.favorites = favorites
-        self.tagOptions = tagOptions
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case user
-        case filters
-        case favorites
-        case tagOptions = "tag_options"
-    }
-}
-
-private struct CodeArxivFilterUpdatePayload: Encodable {
-    var categories: [String]
-    var tags: CodeArxivTagFilters
-    var simFavorites: [Int]
-    var languagePreference: String?
-
-    private enum CodingKeys: String, CodingKey {
-        case categories
-        case tags
-        case simFavorites = "sim_favorites"
-        case languagePreference = "language_preference"
     }
 }
 
@@ -314,7 +176,6 @@ public struct ArxivFeedPaper: Codable, Equatable, Identifiable, Sendable {
     public var embedding: [Double]?
     public var similarity: Double?
     public var filterGroup: String?
-    public var isFavorite: Bool?
     public var links: ArxivFeedLinks
     public var assets: ArxivFeedAssets
 
@@ -338,7 +199,6 @@ public struct ArxivFeedPaper: Codable, Equatable, Identifiable, Sendable {
         embedding: [Double]?,
         similarity: Double? = nil,
         filterGroup: String? = nil,
-        isFavorite: Bool? = nil,
         links: ArxivFeedLinks,
         assets: ArxivFeedAssets
     ) {
@@ -361,7 +221,6 @@ public struct ArxivFeedPaper: Codable, Equatable, Identifiable, Sendable {
         self.embedding = embedding
         self.similarity = similarity
         self.filterGroup = filterGroup
-        self.isFavorite = isFavorite
         self.links = links
         self.assets = assets
     }
@@ -401,7 +260,6 @@ public struct ArxivFeedPaper: Codable, Equatable, Identifiable, Sendable {
         case embedding
         case similarity
         case filterGroup = "filter_group"
-        case isFavorite = "is_favorite"
         case links
         case assets
     }
@@ -517,163 +375,5 @@ public final class ArxivFeedCache {
         try fileManager.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         let data = try encoder.encode(value)
         try data.write(to: url, options: [.atomic])
-    }
-}
-
-public enum ArxivFeedClientError: Error, CustomStringConvertible, Equatable {
-    case missingToken
-    case invalidURL(String)
-    case badStatus(Int)
-    case missingPDFURL(String)
-
-    public var description: String {
-        switch self {
-        case .missingToken:
-            "Missing CodeArXiv API token."
-        case let .invalidURL(value):
-            "Invalid CodeArXiv URL: \(value)"
-        case let .badStatus(status):
-            "CodeArXiv API returned HTTP \(status)."
-        case let .missingPDFURL(arxivID):
-            "Paper \(arxivID) does not include a PDF URL."
-        }
-    }
-}
-
-public final class ArxivFeedClient: Sendable {
-    private let baseURL: URL
-    private let token: String
-    private let session: URLSession
-    private let decoder = JSONDecoder()
-    private let encoder = JSONEncoder()
-
-    public init(baseURL: URL, token: String, session: URLSession = .shared) throws {
-        let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            throw ArxivFeedClientError.missingToken
-        }
-        self.baseURL = baseURL
-        self.token = trimmed
-        self.session = session
-    }
-
-    public func fetchDates() async throws -> ArxivFeedDateIndex {
-        try await decode(ArxivFeedDateIndex.self, path: "api/v1/dates")
-    }
-
-    public func fetchFeed(date: String, username: String? = nil) async throws -> ArxivFeedResponse {
-        var queryItems: [URLQueryItem] = []
-        if let username,
-           !username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            queryItems.append(URLQueryItem(name: "username", value: username))
-        }
-        return try await decode(ArxivFeedResponse.self, path: "api/v1/feed/\(date)", queryItems: queryItems)
-    }
-
-    public func fetchPaper(id: String) async throws -> ArxivFeedPaperEnvelope {
-        try await decode(ArxivFeedPaperEnvelope.self, path: "api/v1/papers/\(id)")
-    }
-
-    public func fetchUserState(username: String, includePapers: Bool = false) async throws -> CodeArxivUserState {
-        let queryItems = includePapers ? [URLQueryItem(name: "include_papers", value: "1")] : []
-        return try await decode(CodeArxivUserState.self, path: "api/v1/users/\(username)/state", queryItems: queryItems)
-    }
-
-    public func updateUserFilters(
-        username: String,
-        categories: [String],
-        whitelistTags: [String],
-        blacklistTags: [String],
-        simFavoriteIDs: [Int],
-        languagePreference: String? = nil
-    ) async throws -> CodeArxivUserState {
-        let payload = CodeArxivFilterUpdatePayload(
-            categories: categories,
-            tags: CodeArxivTagFilters(whitelist: whitelistTags, blacklist: blacklistTags),
-            simFavorites: simFavoriteIDs,
-            languagePreference: languagePreference
-        )
-        var request = URLRequest(url: baseURL.appendingPathComponent("api/v1/users/\(username)/filters"))
-        request.httpMethod = "PATCH"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try encoder.encode(payload)
-        applyAuth(to: &request)
-        let (data, response) = try await session.data(for: request)
-        try validate(response: response)
-        return try decoder.decode(CodeArxivUserState.self, from: data)
-    }
-
-    public func fetchAsset(_ asset: ArxivFeedAsset) async throws -> Data {
-        let requestURL = try resolveURL(asset.url)
-        var request = URLRequest(url: requestURL)
-        applyAuth(to: &request)
-        let (data, response) = try await session.data(for: request)
-        try validate(response: response)
-        return data
-    }
-
-    public func fetchPDF(for paper: ArxivFeedPaper) async throws -> Data {
-        guard let pdf = paper.links.pdf, let url = URL(string: pdf) else {
-            throw ArxivFeedClientError.missingPDFURL(paper.id)
-        }
-        let (data, response) = try await session.data(from: url)
-        try validate(response: response)
-        return data
-    }
-
-    private func decode<T: Decodable>(
-        _ type: T.Type,
-        path: String,
-        queryItems: [URLQueryItem] = []
-    ) async throws -> T {
-        var url = baseURL.appendingPathComponent(path)
-        if !queryItems.isEmpty {
-            guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
-                throw ArxivFeedClientError.invalidURL(url.absoluteString)
-            }
-            components.queryItems = queryItems
-            guard let queryURL = components.url else {
-                throw ArxivFeedClientError.invalidURL(url.absoluteString)
-            }
-            url = queryURL
-        }
-        var request = URLRequest(url: url)
-        applyAuth(to: &request)
-        let (data, response) = try await session.data(for: request)
-        try validate(response: response)
-        return try decoder.decode(type, from: data)
-    }
-
-    private func resolveURL(_ value: String) throws -> URL {
-        if let absolute = URL(string: value), absolute.scheme != nil {
-            return absolute
-        }
-        guard let relative = URL(string: value, relativeTo: baseURL)?.absoluteURL else {
-            throw ArxivFeedClientError.invalidURL(value)
-        }
-        return relative
-    }
-
-    private func applyAuth(to request: inout URLRequest) {
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-    }
-
-    private func validate(response: URLResponse) throws {
-        guard let http = response as? HTTPURLResponse else {
-            return
-        }
-        guard (200..<300).contains(http.statusCode) else {
-            throw ArxivFeedClientError.badStatus(http.statusCode)
-        }
-    }
-}
-
-public struct ArxivFeedPaperEnvelope: Codable, Equatable, Sendable {
-    public var date: String
-    public var paper: ArxivFeedPaper
-
-    public init(date: String, paper: ArxivFeedPaper) {
-        self.date = date
-        self.paper = paper
     }
 }

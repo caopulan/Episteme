@@ -96,7 +96,9 @@ public final class LocalArxivClient: Sendable {
         var lists: [(category: String, page: LocalArxivListPage)] = []
         for category in configuration.categories {
             let html = try await fetchText(url: try listURL(category: category))
-            lists.append((category, try Self.parseListPage(html)))
+            for page in try Self.parseListPages(html) {
+                lists.append((category, page))
+            }
         }
 
         let availableDates = Set(lists.map(\.page.date))
@@ -131,6 +133,47 @@ public final class LocalArxivClient: Sendable {
         return ArxivFeedResponse(date: date, count: papers.count, papers: papers)
     }
 
+    public func fetchFeed(range: DiscoverDateRange) async throws -> ArxivFeedResponse {
+        guard !configuration.categories.isEmpty else {
+            throw LocalArxivClientError.emptyCategories
+        }
+
+        var ids: [String] = []
+        var seenIDs: Set<String> = []
+        var listCategoriesByID: [String: [String]] = [:]
+        var listDatesByID: [String: String] = [:]
+
+        for category in configuration.categories {
+            let html = try await fetchText(url: try listURL(category: category))
+            for page in try Self.parseListPages(html) where range.contains(page.date) {
+                for id in page.ids {
+                    if !seenIDs.contains(id) {
+                        seenIDs.insert(id)
+                        ids.append(id)
+                        listDatesByID[id] = page.date
+                    }
+                    var categories = listCategoriesByID[id, default: []]
+                    if !categories.contains(category) {
+                        categories.append(category)
+                    }
+                    listCategoriesByID[id] = categories
+                }
+            }
+        }
+
+        guard !ids.isEmpty else {
+            throw LocalArxivClientError.listDateUnavailable("\(range.start)...\(range.end)")
+        }
+
+        let papers = try await fetchMetadata(
+            ids: ids,
+            listDate: "\(range.start)...\(range.end)",
+            listCategoriesByID: listCategoriesByID,
+            listDatesByID: listDatesByID
+        )
+        return ArxivFeedResponse(date: "\(range.start)...\(range.end)", count: papers.count, papers: papers)
+    }
+
     public func fetchPDF(for paper: ArxivFeedPaper) async throws -> Data {
         guard let value = paper.links.pdf, let url = URL(string: value) else {
             throw LocalArxivClientError.missingPDFURL(paper.id)
@@ -143,42 +186,55 @@ public final class LocalArxivClient: Sendable {
     }
 
     public static func parseListPage(_ html: String) throws -> LocalArxivListPage {
+        guard let first = try parseListPages(html).first else {
+            throw LocalArxivClientError.listPageMissingDate
+        }
+        return first
+    }
+
+    public static func parseListPages(_ html: String) throws -> [LocalArxivListPage] {
         let headingPattern = #"<h3[^>]*>([^<]+)</h3>"#
         let headingMatches = regexMatches(pattern: headingPattern, in: html)
-        guard let firstHeading = headingMatches.first else {
+        guard !headingMatches.isEmpty else {
             throw LocalArxivClientError.listPageMissingDate
         }
 
-        let heading = firstHeading.groups[0]
-            .components(separatedBy: " (showing")
-            .first?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? firstHeading.groups[0]
-        guard let parsedDate = listHeadingDateFormatter.date(from: heading) else {
-            throw LocalArxivClientError.invalidListDate(heading)
-        }
-
-        let sectionStart = firstHeading.range.upperBound
-        let sectionEnd = headingMatches.dropFirst().first?.range.lowerBound ?? html.endIndex
-        let section = String(html[sectionStart..<sectionEnd])
-        let idMatches = regexMatches(pattern: #"href\s*=\s*["']/abs/([^"']+)["']"#, in: section)
-        var ids: [String] = []
-        var seen: Set<String> = []
-        for match in idMatches {
-            let id = normalizeArxivID(match.groups[0])
-            guard !id.isEmpty, !seen.contains(id) else {
-                continue
+        var pages: [LocalArxivListPage] = []
+        for (index, headingMatch) in headingMatches.enumerated() {
+            let heading = headingMatch.groups[0]
+                .components(separatedBy: " (showing")
+                .first?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? headingMatch.groups[0]
+            guard let parsedDate = listHeadingDateFormatter.date(from: heading) else {
+                throw LocalArxivClientError.invalidListDate(heading)
             }
-            seen.insert(id)
-            ids.append(id)
+
+            let sectionStart = headingMatch.range.upperBound
+            let sectionEnd = index + 1 < headingMatches.count ? headingMatches[index + 1].range.lowerBound : html.endIndex
+            let section = String(html[sectionStart..<sectionEnd])
+            let idMatches = regexMatches(pattern: #"href\s*=\s*["']\s*/abs/([^"']+)["']"#, in: section)
+            var ids: [String] = []
+            var seen: Set<String> = []
+            for match in idMatches {
+                let id = normalizeArxivID(match.groups[0])
+                guard !id.isEmpty, !seen.contains(id) else {
+                    continue
+                }
+                seen.insert(id)
+                ids.append(id)
+            }
+
+            pages.append(LocalArxivListPage(date: isoDateFormatter.string(from: parsedDate), ids: ids))
         }
 
-        return LocalArxivListPage(date: isoDateFormatter.string(from: parsedDate), ids: ids)
+        return pages
     }
 
     public static func parseAtomFeed(
         _ xml: String,
         listDate: String,
-        listCategoriesByID: [String: [String]]
+        listCategoriesByID: [String: [String]],
+        listDatesByID: [String: String] = [:]
     ) throws -> [ArxivFeedPaper] {
         let parser = LocalArxivAtomParser()
         let entries = try parser.parse(xml)
@@ -210,7 +266,7 @@ public final class LocalArxivClient: Sendable {
                 comment: comment,
                 published: entry.published,
                 updated: entry.updated,
-                listDate: listDate,
+                listDate: listDatesByID[arxivID] ?? listDate,
                 thumbnailVersion: nil,
                 embedding: nil,
                 links: ArxivFeedLinks(
@@ -252,7 +308,8 @@ public final class LocalArxivClient: Sendable {
     private func fetchMetadata(
         ids: [String],
         listDate: String,
-        listCategoriesByID: [String: [String]]
+        listCategoriesByID: [String: [String]],
+        listDatesByID: [String: String] = [:]
     ) async throws -> [ArxivFeedPaper] {
         guard !ids.isEmpty else {
             return []
@@ -261,7 +318,12 @@ public final class LocalArxivClient: Sendable {
         for batch in ids.chunked(size: 50) {
             let url = try atomURL(ids: batch)
             let xml = try await fetchText(url: url)
-            for paper in try Self.parseAtomFeed(xml, listDate: listDate, listCategoriesByID: listCategoriesByID) {
+            for paper in try Self.parseAtomFeed(
+                xml,
+                listDate: listDate,
+                listCategoriesByID: listCategoriesByID,
+                listDatesByID: listDatesByID
+            ) {
                 papersByID[paper.id] = paper
             }
         }

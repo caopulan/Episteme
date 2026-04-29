@@ -1209,9 +1209,10 @@ func runBundleChecks() throws {
     let scriptURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
         .appendingPathComponent("scripts/build-app-bundle.sh")
     let script = try String(contentsOf: scriptURL, encoding: .utf8)
-    try check(script.contains("NSAppTransportSecurity"), "app bundle should configure App Transport Security")
-    try check(script.contains("nas.pucao.cn"), "app bundle should allow the configured CodeArXiv host")
-    try check(script.contains("NSExceptionAllowsInsecureHTTPLoads"), "app bundle should allow HTTP for CodeArXiv")
+    let oldHost = ["nas", "pucao", "cn"].joined(separator: ".")
+    let insecureHTTPKey = "NSExceptionAllows" + "InsecureHTTPLoads"
+    try check(!script.contains(oldHost), "app bundle should not keep the old remote feed host")
+    try check(!script.contains(insecureHTTPKey), "app bundle should not allow insecure HTTP for old feed hosts")
 }
 
 func runFixtureLibraryChecks() throws {
@@ -1302,25 +1303,7 @@ func runArxivFeedChecks() throws {
         {"key": "neutral", "count": 0},
         {"key": "black", "count": 0}
       ],
-      "filters": {
-        "categories": ["cs.CV"],
-        "tags": {"whitelist": ["Diffusion"], "blacklist": ["Med"]},
-        "sim_favorites": [11],
-        "last_date": "2026-04-22",
-        "last_paper_id": "2604.18586",
-        "last_position": 123
-      },
-      "favorites": [
-        {
-          "id": 11,
-          "name": "Vision",
-          "paper_ids": ["2604.18586"],
-          "papers": [],
-          "embedding": [0.1, 0.2, 0.3]
-        }
-      ],
       "tag_options": ["Diffusion", "Med", "Toolkit"],
-      "user": {"id": 4, "username": "caopu", "language_preference": "zh"},
       "papers": [
         {
           "id": "2604.18586",
@@ -1363,51 +1346,18 @@ func runArxivFeedChecks() throws {
     let response = try decoder.decode(ArxivFeedResponse.self, from: Data(sample.utf8))
     try check(response.date == "2026-04-22", "arXiv feed response should decode the date")
     try check(response.papers.count == 1, "arXiv feed response should decode papers")
-    try check(response.groups?.map(\.key) == ["white", "neutral", "black"], "CodeArXiv feed should decode group summaries")
-    try check(response.filters?.tags.whitelist == ["Diffusion"], "CodeArXiv feed should decode tag whitelist")
-    try check(response.favorites?.first?.name == "Vision", "CodeArXiv feed should decode favorite folders")
-    try check(response.tagOptions == ["Diffusion", "Med", "Toolkit"], "CodeArXiv feed should decode tag options")
-    try check(response.user?.username == "caopu", "CodeArXiv feed should decode bound username")
+    try check(response.groups?.map(\.key) == ["white", "neutral", "black"], "local arXiv feed should decode group summaries")
+    try check(response.tagOptions == ["Diffusion", "Med", "Toolkit"], "local arXiv feed should decode tag options")
     let paper = response.papers[0]
     try check(paper.id == "2604.18586", "arXiv paper should decode stable arxiv id")
     try check(paper.displayTitle(language: "zh") == "谁塑造了巴西的疫苗辩论？", "arXiv paper should prefer Chinese title in zh mode")
     try check(paper.displaySummary(language: "en") == "Semi-supervised stance detection over YouTube comments.", "arXiv paper should prefer English summary in en mode")
     try check(paper.assets.small?.path == "images/2026-04-22/2604.18586_small.png", "arXiv paper should decode small asset path")
-    try check(paper.links.github == "https://github.com/example/paper-code", "CodeArXiv paper should decode GitHub link")
-    try check(paper.links.project == "https://example.org/paper", "CodeArXiv paper should decode project link")
-    try check(paper.links.huggingFace == "https://huggingface.co/example/paper", "CodeArXiv paper should decode Hugging Face link")
-    try check(paper.similarity == 0.91, "CodeArXiv paper should decode similarity score")
-    try check(paper.filterGroup == "white", "CodeArXiv paper should decode filter group")
-    try check(paper.isFavorite == true, "CodeArXiv paper should decode favorite membership")
-
-    let stateSample = """
-    {
-      "user": {"id": 4, "username": "caopu", "language_preference": "zh"},
-      "filters": {
-        "categories": ["cs.CV"],
-        "tags": {"whitelist": ["Diffusion"], "blacklist": ["Med"]},
-        "sim_favorites": [11],
-        "last_date": "2026-04-22",
-        "last_paper_id": "2604.18586",
-        "last_position": 123
-      },
-      "favorites": [
-        {
-          "id": 11,
-          "name": "Vision",
-          "paper_ids": ["2604.18586"],
-          "papers": [],
-          "embedding": [0.1, 0.2, 0.3]
-        }
-      ],
-      "tag_options": ["Diffusion", "Med", "Toolkit"]
-    }
-    """
-    let state = try decoder.decode(CodeArxivUserState.self, from: Data(stateSample.utf8))
-    try check(state.user.username == "caopu", "CodeArXiv user state should decode username")
-    try check(state.filters.lastPosition == 123, "CodeArXiv user state should decode reading position")
-    try check(state.favorites.first?.paperIDs == ["2604.18586"], "CodeArXiv user state should decode favorite paper ids")
-    try check(state.tagOptions == ["Diffusion", "Med", "Toolkit"], "CodeArXiv user state should decode tag options")
+    try check(paper.links.github == "https://github.com/example/paper-code", "arXiv paper should decode GitHub link")
+    try check(paper.links.project == "https://example.org/paper", "arXiv paper should decode project link")
+    try check(paper.links.huggingFace == "https://huggingface.co/example/paper", "arXiv paper should decode Hugging Face link")
+    try check(paper.similarity == 0.91, "arXiv paper should decode similarity score")
+    try check(paper.filterGroup == "white", "arXiv paper should decode local filter group")
 
     let quickPrompt = QuickPrompt(
         id: "qp-summary",
@@ -1568,6 +1518,24 @@ func runLocalDiscoverEngineChecks() throws {
 }
 
 func runLocalArxivClientChecks() throws {
+    let multiDateHTML = """
+    <html><body>
+    <h3>Wed, 29 Apr 2026 (showing first 2 of 2 entries)</h3>
+    <dl>
+      <dt><a href="/abs/2604.20002">arXiv:2604.20002</a></dt>
+      <dt><a href="/abs/2604.20001v2">arXiv:2604.20001v2</a></dt>
+    </dl>
+    <h3>Tue, 28 Apr 2026 (showing first 1 of 1 entries)</h3>
+    <dl>
+      <dt><a href="/abs/2604.19999">arXiv:2604.19999</a></dt>
+    </dl>
+    </body></html>
+    """
+    let listPages = try LocalArxivClient.parseListPages(multiDateHTML)
+    try check(listPages.map(\.date) == ["2026-04-29", "2026-04-28"], "local arXiv parser should parse every date section")
+    try check(listPages[0].ids == ["2604.20002", "2604.20001"], "local arXiv parser should dedupe versioned ids per section")
+    try check(listPages[1].ids == ["2604.19999"], "local arXiv parser should parse ids in later sections")
+
     let listHTML = """
     <html><body>
     <h3>Wed, 29 Apr 2026 (showing first 3 of 3 entries)</h3>
@@ -1717,46 +1685,6 @@ func runSimilarityRankerChecks() throws {
     try check((ranked[0].similarity ?? 0) > (ranked[1].similarity ?? 0), "similarity ranker should attach cosine scores")
     try check(SimilarityRanker.meanVector([[1, 0], [0, 1]]) == [0.5, 0.5], "similarity ranker should compute collection mean vectors")
     try check(SimilarityRanker.cosine([1, 0], [0, 1]) == 0, "similarity ranker should return zero for orthogonal vectors")
-}
-
-func runArxivLiveFeedChecks() async throws {
-    let environment = ProcessInfo.processInfo.environment
-    guard let baseURLValue = environment["PAPER_CODEX_ARXIV_FEED_BASE_URL"],
-          let baseURL = URL(string: baseURLValue),
-          let token = environment["PAPER_CODEX_ARXIV_FEED_TOKEN"],
-          !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-        throw CheckFailure(
-            description: "arxiv-live requires PAPER_CODEX_ARXIV_FEED_BASE_URL and PAPER_CODEX_ARXIV_FEED_TOKEN"
-        )
-    }
-
-    let client = try ArxivFeedClient(baseURL: baseURL, token: token)
-    let badTokenClient = try ArxivFeedClient(baseURL: baseURL, token: "\(token)-bad")
-    do {
-        _ = try await badTokenClient.fetchDates()
-        throw CheckFailure(description: "live arXiv API should reject an invalid token")
-    } catch ArxivFeedClientError.badStatus(401) {
-    }
-
-    let dates = try await client.fetchDates()
-    try check(!dates.dates.isEmpty, "live arXiv API should return available dates")
-    guard let latest = dates.latest else {
-        throw CheckFailure(description: "live arXiv API should return a latest date")
-    }
-    let feed = try await client.fetchFeed(date: latest)
-    try check(feed.date == latest, "live arXiv feed date should match requested date")
-    try check(feed.count == feed.papers.count, "live arXiv feed count should match paper array")
-    try check(!feed.papers.isEmpty, "live arXiv feed should include papers")
-    guard let paper = feed.papers.first else {
-        throw CheckFailure(description: "live arXiv feed should include a first paper")
-    }
-    try check(paper.links.abs?.contains("arxiv.org/abs/") == true, "live arXiv paper should include arXiv abs link")
-    try check(paper.links.pdf?.contains("arxiv.org/pdf/") == true, "live arXiv paper should include arXiv PDF link")
-    guard let asset = paper.assets.small ?? paper.assets.large else {
-        throw CheckFailure(description: "live arXiv paper should include a thumbnail asset")
-    }
-    let assetData = try await client.fetchAsset(asset)
-    try check(!assetData.isEmpty, "live arXiv thumbnail asset should download bytes")
 }
 
 func seedFixtureLibrary(at root: URL) throws {
@@ -2053,10 +1981,6 @@ do {
     if selectedChecks.isEmpty || selectedChecks.contains("similarity-ranker") {
         try runSimilarityRankerChecks()
         print("similarity-ranker: pass")
-    }
-    if selectedChecks.contains("arxiv-live") {
-        try await runArxivLiveFeedChecks()
-        print("arxiv-live: pass")
     }
 } catch {
     fputs("check failed: \(error)\n", stderr)
