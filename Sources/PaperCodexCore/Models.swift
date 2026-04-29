@@ -218,6 +218,34 @@ public struct PaperSession: Codable, Equatable, Identifiable, Sendable {
     }
 }
 
+public struct PaperReaderPosition: Codable, Equatable, Sendable {
+    public var sessionID: String
+    public var paperID: String
+    public var pageIndex: Int
+    public var pagePointX: Double
+    public var pagePointY: Double
+    public var scaleFactor: Double
+    public var updatedAt: Date
+
+    public init(
+        sessionID: String,
+        paperID: String,
+        pageIndex: Int,
+        pagePointX: Double,
+        pagePointY: Double,
+        scaleFactor: Double,
+        updatedAt: Date
+    ) {
+        self.sessionID = sessionID
+        self.paperID = paperID
+        self.pageIndex = pageIndex
+        self.pagePointX = pagePointX
+        self.pagePointY = pagePointY
+        self.scaleFactor = scaleFactor
+        self.updatedAt = updatedAt
+    }
+}
+
 public enum ChatRole: String, Codable, Equatable, Sendable {
     case user
     case codex

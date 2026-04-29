@@ -227,6 +227,7 @@ final class AppModel: ObservableObject {
     @Published var messages: [ChatMessage] = []
     @Published var currentSelection: PDFSelectionInfo?
     @Published var pdfJumpTarget: PDFJumpTarget?
+    @Published var readerPosition: PaperReaderPosition?
     @Published var codexDiagnostic: CodexDiagnostic?
     @Published var codexModelOverride: String = UserDefaults.standard.string(forKey: codexModelOverrideDefaultsKey) ?? ""
     @Published var codexReasoningEffort: CodexReasoningEffort = {
@@ -301,6 +302,13 @@ final class AppModel: ObservableObject {
 
     var paperLibraryRootPath: String {
         supportRoot.appendingPathComponent("papers", isDirectory: true).path
+    }
+
+    var readerPositionContextID: String? {
+        guard let session = selectedSession, let paper = selectedPaper else {
+            return nil
+        }
+        return "\(session.id)|\(paper.id)"
     }
 
     init() {
@@ -447,6 +455,7 @@ final class AppModel: ObservableObject {
         messages = []
         currentSelection = nil
         pdfJumpTarget = nil
+        readerPosition = nil
     }
 
     func showSettings() {
@@ -457,6 +466,7 @@ final class AppModel: ObservableObject {
         messages = []
         currentSelection = nil
         pdfJumpTarget = nil
+        readerPosition = nil
     }
 
     func setLocalArxivCategories(_ categories: [String]) {
@@ -1163,6 +1173,46 @@ final class AppModel: ObservableObject {
         readerTabState = tabState
     }
 
+    private func loadReaderPositionForSelectedContext(repository: PaperRepository) throws {
+        guard let session = selectedSession, let paper = selectedPaper else {
+            readerPosition = nil
+            return
+        }
+        readerPosition = try repository.fetchReaderPosition(sessionID: session.id, paperID: paper.id)
+    }
+
+    func updateReaderPosition(_ viewportPosition: PDFViewportPosition) {
+        do {
+            guard let repository else {
+                throw AppModelError.repositoryUnavailable
+            }
+            guard let session = selectedSession, let paper = selectedPaper else {
+                readerPosition = nil
+                return
+            }
+            guard viewportPosition.pageIndex >= 0,
+                  viewportPosition.pagePointX.isFinite,
+                  viewportPosition.pagePointY.isFinite,
+                  viewportPosition.scaleFactor.isFinite,
+                  viewportPosition.scaleFactor > 0 else {
+                return
+            }
+            let position = PaperReaderPosition(
+                sessionID: session.id,
+                paperID: paper.id,
+                pageIndex: viewportPosition.pageIndex,
+                pagePointX: viewportPosition.pagePointX,
+                pagePointY: viewportPosition.pagePointY,
+                scaleFactor: viewportPosition.scaleFactor,
+                updatedAt: Date()
+            )
+            try repository.upsertReaderPosition(position)
+            readerPosition = position
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
     private func paperForReaderTab(_ tab: ReaderPaperTab) throws -> Paper? {
         if selectedPaper?.id == tab.paperID {
             return selectedPaper
@@ -1196,15 +1246,20 @@ final class AppModel: ObservableObject {
         } else {
             try createSession()
         }
+        try loadReaderPositionForSelectedContext(repository: repository)
         activeCodexRun = nil
         route = .reader
     }
 
-    private func focusPaperInCurrentReaderSession(_ paper: Paper) {
+    private func focusPaperInCurrentReaderSession(_ paper: Paper) throws {
         openOrUpdateReaderTab(paper)
         selectedPaper = paper
         currentSelection = nil
         pdfJumpTarget = nil
+        guard let repository else {
+            throw AppModelError.repositoryUnavailable
+        }
+        try loadReaderPositionForSelectedContext(repository: repository)
     }
 
     func openPaper(_ paper: Paper) {
@@ -1246,6 +1301,7 @@ final class AppModel: ObservableObject {
                 messages = []
                 currentSelection = nil
                 pdfJumpTarget = nil
+                readerPosition = nil
                 activeCodexRun = nil
                 route = .library
                 return
@@ -1288,6 +1344,7 @@ final class AppModel: ObservableObject {
         sessions = try repository.fetchSessions(paperID: paper.id)
         selectedSession = session
         messages = []
+        readerPosition = nil
         activeCodexRun = nil
     }
 
@@ -1317,6 +1374,7 @@ final class AppModel: ObservableObject {
             }
             selectedSession = session
             messages = try repository.fetchMessages(sessionID: session.id)
+            try loadReaderPositionForSelectedContext(repository: repository)
             if activeCodexRun?.sessionID != session.id {
                 activeCodexRun = nil
             }
@@ -1326,10 +1384,14 @@ final class AppModel: ObservableObject {
     }
 
     func selectReaderPaper(_ paper: Paper) {
-        guard selectedSession?.paperIDs.contains(paper.id) == true else {
-            return
+        do {
+            guard selectedSession?.paperIDs.contains(paper.id) == true else {
+                return
+            }
+            try focusPaperInCurrentReaderSession(paper)
+        } catch {
+            errorMessage = String(describing: error)
         }
-        focusPaperInCurrentReaderSession(paper)
     }
 
     func setPaper(_ paper: Paper, includedInCurrentSession included: Bool) {
@@ -1363,6 +1425,7 @@ final class AppModel: ObservableObject {
                 selectedPaper = replacement
                 currentSelection = nil
                 pdfJumpTarget = nil
+                try loadReaderPositionForSelectedContext(repository: repository)
             }
 
             let storedSession = try repository.fetchSession(id: session.id) ?? session
@@ -1464,7 +1527,7 @@ final class AppModel: ObservableObject {
             }
             if let span = try repository.fetchSpan(id: citationID) {
                 if selectedPaper?.id != span.paperID, let paper = papers.first(where: { $0.id == span.paperID }) {
-                    focusPaperInCurrentReaderSession(paper)
+                    try focusPaperInCurrentReaderSession(paper)
                 }
                 pdfJumpTarget = PDFJumpTarget(
                     id: span.id,
@@ -1479,7 +1542,7 @@ final class AppModel: ObservableObject {
                baseSpanID != citationID,
                let span = try repository.fetchSpan(id: baseSpanID) {
                 if selectedPaper?.id != span.paperID, let paper = papers.first(where: { $0.id == span.paperID }) {
-                    focusPaperInCurrentReaderSession(paper)
+                    try focusPaperInCurrentReaderSession(paper)
                 }
                 pdfJumpTarget = PDFJumpTarget(
                     id: citationID,
@@ -1492,7 +1555,7 @@ final class AppModel: ObservableObject {
             }
             if let anchor = try repository.fetchAnchor(id: citationID) {
                 if selectedPaper?.id != anchor.paperID, let paper = papers.first(where: { $0.id == anchor.paperID }) {
-                    focusPaperInCurrentReaderSession(paper)
+                    try focusPaperInCurrentReaderSession(paper)
                 }
                 pdfJumpTarget = PDFJumpTarget(
                     id: anchor.id,
@@ -1657,6 +1720,7 @@ final class AppModel: ObservableObject {
         messages = []
         currentSelection = nil
         pdfJumpTarget = nil
+        readerPosition = nil
     }
 
     private func loadSessionPaperContext(

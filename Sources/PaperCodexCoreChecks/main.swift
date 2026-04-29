@@ -176,6 +176,82 @@ func runReaderTabStateChecks() throws {
     try check(state.tabs.isEmpty, "closing the last reader tab should clear open tabs")
 }
 
+func runReaderPositionRepositoryChecks() throws {
+    let tempRoot = FileManager.default.temporaryDirectory
+        .appendingPathComponent("paper-codex-reader-positions-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+    let databaseURL = tempRoot.appendingPathComponent("store.sqlite")
+    let repository = try PaperRepository(databasePath: databaseURL.path)
+    try repository.migrate()
+
+    let now = Date(timeIntervalSince1970: 1_777_260_000)
+    let paper = Paper(
+        id: "paper-a",
+        filePath: "/tmp/paper-a.pdf",
+        fileHash: "hash-reader-position-a",
+        title: "Paper A",
+        authors: ["Alice"],
+        year: 2026,
+        sourceURL: nil,
+        importedAt: now,
+        updatedAt: now
+    )
+    try repository.upsertPaper(paper)
+
+    let sessionA = PaperSession(
+        id: "session-a",
+        title: "Session A",
+        paperIDs: [paper.id],
+        codexSessionID: nil,
+        workspacePath: tempRoot.appendingPathComponent("session-a").path,
+        createdAt: now,
+        updatedAt: now
+    )
+    let sessionB = PaperSession(
+        id: "session-b",
+        title: "Session B",
+        paperIDs: [paper.id],
+        codexSessionID: nil,
+        workspacePath: tempRoot.appendingPathComponent("session-b").path,
+        createdAt: now,
+        updatedAt: now
+    )
+    try repository.upsertSession(sessionA)
+    try repository.upsertSession(sessionB)
+
+    let positionA = PaperReaderPosition(
+        sessionID: sessionA.id,
+        paperID: paper.id,
+        pageIndex: 4,
+        pagePointX: 120.5,
+        pagePointY: 730.25,
+        scaleFactor: 1.35,
+        updatedAt: now
+    )
+    let positionB = PaperReaderPosition(
+        sessionID: sessionB.id,
+        paperID: paper.id,
+        pageIndex: 9,
+        pagePointX: 82,
+        pagePointY: 240,
+        scaleFactor: 0.92,
+        updatedAt: now.addingTimeInterval(30)
+    )
+
+    try repository.upsertReaderPosition(positionA)
+    try repository.upsertReaderPosition(positionB)
+
+    let fetchedPositionA = try repository.fetchReaderPosition(sessionID: sessionA.id, paperID: paper.id)
+    let fetchedPositionB = try repository.fetchReaderPosition(sessionID: sessionB.id, paperID: paper.id)
+    try check(fetchedPositionA == positionA, "reader position should be scoped by session and paper")
+    try check(fetchedPositionB == positionB, "different sessions should keep independent positions for the same paper")
+
+    let reopened = try PaperRepository(databasePath: databaseURL.path)
+    try reopened.migrate()
+    let reopenedPositionA = try reopened.fetchReaderPosition(sessionID: sessionA.id, paperID: paper.id)
+    try check(reopenedPositionA == positionA, "reader position should survive repository reopen")
+}
+
 func runRepositoryChecks() throws {
     let tempRoot = FileManager.default.temporaryDirectory
         .appendingPathComponent("paper-codex-repository-\(UUID().uuidString)", isDirectory: true)
@@ -2008,6 +2084,10 @@ do {
     if selectedChecks.isEmpty || selectedChecks.contains("reader-tabs") {
         try runReaderTabStateChecks()
         print("reader-tabs: pass")
+    }
+    if selectedChecks.isEmpty || selectedChecks.contains("reader-positions") {
+        try runReaderPositionRepositoryChecks()
+        print("reader-positions: pass")
     }
     if selectedChecks.isEmpty || selectedChecks.contains("repository") {
         try runRepositoryChecks()

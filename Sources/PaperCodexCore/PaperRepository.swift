@@ -121,6 +121,17 @@ public final class PaperRepository {
           PRIMARY KEY (session_id, paper_id)
         );
 
+        CREATE TABLE IF NOT EXISTS reader_positions (
+          session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+          paper_id TEXT NOT NULL REFERENCES papers(id) ON DELETE CASCADE,
+          page_index INTEGER NOT NULL,
+          page_point_x REAL NOT NULL,
+          page_point_y REAL NOT NULL,
+          scale_factor REAL NOT NULL,
+          updated_at TEXT NOT NULL,
+          PRIMARY KEY (session_id, paper_id)
+        );
+
         CREATE TABLE IF NOT EXISTS chat_messages (
           id TEXT PRIMARY KEY,
           session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
@@ -503,6 +514,40 @@ public final class PaperRepository {
         return session
     }
 
+    public func upsertReaderPosition(_ position: PaperReaderPosition) throws {
+        try database.run("""
+        INSERT INTO reader_positions (
+          session_id, paper_id, page_index, page_point_x, page_point_y, scale_factor, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(session_id, paper_id) DO UPDATE SET
+          page_index = excluded.page_index,
+          page_point_x = excluded.page_point_x,
+          page_point_y = excluded.page_point_y,
+          scale_factor = excluded.scale_factor,
+          updated_at = excluded.updated_at;
+        """, bindings: [
+            .text(position.sessionID),
+            .text(position.paperID),
+            .int(position.pageIndex),
+            .double(position.pagePointX),
+            .double(position.pagePointY),
+            .double(position.scaleFactor),
+            .text(dates.string(from: position.updatedAt))
+        ])
+    }
+
+    public func fetchReaderPosition(sessionID: String, paperID: String) throws -> PaperReaderPosition? {
+        try database.query("""
+        SELECT session_id, paper_id, page_index, page_point_x, page_point_y, scale_factor, updated_at
+        FROM reader_positions
+        WHERE session_id = ? AND paper_id = ?
+        LIMIT 1;
+        """, bindings: [.text(sessionID), .text(paperID)]) { row in
+            try readerPosition(from: row)
+        }.first
+    }
+
     public func appendMessage(_ message: ChatMessage) throws {
         try database.run("""
         INSERT INTO chat_messages (id, session_id, role, content, created_at)
@@ -657,6 +702,18 @@ public final class PaperRepository {
             workspacePath: try row.text(3),
             createdAt: try date(from: try row.text(4)),
             updatedAt: try date(from: try row.text(5))
+        )
+    }
+
+    private func readerPosition(from row: SQLiteRow) throws -> PaperReaderPosition {
+        PaperReaderPosition(
+            sessionID: try row.text(0),
+            paperID: try row.text(1),
+            pageIndex: row.int(2),
+            pagePointX: row.double(3),
+            pagePointY: row.double(4),
+            scaleFactor: row.double(5),
+            updatedAt: try date(from: try row.text(6))
         )
     }
 

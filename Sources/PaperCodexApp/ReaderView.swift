@@ -42,9 +42,18 @@ struct ReaderView: View {
     private var pdfPane: some View {
         ZStack {
             if let paper = model.selectedPaper {
-                PDFKitView(filePath: paper.filePath, jumpTarget: model.pdfJumpTarget) { selection in
-                    model.updateSelection(selection)
-                }
+                PDFKitView(
+                    filePath: paper.filePath,
+                    jumpTarget: model.pdfJumpTarget,
+                    readingContextID: model.readerPositionContextID,
+                    readingPosition: model.readerPosition,
+                    onSelection: { selection in
+                        model.updateSelection(selection)
+                    },
+                    onReadingPositionChange: { position in
+                        model.updateReaderPosition(position)
+                    }
+                )
             } else {
                 ContentUnavailableView("No Paper Selected", systemImage: "doc.text")
             }
