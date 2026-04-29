@@ -135,6 +135,7 @@ public final class PaperRepository {
         if !paperColumns.contains("is_saved") {
             try database.execute("ALTER TABLE papers ADD COLUMN is_saved INTEGER NOT NULL DEFAULT 1;")
         }
+        try LocalStoreV2Migrator.migrate(database: database)
     }
 
     public func upsertPaper(_ paper: Paper) throws {

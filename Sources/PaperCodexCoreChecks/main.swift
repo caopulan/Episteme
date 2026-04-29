@@ -288,6 +288,51 @@ func runRepositoryChecks() throws {
     try check(removedTags.isEmpty, "paper tag links should be removable")
 }
 
+func runLocalStoreV2MigrationChecks() throws {
+    let tempRoot = FileManager.default.temporaryDirectory
+        .appendingPathComponent("paper-codex-local-store-v2-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+    let repository = try PaperRepository(databasePath: tempRoot.appendingPathComponent("store.sqlite").path)
+    try repository.migrate()
+
+    let now = Date(timeIntervalSince1970: 1_777_300_000)
+    let paper = Paper(
+        id: "paper-a",
+        filePath: tempRoot.appendingPathComponent("paper-a/original.pdf").path,
+        fileHash: "hash-a",
+        title: "Paper A",
+        authors: ["Alice"],
+        year: 2026,
+        sourceURL: "https://arxiv.org/abs/2604.18586",
+        importedAt: now,
+        updatedAt: now
+    )
+    try repository.upsertPaper(paper)
+    try repository.upsertCategory(Category(id: "cat-methods", parentID: nil, name: "Methods", sortOrder: 1))
+    try repository.upsertCategory(Category(id: "cat-vae", parentID: "cat-methods", name: "VAE", sortOrder: 2))
+    try repository.upsertTag(PaperTag(id: "tag-diffusion", name: "Diffusion"))
+    try repository.assignPaper("paper-a", toCategory: "cat-vae")
+    try repository.assignPaper("paper-a", toTag: "tag-diffusion")
+
+    try repository.migrate()
+    let database = try SQLiteDatabase(path: tempRoot.appendingPathComponent("store.sqlite").path)
+    let paperColumns = try database.tableColumns("papers")
+    let folders = try database.query("SELECT id, parent_id, name FROM folders ORDER BY sort_order, name;") { row in
+        "\(try row.text(0))|\(row.optionalText(1) ?? "")|\(try row.text(2))"
+    }
+    let fileRows = try database.query("SELECT paper_id, storage_state, local_path, content_hash FROM paper_files;") { row in
+        "\(try row.text(0))|\(try row.text(1))|\(try row.text(2))|\(try row.text(3))"
+    }
+    let sources = try database.query("SELECT paper_id, source_type, source_id, url FROM paper_sources;") { row in
+        "\(try row.text(0))|\(try row.text(1))|\(row.optionalText(2) ?? "")|\(row.optionalText(3) ?? "")"
+    }
+
+    try check(paperColumns.contains("canonical_key"), "V2 migration should add canonical paper columns")
+    try check(folders == ["cat-methods||Methods", "cat-vae|cat-methods|VAE"], "V2 migration should backfill folders from categories")
+    try check(fileRows == ["paper-a|saved_local|\(paper.filePath)|hash-a"], "V2 migration should backfill paper file records")
+    try check(sources == ["paper-a|arxiv|2604.18586|https://arxiv.org/abs/2604.18586"], "V2 migration should backfill arXiv source records")
+}
+
 func runSQLiteHelperChecks() throws {
     let databaseURL = FileManager.default.temporaryDirectory
         .appendingPathComponent("paper-codex-sqlite-helpers-\(UUID().uuidString).sqlite")
@@ -1344,6 +1389,10 @@ do {
     if selectedChecks.isEmpty || selectedChecks.contains("repository") {
         try runRepositoryChecks()
         print("repository: pass")
+    }
+    if selectedChecks.isEmpty || selectedChecks.contains("local-store-v2-migration") {
+        try runLocalStoreV2MigrationChecks()
+        print("local-store-v2-migration: pass")
     }
     if selectedChecks.isEmpty || selectedChecks.contains("sqlite-helpers") {
         try runSQLiteHelperChecks()
