@@ -217,13 +217,68 @@ struct PDFKitView: NSViewRepresentable {
                 highlightedAnnotations.append((page, annotation))
             }
 
-            if let first = boxes.first {
-                let point = NSPoint(x: first.x, y: first.y + first.height)
-                pdfView.go(to: PDFDestination(page: page, at: point))
-            } else {
+            if boxes.isEmpty {
                 pdfView.go(to: page)
+            } else {
+                centerJumpTarget(on: page, boxes: boxes)
             }
             scheduleViewportReport()
+        }
+
+        @MainActor
+        private func centerJumpTarget(on page: PDFPage, boxes: [BoundingBox]) {
+            guard let targetRect = unionRect(for: boxes), let pdfView else {
+                return
+            }
+            let targetPoint = NSPoint(x: targetRect.midX, y: targetRect.midY)
+            pdfView.go(to: PDFDestination(page: page, at: targetPoint))
+            centerPDFPagePointInViewport(targetPoint, page: page)
+            DispatchQueue.main.async { [weak self] in
+                self?.centerPDFPagePointInViewport(targetPoint, page: page)
+                self?.scheduleViewportReport()
+            }
+        }
+
+        private func unionRect(for boxes: [BoundingBox]) -> CGRect? {
+            let rects = boxes.map { box in
+                CGRect(x: box.x, y: box.y, width: box.width, height: box.height)
+            }
+            guard let first = rects.first else {
+                return nil
+            }
+            return rects.dropFirst().reduce(first) { partialResult, rect in
+                partialResult.union(rect)
+            }
+        }
+
+        @MainActor
+        private func centerPDFPagePointInViewport(_ pagePoint: NSPoint, page: PDFPage) {
+            guard let pdfView,
+                  let documentView = pdfView.documentView,
+                  let scrollView = findScrollView(in: pdfView) else {
+                return
+            }
+            let clipView = scrollView.contentView
+            let targetInPDFView = pdfView.convert(pagePoint, from: page)
+            let targetInDocumentView = documentView.convert(targetInPDFView, from: pdfView)
+            let boundedOrigin = boundedClipOrigin(
+                centeredOn: targetInDocumentView,
+                clipSize: clipView.bounds.size,
+                documentBounds: documentView.bounds
+            )
+            clipView.scroll(to: boundedOrigin)
+            scrollView.reflectScrolledClipView(clipView)
+        }
+
+        private func boundedClipOrigin(centeredOn point: NSPoint, clipSize: NSSize, documentBounds: NSRect) -> NSPoint {
+            let minX = documentBounds.minX
+            let minY = documentBounds.minY
+            let maxX = max(minX, documentBounds.maxX - clipSize.width)
+            let maxY = max(minY, documentBounds.maxY - clipSize.height)
+            return NSPoint(
+                x: min(max(point.x - clipSize.width / 2, minX), maxX),
+                y: min(max(point.y - clipSize.height / 2, minY), maxY)
+            )
         }
 
         @MainActor

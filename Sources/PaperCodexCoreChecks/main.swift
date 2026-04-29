@@ -284,6 +284,21 @@ func runUILayoutSourceChecks() throws {
         chatSource.contains("ChatComposerLayout.clampedTextHeight"),
         "chat composer height changes should be clamped through a shared layout helper"
     )
+
+    let pdfKitViewURL = root.appendingPathComponent("Sources/PaperCodexApp/PDFKitView.swift")
+    let pdfKitSource = try String(contentsOf: pdfKitViewURL)
+    try check(
+        pdfKitSource.contains("centerJumpTarget"),
+        "PDF citation jumps should use an explicit centered viewport path"
+    )
+    try check(
+        pdfKitSource.contains("centerPDFPagePointInViewport"),
+        "PDF citation jumps should scroll the target point into the middle of the viewport"
+    )
+    try check(
+        !pdfKitSource.contains("first.y + first.height"),
+        "PDF citation jumps should not align the highlight top edge to the viewport top"
+    )
 }
 
 func runRepositoryChecks() throws {
