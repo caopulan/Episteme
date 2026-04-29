@@ -437,6 +437,37 @@ func runLibraryDataStoreChecks() throws {
     try check(legacyFetchedTags.contains(PaperTag(id: "tag-ai", name: "AI")), "LibraryDataStore tag assignments should remain visible to legacy repository tag fetches")
 }
 
+func runArxivCacheDataStoreChecks() throws {
+    let databaseURL = FileManager.default.temporaryDirectory
+        .appendingPathComponent("paper-codex-arxiv-cache-store-\(UUID().uuidString).sqlite")
+    let repository = try PaperRepository(databasePath: databaseURL.path)
+    try repository.migrate()
+    let database = try SQLiteDatabase(path: databaseURL.path)
+    let store = ArxivCacheDataStore(database: database)
+    let now = Date(timeIntervalSince1970: 1_777_300_000)
+    try store.upsertFeedDate(
+        date: "2026-04-29",
+        source: "codearxiv",
+        feedVersion: "v1",
+        filterSnapshotJSON: #"{"tags":[]}"#,
+        cachedAt: now,
+        expiresAt: nil
+    )
+    try store.upsertPDFCache(
+        arxivID: "2604.18586",
+        date: "2026-04-29",
+        localPath: "/cache/2604.18586.pdf",
+        contentHash: "hash-pdf",
+        byteCount: 123,
+        cachedAt: now,
+        lastAccessedAt: now,
+        promotedPaperID: nil
+    )
+    let status = try store.feedCacheStatus(date: "2026-04-29")
+    try check(status.metadataCached, "arXiv cache store should report metadata cache")
+    try check(status.cachedPDFCount == 1, "arXiv cache store should count cached PDFs")
+}
+
 func runSQLiteHelperChecks() throws {
     let databaseURL = FileManager.default.temporaryDirectory
         .appendingPathComponent("paper-codex-sqlite-helpers-\(UUID().uuidString).sqlite")
@@ -1501,6 +1532,10 @@ do {
     if selectedChecks.isEmpty || selectedChecks.contains("library-data-store") {
         try runLibraryDataStoreChecks()
         print("library-data-store: pass")
+    }
+    if selectedChecks.isEmpty || selectedChecks.contains("arxiv-cache-data-store") {
+        try runArxivCacheDataStoreChecks()
+        print("arxiv-cache-data-store: pass")
     }
     if selectedChecks.isEmpty || selectedChecks.contains("sqlite-helpers") {
         try runSQLiteHelperChecks()
