@@ -3,13 +3,13 @@ import SwiftUI
 
 struct ReaderView: View {
     @EnvironmentObject private var model: AppModel
-    @State private var isShowingSessionPapers = false
     @State private var isShowingSaveToLibrarySheet = false
 
     var body: some View {
         VStack(spacing: 0) {
-            header
-            ReaderTabBar()
+            ReaderTabBar {
+                isShowingSaveToLibrarySheet = true
+            }
                 .environmentObject(model)
             Divider()
             HSplitView {
@@ -39,54 +39,6 @@ struct ReaderView: View {
         }
     }
 
-    private var header: some View {
-        HStack(spacing: 12) {
-            Button {
-                model.goToLibrary()
-            } label: {
-                Label("Library", systemImage: "chevron.left")
-            }
-            .buttonStyle(.bordered)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(model.selectedPaper?.title ?? "Reader")
-                    .font(.system(size: 18, weight: .semibold))
-                Text(model.selectedPaper?.filePath ?? "")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-            Spacer()
-
-            if let paper = model.selectedPaper, !paper.isSaved {
-                Button {
-                    isShowingSaveToLibrarySheet = true
-                } label: {
-                    Label("Save to Library", systemImage: "tray.and.arrow.down")
-                }
-                .buttonStyle(.borderedProminent)
-            }
-
-            Button {
-                isShowingSessionPapers.toggle()
-            } label: {
-                Label(sessionPaperCountLabel, systemImage: "rectangle.stack")
-            }
-            .buttonStyle(.bordered)
-            .popover(isPresented: $isShowingSessionPapers, arrowEdge: .bottom) {
-                SessionPapersPopover()
-                    .environmentObject(model)
-            }
-        }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 12)
-    }
-
-    private var sessionPaperCountLabel: String {
-        let count = model.selectedSession?.paperIDs.count ?? 0
-        return count == 1 ? "1 Paper" : "\(count) Papers"
-    }
-
     private var pdfPane: some View {
         ZStack {
             if let paper = model.selectedPaper {
@@ -103,22 +55,54 @@ struct ReaderView: View {
 
 private struct ReaderTabBar: View {
     @EnvironmentObject private var model: AppModel
+    var onShowSaveToLibrary: () -> Void
 
     var body: some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: 8) {
-                ForEach(model.readerTabState.tabs) { tab in
-                    ReaderTabItem(
-                        tab: tab,
-                        isActive: model.selectedPaper?.id == tab.paperID
-                            || model.readerTabState.activePaperID == tab.paperID
-                    )
-                }
+        HStack(spacing: 8) {
+            Button {
+                model.goToLibrary()
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(width: 26, height: 26)
+                    .contentShape(RoundedRectangle(cornerRadius: 6))
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 7)
+            .buttonStyle(.plain)
+            .background(Color(nsColor: .controlBackgroundColor))
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .help("Back to Library")
+
+            ScrollView(.horizontal) {
+                HStack(spacing: 8) {
+                    ForEach(model.readerTabState.tabs) { tab in
+                        ReaderTabItem(
+                            tab: tab,
+                            isActive: model.selectedPaper?.id == tab.paperID
+                                || model.readerTabState.activePaperID == tab.paperID
+                        )
+                    }
+                }
+                .padding(.vertical, 7)
+            }
+            .scrollIndicators(.hidden)
+
+            if let paper = model.selectedPaper, !paper.isSaved {
+                Button {
+                    onShowSaveToLibrary()
+                } label: {
+                    Image(systemName: "tray.and.arrow.down")
+                        .font(.system(size: 13, weight: .semibold))
+                        .frame(width: 28, height: 26)
+                        .contentShape(RoundedRectangle(cornerRadius: 6))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Color.accentColor)
+                .background(Color.accentColor.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .help("Save to Library")
+            }
         }
-        .scrollIndicators(.hidden)
+        .padding(.horizontal, 10)
         .background(Color(nsColor: .windowBackgroundColor))
     }
 }
@@ -202,90 +186,5 @@ private struct ReaderTabItem: View {
             return Color.accentColor.opacity(0.38)
         }
         return isHovering ? Color.primary.opacity(0.16) : Color.primary.opacity(0.08)
-    }
-}
-
-private struct SessionPapersPopover: View {
-    @EnvironmentObject private var model: AppModel
-
-    private var sessionPaperIDs: Set<String> {
-        Set(model.selectedSession?.paperIDs ?? [])
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Session Papers")
-                .font(.headline)
-
-            if model.papers.isEmpty {
-                ContentUnavailableView("No Papers", systemImage: "doc.text")
-                    .frame(width: 320, height: 160)
-            } else {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 8) {
-                        ForEach(model.papers) { paper in
-                            SessionPaperRow(
-                                paper: paper,
-                                isIncluded: sessionPaperIDs.contains(paper.id),
-                                isFocused: model.selectedPaper?.id == paper.id,
-                                canRemove: sessionPaperIDs.count > 1
-                            )
-                        }
-                    }
-                    .padding(.vertical, 2)
-                }
-                .frame(width: 360)
-                .frame(maxHeight: 360)
-            }
-        }
-        .padding(16)
-    }
-}
-
-private struct SessionPaperRow: View {
-    @EnvironmentObject private var model: AppModel
-    var paper: Paper
-    var isIncluded: Bool
-    var isFocused: Bool
-    var canRemove: Bool
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Toggle(isOn: Binding(
-                get: { isIncluded },
-                set: { isOn in
-                    model.setPaper(paper, includedInCurrentSession: isOn)
-                }
-            )) {
-                EmptyView()
-            }
-            .toggleStyle(.checkbox)
-            .disabled(isIncluded && !canRemove)
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(paper.title)
-                    .font(.system(size: 13, weight: .medium))
-                    .lineLimit(2)
-                Text(paper.authors.isEmpty ? "Authors not set" : paper.authors.joined(separator: ", "))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-
-            Spacer(minLength: 8)
-
-            if isIncluded {
-                Button {
-                    model.selectReaderPaper(paper)
-                } label: {
-                    Image(systemName: isFocused ? "eye.fill" : "eye")
-                }
-                .buttonStyle(.borderless)
-                .help(isFocused ? "Reading" : "Read This Paper")
-            }
-        }
-        .padding(8)
-        .background(isFocused ? Color.accentColor.opacity(0.12) : Color.clear)
-        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 }
