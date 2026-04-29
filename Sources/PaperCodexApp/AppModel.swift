@@ -148,6 +148,10 @@ private func loadCodexSystemPromptFromDefaults() -> String {
           !stored.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
         return PromptBuilder.defaultSystemPrompt
     }
+    if stored.trimmingCharacters(in: .whitespacesAndNewlines) == PromptDefaults.legacyCodexSystemPrompt {
+        UserDefaults.standard.removeObject(forKey: codexSystemPromptDefaultsKey)
+        return PromptBuilder.defaultSystemPrompt
+    }
     return stored
 }
 
