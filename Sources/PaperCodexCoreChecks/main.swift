@@ -1569,6 +1569,15 @@ func runLocalDiscoverEngineChecks() throws {
 }
 
 func runLocalArxivClientChecks() throws {
+    let apiRange = try DiscoverDateRange(start: "2026-04-27", end: "2026-04-29")
+    let apiQuery = try LocalArxivClient.submittedDateSearchQuery(range: apiRange, categories: ["cs.AI", "cs.CL"])
+    let apiURL = try LocalArxivClient.apiSearchURL(query: apiQuery, start: 2_000, maxResults: 1_000)
+    try check(apiQuery == "(cat:cs.AI OR cat:cs.CL) AND submittedDate:[202604270000 TO 202604292359]", "local arXiv client should build submittedDate category range queries")
+    try check(apiURL.absoluteString.contains("sortBy=submittedDate"), "local arXiv API URL should sort by submitted date")
+    try check(apiURL.absoluteString.contains("sortOrder=descending"), "local arXiv API URL should sort newest papers first")
+    try check(apiURL.absoluteString.contains("start=2000"), "local arXiv API URL should support paging start")
+    try check(apiURL.absoluteString.contains("max_results=1000"), "local arXiv API URL should support paging size")
+
     let multiDateHTML = """
     <html><body>
     <h3>Wed, 29 Apr 2026 (showing first 2 of 2 entries)</h3>

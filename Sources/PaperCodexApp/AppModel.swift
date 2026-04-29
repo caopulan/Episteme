@@ -180,12 +180,14 @@ private func isCancellationError(_ error: any Error) -> Bool {
     return nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled
 }
 
-private func currentISODate() -> String {
+private func latestCompleteArxivSubmissionISODate() -> String {
     let formatter = DateFormatter()
     formatter.locale = Locale(identifier: "en_US_POSIX")
     formatter.timeZone = TimeZone(secondsFromGMT: 0)
     formatter.dateFormat = "yyyy-MM-dd"
-    return formatter.string(from: Date())
+    let calendar = Calendar(identifier: .gregorian)
+    let date = calendar.date(byAdding: .day, value: -1, to: Date()) ?? Date()
+    return formatter.string(from: date)
 }
 
 @MainActor
@@ -226,8 +228,8 @@ final class AppModel: ObservableObject {
     @Published var arxivFeed: ArxivFeedResponse?
     @Published var selectedArxivPaper: ArxivFeedPaper?
     @Published var discoverKeyword = ""
-    @Published var discoverStartDate: String = currentISODate()
-    @Published var discoverEndDate: String = currentISODate()
+    @Published var discoverStartDate: String = latestCompleteArxivSubmissionISODate()
+    @Published var discoverEndDate: String = latestCompleteArxivSubmissionISODate()
     @Published var discoverSelectedCategories: [String] = ["cs.CV"]
     @Published var discoverSelectedSimilaritySourceIDs: [String] = []
     @Published var discoverResultIDs: [String] = []

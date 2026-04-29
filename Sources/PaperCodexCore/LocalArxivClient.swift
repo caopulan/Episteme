@@ -13,17 +13,24 @@ public struct LocalArxivListPage: Equatable, Sendable {
 public struct LocalArxivClientConfiguration: Equatable, Sendable {
     public var categories: [String]
     public var listShow: Int
+    public var apiPageSize: Int
     public var userAgent: String
 
-    public init(categories: [String], listShow: Int = 2_000, userAgent: String = "PaperCodex/0.1 (+https://arxiv.org)") {
+    public init(
+        categories: [String],
+        listShow: Int = 2_000,
+        apiPageSize: Int = 1_000,
+        userAgent: String = "PaperCodex/0.1 (+https://arxiv.org)"
+    ) {
         self.categories = LocalArxivClientConfiguration.normalized(categories)
         self.listShow = listShow
+        self.apiPageSize = min(max(apiPageSize, 1), 2_000)
         self.userAgent = userAgent
     }
 
     public static let `default` = LocalArxivClientConfiguration(categories: LocalArxivClient.defaultCategories)
 
-    private static func normalized(_ values: [String]) -> [String] {
+    fileprivate static func normalized(_ values: [String]) -> [String] {
         var seen: Set<String> = []
         var result: [String] = []
         for value in values {
@@ -138,40 +145,47 @@ public final class LocalArxivClient: Sendable {
             throw LocalArxivClientError.emptyCategories
         }
 
-        var ids: [String] = []
+        let query = try Self.submittedDateSearchQuery(range: range, categories: configuration.categories)
+        let rangeLabel = "\(range.start)...\(range.end)"
+        let pageSize = configuration.apiPageSize
+        var start = 0
+        var totalResults: Int?
+        var papers: [ArxivFeedPaper] = []
         var seenIDs: Set<String> = []
-        var listCategoriesByID: [String: [String]] = [:]
-        var listDatesByID: [String: String] = [:]
 
-        for category in configuration.categories {
-            let html = try await fetchText(url: try listURL(category: category))
-            for page in try Self.parseListPages(html) where range.contains(page.date) {
-                for id in page.ids {
-                    if !seenIDs.contains(id) {
-                        seenIDs.insert(id)
-                        ids.append(id)
-                        listDatesByID[id] = page.date
-                    }
-                    var categories = listCategoriesByID[id, default: []]
-                    if !categories.contains(category) {
-                        categories.append(category)
-                    }
-                    listCategoriesByID[id] = categories
-                }
+        repeat {
+            let xml = try await fetchText(url: try Self.apiSearchURL(query: query, start: start, maxResults: pageSize))
+            if totalResults == nil {
+                totalResults = Self.parseOpenSearchTotalResults(xml)
             }
-        }
+            let pagePapers = try Self.parseAtomFeed(
+                xml,
+                listDate: rangeLabel,
+                listCategoriesByID: [:]
+            )
+                .map { paper -> ArxivFeedPaper in
+                    var datedPaper = paper
+                    datedPaper.listDate = Self.isoDateFromAtomTimestamp(paper.published) ?? rangeLabel
+                    return datedPaper
+                }
 
-        guard !ids.isEmpty else {
+            for paper in pagePapers where !seenIDs.contains(paper.id) {
+                seenIDs.insert(paper.id)
+                papers.append(paper)
+            }
+
+            start += pageSize
+            guard let totalResults, start < totalResults, !pagePapers.isEmpty else {
+                break
+            }
+            try await Task.sleep(nanoseconds: 3_000_000_000)
+        } while start < 30_000
+
+        guard !papers.isEmpty else {
             throw LocalArxivClientError.listDateUnavailable("\(range.start)...\(range.end)")
         }
 
-        let papers = try await fetchMetadata(
-            ids: ids,
-            listDate: "\(range.start)...\(range.end)",
-            listCategoriesByID: listCategoriesByID,
-            listDatesByID: listDatesByID
-        )
-        return ArxivFeedResponse(date: "\(range.start)...\(range.end)", count: papers.count, papers: papers)
+        return ArxivFeedResponse(date: rangeLabel, count: papers.count, papers: papers)
     }
 
     public func fetchPDF(for paper: ArxivFeedPaper) async throws -> Data {
@@ -230,6 +244,39 @@ public final class LocalArxivClient: Sendable {
         return pages
     }
 
+    public static func submittedDateSearchQuery(range: DiscoverDateRange, categories: [String]) throws -> String {
+        let normalizedCategories = LocalArxivClientConfiguration.normalized(categories)
+        guard !normalizedCategories.isEmpty else {
+            throw LocalArxivClientError.emptyCategories
+        }
+        let categoryClause: String
+        if normalizedCategories.count == 1 {
+            categoryClause = "cat:\(normalizedCategories[0])"
+        } else {
+            categoryClause = "(\(normalizedCategories.map { "cat:\($0)" }.joined(separator: " OR ")))"
+        }
+        let start = range.start.replacingOccurrences(of: "-", with: "")
+        let end = range.end.replacingOccurrences(of: "-", with: "")
+        return "\(categoryClause) AND submittedDate:[\(start)0000 TO \(end)2359]"
+    }
+
+    public static func apiSearchURL(query: String, start: Int, maxResults: Int) throws -> URL {
+        guard var components = URLComponents(string: "https://export.arxiv.org/api/query") else {
+            throw LocalArxivClientError.invalidURL("https://export.arxiv.org/api/query")
+        }
+        components.queryItems = [
+            URLQueryItem(name: "search_query", value: query),
+            URLQueryItem(name: "start", value: "\(max(start, 0))"),
+            URLQueryItem(name: "max_results", value: "\(min(max(maxResults, 1), 2_000))"),
+            URLQueryItem(name: "sortBy", value: "submittedDate"),
+            URLQueryItem(name: "sortOrder", value: "descending")
+        ]
+        guard let url = components.url else {
+            throw LocalArxivClientError.invalidURL(query)
+        }
+        return url
+    }
+
     public static func parseAtomFeed(
         _ xml: String,
         listDate: String,
@@ -278,6 +325,24 @@ public final class LocalArxivClient: Sendable {
                 assets: ArxivFeedAssets(small: nil, large: nil)
             )
         }
+    }
+
+    public static func parseOpenSearchTotalResults(_ xml: String) -> Int? {
+        guard let match = regexMatches(
+            pattern: #"<(?:opensearch:)?totalResults[^>]*>\s*(\d+)\s*</(?:opensearch:)?totalResults>"#,
+            in: xml
+        ).first,
+              let value = match.groups.first else {
+            return nil
+        }
+        return Int(value)
+    }
+
+    public static func isoDateFromAtomTimestamp(_ value: String?) -> String? {
+        guard let value else {
+            return nil
+        }
+        return value.split(separator: "T").first.map(String.init)
     }
 
     public static func normalizeArxivID(_ raw: String) -> String {
