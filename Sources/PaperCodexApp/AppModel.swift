@@ -262,7 +262,10 @@ final class AppModel: ObservableObject {
     @Published var isCancellingDiscoverSearch = false
     @Published var isProcessingDiscoverResults = false
     @Published var discoverProcessingProgress: ArxivCacheProgress?
+    @Published var isCachingDiscoverPDFs = false
+    @Published var discoverPDFCacheProgress: ArxivCacheProgress?
     @Published var arxivAssetURLs: [String: URL] = [:]
+    @Published var arxivPDFThumbnailURLsByID: [String: [URL]] = [:]
     @Published var isLoadingArxivFeed = false
     @Published var isRefreshingArxivDates = false
     @Published var isPreloadingArxivAssets = false
@@ -284,10 +287,12 @@ final class AppModel: ObservableObject {
     private let workspaceManager = SessionWorkspaceManager()
     private var watchedFolderAutoScanTask: Task<Void, Never>?
     private var activeDiscoverSearchTask: Task<Void, Never>?
+    private var activeDiscoverPDFCacheTask: Task<Void, Never>?
     private var activeCodexRunHandle: CodexRunHandle?
     private var activeDiscoverCodexRunHandles: [CodexRunHandle] = []
     private var isCancellingCodexRun = false
     private var isCancellingDiscoverProcessing = false
+    private var isCancellingDiscoverPDFCache = false
 
     var arxivDisposableCachePath: String {
         supportRoot.appendingPathComponent("cache", isDirectory: true).path
@@ -324,6 +329,7 @@ final class AppModel: ObservableObject {
 
     deinit {
         watchedFolderAutoScanTask?.cancel()
+        activeDiscoverPDFCacheTask?.cancel()
     }
 
     func reloadLibrary() throws {
@@ -706,6 +712,55 @@ final class AppModel: ObservableObject {
         }
     }
 
+    private func cacheDiscoverPDFs(_ papers: [ArxivFeedPaper]) async {
+        guard !papers.isEmpty else {
+            return
+        }
+        isCachingDiscoverPDFs = true
+        isCancellingDiscoverPDFCache = false
+        defer {
+            isCachingDiscoverPDFs = false
+            isCancellingDiscoverPDFCache = false
+            discoverPDFCacheProgress = nil
+        }
+
+        let client = makeLocalArxivClient()
+        let total = papers.count
+        var completed = 0
+        var cached = 0
+        var failed = 0
+        updateDiscoverPDFCacheProgress(completed: completed, cached: cached, failed: failed, total: total)
+
+        for paper in papers {
+            if isCancellingDiscoverPDFCache || Task.isCancelled {
+                break
+            }
+            arxivDownloadingPaperIDs.insert(paper.id)
+            arxivDownloadProgressByID[paper.id] = 0.08
+            do {
+                let wasCached = try cachedArxivPDFURL(for: paper) != nil
+                let pdfURL = try await ensureArxivPDFCached(paper, client: client)
+                arxivDownloadProgressByID[paper.id] = 0.84
+                _ = try refreshDiscoverPDFThumbnails(for: paper, pdfURL: pdfURL)
+                if wasCached {
+                    cached += 1
+                }
+                arxivDownloadProgressByID[paper.id] = 1
+            } catch {
+                arxivDownloadingPaperIDs.remove(paper.id)
+                arxivDownloadProgressByID.removeValue(forKey: paper.id)
+                if isCancellationError(error) || isCancellingDiscoverPDFCache || Task.isCancelled {
+                    break
+                }
+                failed += 1
+            }
+            completed += 1
+            arxivDownloadingPaperIDs.remove(paper.id)
+            arxivDownloadProgressByID.removeValue(forKey: paper.id)
+            updateDiscoverPDFCacheProgress(completed: completed, cached: cached, failed: failed, total: total)
+        }
+    }
+
     private func processDiscoverPaperForEnrichment(_ paper: ArxivFeedPaper) async -> DiscoverPaperProcessingResult {
         if isCancellingDiscoverProcessing || Task.isCancelled {
             return DiscoverPaperProcessingResult(paperID: paper.id, state: .cancelled)
@@ -864,12 +919,36 @@ final class AppModel: ObservableObject {
         return try? arxivCache.cachedAssetURL(path: asset.path)
     }
 
+    func cachedArxivPDFThumbnailURLs(for paper: ArxivFeedPaper) -> [URL] {
+        arxivPDFThumbnailURLsByID[paper.id, default: []]
+    }
+
     func isDownloadingArxivPaper(_ paper: ArxivFeedPaper) -> Bool {
         arxivDownloadingPaperIDs.contains(paper.id)
     }
 
     func arxivDownloadProgress(for paper: ArxivFeedPaper) -> Double? {
         arxivDownloadProgressByID[paper.id]
+    }
+
+    func startCachingDiscoverPDFs(_ papers: [ArxivFeedPaper]) {
+        let uniquePapers = uniqueArxivPapers(papers)
+        guard !uniquePapers.isEmpty,
+              activeDiscoverPDFCacheTask == nil,
+              !isCachingDiscoverPDFs else {
+            return
+        }
+        activeDiscoverPDFCacheTask = Task { [weak self] in
+            await self?.cacheDiscoverPDFs(uniquePapers)
+            await MainActor.run {
+                self?.activeDiscoverPDFCacheTask = nil
+            }
+        }
+    }
+
+    func cancelDiscoverPDFCache() {
+        isCancellingDiscoverPDFCache = true
+        activeDiscoverPDFCacheTask?.cancel()
     }
 
     func libraryPaper(for arxivPaper: ArxivFeedPaper) -> Paper? {
@@ -978,6 +1057,8 @@ final class AppModel: ObservableObject {
             arxivFeed = nil
             selectedArxivPaper = nil
             arxivAssetURLs = [:]
+            arxivPDFThumbnailURLsByID = [:]
+            discoverPDFCacheProgress = nil
             try reloadLibrary()
         } catch {
             errorMessage = String(describing: error)
@@ -1690,6 +1771,61 @@ final class AppModel: ObservableObject {
         )
     }
 
+    private func updateDiscoverPDFCacheProgress(completed: Int, cached: Int, failed: Int, total: Int) {
+        let downloaded = max(completed - cached - failed, 0)
+        discoverPDFCacheProgress = ArxivCacheProgress(
+            date: selectedArxivDate ?? "\(discoverStartDate)...\(discoverEndDate)",
+            title: isCancellingDiscoverPDFCache ? "Stopping PDF cache" : "Caching PDFs",
+            detail: "\(downloaded) downloaded · \(cached) already cached · \(failed) failed · \(completed)/\(total)",
+            completed: completed,
+            total: total
+        )
+    }
+
+    private func uniqueArxivPapers(_ papers: [ArxivFeedPaper]) -> [ArxivFeedPaper] {
+        var seen: Set<String> = []
+        var result: [ArxivFeedPaper] = []
+        for paper in papers where !seen.contains(paper.id) {
+            seen.insert(paper.id)
+            result.append(paper)
+        }
+        return result
+    }
+
+    private func cachedArxivPDFURL(for paper: ArxivFeedPaper) throws -> URL? {
+        if let url = try arxivCache.cachedPDFURL(arxivID: paper.id, date: arxivPDFCacheDate(for: paper)) {
+            return url
+        }
+        return try arxivCache.cachedPDFURL(arxivID: paper.id)
+    }
+
+    private func arxivPDFCacheDate(for paper: ArxivFeedPaper) -> String {
+        paper.listDate ?? selectedArxivDate ?? arxivFeed?.date ?? latestCompleteArxivSubmissionISODate()
+    }
+
+    private func ensureArxivPDFCached(_ paper: ArxivFeedPaper, client: LocalArxivClient? = nil) async throws -> URL {
+        if let cachedURL = try cachedArxivPDFURL(for: paper) {
+            return cachedURL
+        }
+        let data = try await (client ?? makeLocalArxivClient()).fetchPDF(for: paper)
+        guard data.starts(with: Data("%PDF-".utf8)) else {
+            throw AppModelError.downloadedFileIsNotPDF(paper.id)
+        }
+        return try arxivCache.savePDF(data, arxivID: paper.id, date: arxivPDFCacheDate(for: paper))
+    }
+
+    @discardableResult
+    private func refreshDiscoverPDFThumbnails(for paper: ArxivFeedPaper, pdfURL: URL) throws -> [URL] {
+        let urls = try thumbnailCache.thumbnails(
+            forPDFAt: pdfURL,
+            cacheID: "arxiv-\(paper.id)",
+            pageLimit: 5,
+            size: CGSize(width: 164, height: 212)
+        )
+        arxivPDFThumbnailURLsByID[paper.id] = urls
+        return urls
+    }
+
     @discardableResult
     private func loadCachedArxivFeed(date: String) throws -> Bool {
         guard let cachedFeed = try arxivCache.loadFeed(date: date) else {
@@ -1796,6 +1932,30 @@ final class AppModel: ObservableObject {
             }
         }
         arxivAssetURLs = urls
+        reloadCachedArxivPDFThumbnails()
+    }
+
+    private func reloadCachedArxivPDFThumbnails() {
+        guard let arxivFeed else {
+            arxivPDFThumbnailURLsByID = [:]
+            return
+        }
+        var urlsByID = arxivPDFThumbnailURLsByID
+        let visibleIDs = Set(arxivFeed.papers.map(\.id))
+        for paper in arxivFeed.papers where urlsByID[paper.id]?.isEmpty != false {
+            guard let pdfURL = try? cachedArxivPDFURL(for: paper),
+                  let urls = try? thumbnailCache.thumbnails(
+                    forPDFAt: pdfURL,
+                    cacheID: "arxiv-\(paper.id)",
+                    pageLimit: 5,
+                    size: CGSize(width: 164, height: 212)
+                  ),
+                  !urls.isEmpty else {
+                continue
+            }
+            urlsByID[paper.id] = urls
+        }
+        arxivPDFThumbnailURLsByID = urlsByID.filter { visibleIDs.contains($0.key) }
     }
 
     private func importArxivPaper(_ arxivPaper: ArxivFeedPaper, isSaved: Bool) async throws -> Paper {
@@ -1812,18 +1972,9 @@ final class AppModel: ObservableObject {
         }
 
         let client = makeLocalArxivClient()
-        let pdfData = try await client.fetchPDF(for: arxivPaper)
+        let pdfURL = try await ensureArxivPDFCached(arxivPaper, client: client)
         arxivDownloadProgressByID[arxivPaper.id] = 0.65
-        guard pdfData.starts(with: Data("%PDF-".utf8)) else {
-            throw AppModelError.downloadedFileIsNotPDF(arxivPaper.id)
-        }
-        let downloadDir = supportRoot.appendingPathComponent("cache/downloads", isDirectory: true)
-        try FileManager.default.createDirectory(at: downloadDir, withIntermediateDirectories: true)
-        let pdfURL = downloadDir.appendingPathComponent("\(arxivPaper.id).pdf")
-        try pdfData.write(to: pdfURL, options: [.atomic])
-        defer {
-            try? FileManager.default.removeItem(at: pdfURL)
-        }
+        _ = try refreshDiscoverPDFThumbnails(for: arxivPaper, pdfURL: pdfURL)
 
         let metadata = PaperImportMetadata(
             title: arxivPaper.displayTitle(language: "en"),

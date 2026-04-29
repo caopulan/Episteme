@@ -270,6 +270,7 @@ struct DiscoverView: View {
                                     paper: paper,
                                     enrichment: model.discoverEnrichment(for: paper),
                                     imageURL: model.cachedArxivAssetURL(for: paper.assets.small),
+                                    thumbnailURLs: model.cachedArxivPDFThumbnailURLs(for: paper),
                                     inLibrary: model.libraryPaper(for: paper) != nil,
                                     isBusy: model.isDownloadingArxivPaper(paper),
                                     downloadProgress: model.arxivDownloadProgress(for: paper),
@@ -355,18 +356,21 @@ struct DiscoverView: View {
                         title: model.isSearchingDiscover ? "Searching" : "Search",
                         systemImage: "magnifyingglass",
                         tint: .blue,
-                        disabled: model.isSearchingDiscover || model.isProcessingDiscoverResults
+                        disabled: model.isSearchingDiscover || model.isProcessingDiscoverResults || model.isCachingDiscoverPDFs
                     ) {
                         model.startDiscoverSearch()
                     }
 
-                    if model.isSearchingDiscover || model.isProcessingDiscoverResults {
+                    if model.isSearchingDiscover || model.isProcessingDiscoverResults || model.isCachingDiscoverPDFs {
                         ToolbarActionButton(title: "Stop", systemImage: "stop.circle", tint: .red) {
                             if model.isSearchingDiscover {
                                 model.cancelDiscoverSearch()
                             }
                             if model.isProcessingDiscoverResults {
                                 model.cancelDiscoverProcessing()
+                            }
+                            if model.isCachingDiscoverPDFs {
+                                model.cancelDiscoverPDFCache()
                             }
                         }
                     } else {
@@ -381,6 +385,15 @@ struct DiscoverView: View {
                                 await model.processCurrentDiscoverResults(visible)
                             }
                         }
+
+                        ToolbarActionButton(
+                            title: "Cache PDFs",
+                            systemImage: "tray.and.arrow.down",
+                            tint: .green,
+                            disabled: (model.arxivFeed?.papers.isEmpty ?? papers.isEmpty) || model.isSearchingDiscover
+                        ) {
+                            model.startCachingDiscoverPDFs(model.arxivFeed?.papers ?? papers)
+                        }
                     }
 
                     Spacer()
@@ -392,6 +405,10 @@ struct DiscoverView: View {
                 }
                 if model.isProcessingDiscoverResults,
                    let progress = model.discoverProcessingProgress {
+                    ArxivCacheProgressStrip(progress: progress)
+                }
+                if model.isCachingDiscoverPDFs,
+                   let progress = model.discoverPDFCacheProgress {
                     ArxivCacheProgressStrip(progress: progress)
                 }
             }
@@ -851,6 +868,7 @@ private struct ArxivPaperCard: View {
     var paper: ArxivFeedPaper
     var enrichment: DiscoverPaperEnrichment?
     var imageURL: URL?
+    var thumbnailURLs: [URL]
     var inLibrary: Bool
     var isBusy: Bool
     var downloadProgress: Double?
@@ -859,17 +877,28 @@ private struct ArxivPaperCard: View {
     var onOpen: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if imageURL != nil {
+        VStack(alignment: .leading, spacing: 0) {
+            if imageURL != nil || !thumbnailURLs.isEmpty {
                 Button {
-                    onPreview()
+                    if imageURL != nil {
+                        onPreview()
+                    } else {
+                        onOpen()
+                    }
                 } label: {
-                    ArxivPreviewImage(url: imageURL)
-                        .frame(maxWidth: .infinity)
+                    if imageURL != nil {
+                        ArxivPreviewImage(url: imageURL)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 150)
+                            .clipped()
+                    } else {
+                        DiscoverPDFThumbnailHero(urls: thumbnailURLs)
+                            .frame(maxWidth: .infinity)
+                    }
                 }
                 .buttonStyle(.plain)
-                .disabled(paper.assets.large == nil && paper.assets.small == nil)
-                .help("Open image preview")
+                .disabled(imageURL == nil && isBusy)
+                .help(imageURL == nil ? "Open cached PDF" : "Open image preview")
             }
 
             VStack(alignment: .leading, spacing: 10) {
@@ -921,8 +950,7 @@ private struct ArxivPaperCard: View {
                     StableOpenButton(isBusy: isBusy, action: onOpen)
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.bottom, 12)
+            .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .contentShape(RoundedRectangle(cornerRadius: 8))
@@ -1227,6 +1255,39 @@ private struct SimilarityMeter: View {
     }
 }
 
+private struct DiscoverPDFThumbnailHero: View {
+    var urls: [URL]
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(Array(urls.prefix(5).enumerated()), id: \.offset) { _, url in
+                if let image = NSImage(contentsOf: url) {
+                    Image(nsImage: image)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .clipped()
+                        .overlay(alignment: .trailing) {
+                            Rectangle()
+                                .fill(Color.black.opacity(0.06))
+                                .frame(width: 1)
+                        }
+                }
+            }
+        }
+        .frame(height: 154)
+        .background(Color(nsColor: .controlBackgroundColor))
+        .overlay(alignment: .bottomLeading) {
+            Label("Cached PDF", systemImage: "doc.richtext")
+                .font(.system(size: 11.5, weight: .semibold))
+                .padding(.horizontal, 8)
+                .frame(height: 24)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6))
+                .padding(8)
+        }
+    }
+}
+
 private struct ArxivPreviewImage: View {
     var url: URL?
 
@@ -1235,7 +1296,7 @@ private struct ArxivPreviewImage: View {
             if let url, let image = NSImage(contentsOf: url) {
                 Image(nsImage: image)
                     .resizable()
-                    .aspectRatio(imageAspectRatio(image), contentMode: .fit)
+                    .aspectRatio(imageAspectRatio(image), contentMode: .fill)
             } else {
                 ZStack {
                     Color(nsColor: .separatorColor).opacity(0.22)

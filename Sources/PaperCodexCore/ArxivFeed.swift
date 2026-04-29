@@ -341,6 +341,54 @@ public final class ArxivFeedCache {
         return fileManager.fileExists(atPath: url.path) ? url : nil
     }
 
+    @discardableResult
+    public func savePDF(_ data: Data, arxivID: String, date: String) throws -> URL {
+        let url = try pdfURL(arxivID: arxivID, date: date)
+        try fileManager.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try data.write(to: url, options: [.atomic])
+        return url
+    }
+
+    public func cachedPDFURL(arxivID: String, date: String? = nil) throws -> URL? {
+        if let date {
+            let url = try pdfURL(arxivID: arxivID, date: date)
+            return fileManager.fileExists(atPath: url.path) ? url : nil
+        }
+
+        let pdfsRoot = root.appendingPathComponent("pdfs", isDirectory: true)
+        guard fileManager.fileExists(atPath: pdfsRoot.path) else {
+            return nil
+        }
+        let fileName = "\(try safeCacheComponent(arxivID)).pdf"
+        guard let enumerator = fileManager.enumerator(
+            at: pdfsRoot,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return nil
+        }
+        for case let candidate as URL in enumerator where candidate.lastPathComponent == fileName {
+            return candidate
+        }
+        return nil
+    }
+
+    public func pdfCacheSummary(for feed: ArxivFeedResponse) throws -> ArxivFeedAssetCacheSummary {
+        var cached = 0
+        var seen: Set<String> = []
+        for paper in feed.papers {
+            guard !seen.contains(paper.id) else {
+                continue
+            }
+            seen.insert(paper.id)
+            if try cachedPDFURL(arxivID: paper.id, date: paper.listDate ?? feed.date) != nil ||
+                (try cachedPDFURL(arxivID: paper.id)) != nil {
+                cached += 1
+            }
+        }
+        return ArxivFeedAssetCacheSummary(cached: cached, total: seen.count)
+    }
+
     public func assetCacheSummary(for feed: ArxivFeedResponse, includeLarge: Bool) throws -> ArxivFeedAssetCacheSummary {
         let assets = feed.uniqueAssets(includeLarge: includeLarge)
         var cached = 0
@@ -369,6 +417,34 @@ public final class ArxivFeedCache {
         return components.reduce(root) { partial, component in
             partial.appendingPathComponent(component)
         }
+    }
+
+    public func pdfURL(arxivID: String, date: String) throws -> URL {
+        root
+            .appendingPathComponent("pdfs", isDirectory: true)
+            .appendingPathComponent(try safeCacheComponent(date), isDirectory: true)
+            .appendingPathComponent("\(try safeCacheComponent(arxivID)).pdf")
+    }
+
+    private func safeCacheComponent(_ value: String) throws -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !trimmed.hasPrefix("/") else {
+            throw ArxivFeedCacheError.unsafePath(value)
+        }
+        var result = ""
+        for scalar in trimmed.unicodeScalars {
+            if CharacterSet.alphanumerics.contains(scalar) || ".-_".unicodeScalars.contains(scalar) {
+                result.unicodeScalars.append(scalar)
+            } else if scalar == "/" {
+                result.append("_")
+            } else {
+                result.append("-")
+            }
+        }
+        guard !result.isEmpty, result != ".", result != "..", !result.contains("..") else {
+            throw ArxivFeedCacheError.unsafePath(value)
+        }
+        return result
     }
 
     private func writeJSON<T: Encodable>(_ value: T, to url: URL) throws {

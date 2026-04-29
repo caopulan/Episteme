@@ -1409,6 +1409,19 @@ func runArxivFeedChecks() throws {
     let fullAssetSummary = try cache.assetCacheSummary(for: response, includeLarge: true)
     try check(smallAssetSummary == ArxivFeedAssetCacheSummary(cached: 1, total: 1), "arXiv cache should count cached small assets")
     try check(fullAssetSummary == ArxivFeedAssetCacheSummary(cached: 1, total: 2), "arXiv cache should count cached full image assets")
+    let emptyPDFSummary = try cache.pdfCacheSummary(for: response)
+    try check(emptyPDFSummary == ArxivFeedAssetCacheSummary(cached: 0, total: 1), "arXiv cache should count missing PDFs")
+    let savedPDFURL = try cache.savePDF(Data("%PDF-1.4\n".utf8), arxivID: paper.id, date: paper.listDate ?? response.date)
+    try check(FileManager.default.fileExists(atPath: savedPDFURL.path), "arXiv cache should store cached PDF bytes")
+    let exactCachedPDFURL = try cache.cachedPDFURL(arxivID: paper.id, date: paper.listDate ?? response.date)
+    let discoveredCachedPDFURL = try cache.cachedPDFURL(arxivID: paper.id)
+    try check(exactCachedPDFURL == savedPDFURL, "arXiv cache should find a PDF by exact feed date")
+    try check(
+        discoveredCachedPDFURL?.resolvingSymlinksInPath().path == savedPDFURL.resolvingSymlinksInPath().path,
+        "arXiv cache should find a PDF across cached dates"
+    )
+    let pdfSummary = try cache.pdfCacheSummary(for: response)
+    try check(pdfSummary == ArxivFeedAssetCacheSummary(cached: 1, total: 1), "arXiv cache should count cached PDFs")
 
     let metadata = PaperImportMetadata(
         title: paper.displayTitle(language: "en"),
