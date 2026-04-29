@@ -297,6 +297,33 @@ func runUILayoutSourceChecks() throws {
         librarySource.contains("systemImage: \"number\""),
         "library toolbar should show an arXiv import button next to PDF import"
     )
+    try check(
+        librarySource.contains(".onDrag {") && librarySource.contains("NSItemProvider(object: paper.id as NSString)"),
+        "library paper rows should expose the paper ID as an NSItemProvider drag payload"
+    )
+    try check(
+        librarySource.contains(".onDrop(of: [UTType.plainText]"),
+        "library category rows should accept dropped paper IDs as plain text payloads"
+    )
+    try check(
+        librarySource.contains("isDropTargeted"),
+        "library category rows should visibly highlight valid drop targets"
+    )
+    try check(
+        librarySource.contains("DragGesture(minimumDistance: 8"),
+        "library paper rows should support in-app drag gestures for direct folder assignment"
+    )
+    try check(
+        librarySource.contains("CategoryDropFramePreferenceKey"),
+        "library categories should publish drop frames for in-app drag targeting"
+    )
+
+    let appModelURL = root.appendingPathComponent("Sources/PaperCodexApp/AppModel.swift")
+    let appModelSource = try String(contentsOf: appModelURL)
+    try check(
+        appModelSource.contains("assignPapers(_ paperIDs: [String], toCategory categoryID: String)"),
+        "AppModel should provide a batch paper-to-category assignment path for drag and drop"
+    )
 
     let chatViewURL = root.appendingPathComponent("Sources/PaperCodexApp/ChatView.swift")
     let chatSource = try String(contentsOf: chatViewURL)

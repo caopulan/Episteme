@@ -1202,6 +1202,29 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func assignPapers(_ paperIDs: [String], toCategory categoryID: String) {
+        do {
+            guard let repository else {
+                throw AppModelError.repositoryUnavailable
+            }
+            guard categories.contains(where: { $0.id == categoryID }) else {
+                throw AppModelError.categoryNotFound(categoryID)
+            }
+            let validPaperIDs = Set(papers.map(\.id))
+            var assignedPaperIDs = Set<String>()
+            for paperID in paperIDs where validPaperIDs.contains(paperID) && !assignedPaperIDs.contains(paperID) {
+                try repository.assignPaper(paperID, toCategory: categoryID)
+                assignedPaperIDs.insert(paperID)
+            }
+            guard !assignedPaperIDs.isEmpty else {
+                return
+            }
+            try reloadLibrary()
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
     func setTag(_ tagID: String, assigned: Bool, for paper: Paper) {
         do {
             guard let repository else {
@@ -2978,6 +3001,7 @@ enum AppModelError: Error, CustomStringConvertible {
     case noRecoverableCodexTurn
     case downloadedFileIsNotPDF(String)
     case arxivMetadataNotFound(String)
+    case categoryNotFound(String)
     case keychainFailure(OSStatus)
 
     var description: String {
@@ -3000,6 +3024,8 @@ enum AppModelError: Error, CustomStringConvertible {
             "Downloaded content for \(arxivID) was not a PDF."
         case let .arxivMetadataNotFound(arxivID):
             "No arXiv metadata was found for \(arxivID)."
+        case let .categoryNotFound(categoryID):
+            "No folder was found for \(categoryID)."
         case let .keychainFailure(status):
             "Keychain operation failed with status \(status)."
         }

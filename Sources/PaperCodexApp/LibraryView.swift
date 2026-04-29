@@ -15,6 +15,8 @@ struct LibraryView: View {
     @State private var searchText = ""
     @State private var selectedCategoryID: String?
     @State private var selectedTagID: String?
+    @State private var activePaperDrag: ActiveLibraryPaperDrag?
+    @State private var categoryDropFrames: [String: CGRect] = [:]
     @AppStorage("PaperCodexLibrarySortOption") private var librarySortRawValue = LibrarySortOption.addedNewest.rawValue
 
     private var filteredPapers: [Paper] {
@@ -56,6 +58,13 @@ struct LibraryView: View {
                     .padding(.top, LibraryLayout.splitPaneTopInset)
                     .frame(minWidth: 300, idealWidth: 340, maxWidth: 420)
             }
+        }
+        .coordinateSpace(name: LibraryDragCoordinateSpace.name)
+        .onPreferenceChange(CategoryDropFramePreferenceKey.self) { frames in
+            categoryDropFrames = frames
+        }
+        .overlay(alignment: .topLeading) {
+            activePaperDragPreview
         }
         .sheet(isPresented: $isCreatingCategory) {
             CategoryEditorSheet(
@@ -152,6 +161,7 @@ struct LibraryView: View {
                             systemImage: selectedCategoryID == item.category.id ? "folder.fill" : "folder",
                             isSelected: selectedCategoryID == item.category.id,
                             depth: item.depth,
+                            isPaperDragTargeted: isPaperDragTargeting(item.category.id),
                             onSelect: {
                                 selectedCategoryID = item.category.id
                                 selectedTagID = nil
@@ -159,8 +169,14 @@ struct LibraryView: View {
                             onCreateChild: {
                                 newCategoryParentID = item.category.id
                                 startCreatingCategory(parentID: item.category.id)
+                            },
+                            onDropPapers: { paperIDs in
+                                model.assignPapers(paperIDs, toCategory: item.category.id)
+                                selectedCategoryID = item.category.id
+                                selectedTagID = nil
                             }
                         )
+                        .background(CategoryDropFrameReader(categoryID: item.category.id))
                     }
                 }
             }
@@ -259,9 +275,15 @@ struct LibraryView: View {
                                 model.openPaper(paper)
                             }
                             .contentShape(Rectangle())
+                            .onDrag {
+                                NSItemProvider(object: paper.id as NSString)
+                            } preview: {
+                                PaperDragPreview(paper: paper)
+                            }
                             .onTapGesture {
                                 model.selectLibraryPaper(paper)
                             }
+                            .highPriorityGesture(paperDragGesture(for: paper))
                         }
                     }
                     .padding(.vertical, 4)
@@ -418,6 +440,55 @@ struct LibraryView: View {
     private func startCreatingCategory(parentID: String?) {
         newCategoryParentID = parentID ?? ""
         isCreatingCategory = true
+    }
+
+    private var activePaperDragPreview: some View {
+        Group {
+            if let activePaperDrag,
+               let paper = model.papers.first(where: { $0.id == activePaperDrag.paperID }) {
+                PaperDragPreview(paper: paper)
+                    .opacity(0.94)
+                    .offset(x: activePaperDrag.location.x + 14, y: activePaperDrag.location.y + 14)
+                    .allowsHitTesting(false)
+            }
+        }
+    }
+
+    private func paperDragGesture(for paper: Paper) -> some Gesture {
+        DragGesture(minimumDistance: 8, coordinateSpace: .named(LibraryDragCoordinateSpace.name))
+            .onChanged { value in
+                activePaperDrag = ActiveLibraryPaperDrag(paperID: paper.id, location: value.location)
+            }
+            .onEnded { value in
+                completePaperDrag(paper.id, at: value.location)
+            }
+    }
+
+    private func completePaperDrag(_ paperID: String, at location: CGPoint) {
+        defer {
+            activePaperDrag = nil
+        }
+        guard let categoryID = categoryID(at: location) else {
+            return
+        }
+        model.assignPapers([paperID], toCategory: categoryID)
+        selectedCategoryID = categoryID
+        selectedTagID = nil
+    }
+
+    private func isPaperDragTargeting(_ categoryID: String) -> Bool {
+        guard let location = activePaperDrag?.location,
+              let frame = categoryDropFrames[categoryID] else {
+            return false
+        }
+        return frame.insetBy(dx: -6, dy: -3).contains(location)
+    }
+
+    private func categoryID(at location: CGPoint) -> String? {
+        categoryDropFrames
+            .filter { _, frame in frame.insetBy(dx: -6, dy: -3).contains(location) }
+            .min { left, right in left.value.midY < right.value.midY }?
+            .key
     }
 
     private func categories(for paper: Paper) -> [PaperCodexCore.Category] {
@@ -583,6 +654,36 @@ private struct CategoryListItem: Identifiable {
     var id: String { category.id }
 }
 
+private struct ActiveLibraryPaperDrag: Equatable {
+    var paperID: String
+    var location: CGPoint
+}
+
+private enum LibraryDragCoordinateSpace {
+    static let name = "PaperCodexLibraryDragSpace"
+}
+
+private struct CategoryDropFramePreferenceKey: PreferenceKey {
+    static let defaultValue: [String: CGRect] = [:]
+
+    static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, new in new })
+    }
+}
+
+private struct CategoryDropFrameReader: View {
+    var categoryID: String
+
+    var body: some View {
+        GeometryReader { proxy in
+            Color.clear.preference(
+                key: CategoryDropFramePreferenceKey.self,
+                value: [categoryID: proxy.frame(in: .named(LibraryDragCoordinateSpace.name))]
+            )
+        }
+    }
+}
+
 private enum LibraryLayout {
     static let splitPaneTopInset: CGFloat = 24
 }
@@ -634,6 +735,35 @@ private struct PaperRow: View {
                 .stroke(isSelected ? Color.accentColor.opacity(0.45) : Color.clear, lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+private struct PaperDragPreview: View {
+    var paper: Paper
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "doc.text")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(Color.accentColor)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(paper.title)
+                    .font(.system(size: 13, weight: .semibold))
+                    .lineLimit(1)
+                Text(paper.authors.isEmpty ? "Authors not set" : paper.authors.joined(separator: ", "))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .frame(width: 360, alignment: .leading)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(Color.accentColor.opacity(0.28), lineWidth: 1)
+        )
     }
 }
 
@@ -1069,13 +1199,16 @@ private struct FlowLayout: Layout {
 
 private struct CategorySidebarRow: View {
     @State private var isHovering = false
+    @State private var isDropTargeted = false
 
     var title: String
     var systemImage: String
     var isSelected: Bool
     var depth: Int
+    var isPaperDragTargeted: Bool
     var onSelect: () -> Void
     var onCreateChild: () -> Void
+    var onDropPapers: ([String]) -> Void
 
     var body: some View {
         ZStack(alignment: .trailing) {
@@ -1088,7 +1221,16 @@ private struct CategorySidebarRow: View {
                 action: onSelect
             )
 
-            if isHovering || isSelected {
+            if isDropActive {
+                Label("Drop", systemImage: "arrow.down.doc")
+                    .font(.system(size: 11, weight: .semibold))
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 4)
+                    .foregroundStyle(Color.accentColor)
+                    .background(Capsule().fill(Color.accentColor.opacity(0.16)))
+                    .padding(.trailing, 6)
+                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
+            } else if isHovering || isSelected {
                 Button(action: onCreateChild) {
                     Image(systemName: "plus")
                         .font(.system(size: 11, weight: .semibold))
@@ -1110,11 +1252,53 @@ private struct CategorySidebarRow: View {
                 .transition(.opacity.combined(with: .scale(scale: 0.92)))
             }
         }
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(isDropActive ? Color.accentColor.opacity(0.12) : Color.clear)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(isDropActive ? Color.accentColor.opacity(0.55) : Color.clear, lineWidth: 1.5)
+        )
+        .scaleEffect(isDropActive ? 1.02 : 1, anchor: .center)
+        .animation(.easeOut(duration: 0.12), value: isDropActive)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+        .onDrop(of: [UTType.plainText], isTargeted: $isDropTargeted) { providers in
+            loadDroppedPaperIDs(from: providers)
+        }
+        .help("Drop papers into \(title)")
         .onHover { hovering in
             withAnimation(.easeOut(duration: 0.12)) {
                 isHovering = hovering
             }
         }
+    }
+
+    private var isDropActive: Bool {
+        isDropTargeted || isPaperDragTargeted
+    }
+
+    private func loadDroppedPaperIDs(from providers: [NSItemProvider]) -> Bool {
+        let textProviders = providers.filter { $0.canLoadObject(ofClass: NSString.self) }
+        guard !textProviders.isEmpty else {
+            return false
+        }
+        for provider in textProviders {
+            provider.loadObject(ofClass: NSString.self) { object, _ in
+                guard let paperID = (object as? NSString).map(String.init) else {
+                    return
+                }
+                let trimmedPaperID = paperID.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmedPaperID.isEmpty else {
+                    return
+                }
+                DispatchQueue.main.async {
+                    onDropPapers([trimmedPaperID])
+                }
+            }
+        }
+        return true
     }
 }
 
