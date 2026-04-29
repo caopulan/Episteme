@@ -1,5 +1,6 @@
 import Foundation
 import PaperCodexCore
+import Security
 import SwiftUI
 
 enum AppRoute {
@@ -81,10 +82,9 @@ private struct SessionPaperContext {
 
 private let codexModelOverrideDefaultsKey = "PaperCodexCodexModelOverride"
 private let codexReasoningEffortDefaultsKey = "PaperCodexCodexReasoningEffort"
-private let arxivFeedBaseURLDefaultsKey = "PaperCodexArxivFeedBaseURL"
-private let arxivFeedTokenDefaultsKey = "PaperCodexArxivFeedToken"
-private let arxivFeedUsernameDefaultsKey = "PaperCodexArxivFeedUsername"
 private let localDiscoverPreferencesDefaultsKey = "PaperCodexLocalDiscoverPreferences"
+private let embeddingProviderAPIKeyService = "PaperCodexEmbeddingProvider"
+private let embeddingProviderAPIKeyAccount = "default"
 private let arxivSaveOrganizationDefaultsKey = "PaperCodexArxivSaveOrganization"
 private let quickPromptsDefaultsKey = "PaperCodexQuickPrompts"
 private let librarySidebarWidthDefaultsKey = "PaperCodexLibrarySidebarWidth"
@@ -120,6 +120,53 @@ private func saveLocalDiscoverPreferencesToDefaults(_ preferences: LocalDiscover
     if let data = try? JSONEncoder().encode(preferences.normalized) {
         UserDefaults.standard.set(data, forKey: localDiscoverPreferencesDefaultsKey)
     }
+}
+
+private func loadEmbeddingProviderAPIKeyFromKeychain() -> String {
+    var query = embeddingProviderAPIKeyQuery()
+    query[kSecReturnData as String] = true
+    query[kSecMatchLimit as String] = kSecMatchLimitOne
+    var result: CFTypeRef?
+    let status = SecItemCopyMatching(query as CFDictionary, &result)
+    guard status == errSecSuccess,
+          let data = result as? Data,
+          let value = String(data: data, encoding: .utf8) else {
+        return ""
+    }
+    return value
+}
+
+private func saveEmbeddingProviderAPIKeyToKeychain(_ value: String) throws {
+    let data = Data(value.utf8)
+    let baseQuery = embeddingProviderAPIKeyQuery()
+    if data.isEmpty {
+        SecItemDelete(baseQuery as CFDictionary)
+        return
+    }
+
+    let updateStatus = SecItemUpdate(baseQuery as CFDictionary, [kSecValueData as String: data] as CFDictionary)
+    if updateStatus == errSecSuccess {
+        return
+    }
+    if updateStatus != errSecItemNotFound {
+        throw AppModelError.keychainFailure(updateStatus)
+    }
+
+    var addQuery = baseQuery
+    addQuery[kSecValueData as String] = data
+    let addStatus = SecItemAdd(addQuery as CFDictionary, nil)
+    guard addStatus == errSecSuccess else {
+        throw AppModelError.keychainFailure(addStatus)
+    }
+}
+
+private func embeddingProviderAPIKeyQuery() -> [String: Any] {
+    [
+        kSecClass as String: kSecClassGenericPassword,
+        kSecAttrService as String: embeddingProviderAPIKeyService,
+        kSecAttrAccount as String: embeddingProviderAPIKeyAccount,
+        kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+    ]
 }
 
 private func isCancellationError(_ error: any Error) -> Bool {
@@ -159,10 +206,8 @@ final class AppModel: ObservableObject {
     @Published var errorMessage: String?
     @Published var isSending = false
     @Published var isScanningWatchedFolders = false
-    @Published var arxivFeedBaseURL: String = UserDefaults.standard.string(forKey: arxivFeedBaseURLDefaultsKey) ?? "http://nas.pucao.cn:20003"
-    @Published var arxivFeedToken: String = UserDefaults.standard.string(forKey: arxivFeedTokenDefaultsKey) ?? ""
-    @Published var arxivFeedUsername: String = UserDefaults.standard.string(forKey: arxivFeedUsernameDefaultsKey) ?? "caopu"
     @Published var localDiscoverPreferences: LocalDiscoverPreferences = loadLocalDiscoverPreferencesFromDefaults()
+    @Published var embeddingProviderAPIKey: String = loadEmbeddingProviderAPIKeyFromKeychain()
     @Published var arxivSaveOrganization: ArxivSaveOrganization = {
         let stored = UserDefaults.standard.string(forKey: arxivSaveOrganizationDefaultsKey)
         return stored.flatMap(ArxivSaveOrganization.init(rawValue:)) ?? .primaryCategory
@@ -171,7 +216,6 @@ final class AppModel: ObservableObject {
     @Published var arxivDates: [String] = []
     @Published var selectedArxivDate: String?
     @Published var arxivFeed: ArxivFeedResponse?
-    @Published var codeArxivUserState: CodeArxivUserState?
     @Published var selectedArxivPaper: ArxivFeedPaper?
     @Published var arxivAssetURLs: [String: URL] = [:]
     @Published var isLoadingArxivFeed = false
@@ -181,9 +225,6 @@ final class AppModel: ObservableObject {
     @Published var arxivDownloadingPaperIDs: Set<String> = []
     @Published var arxivDownloadProgressByID: [String: Double] = [:]
     @Published var arxivCacheProgress: ArxivCacheProgress?
-    @Published var isSyncingCodeArxivFavorites = false
-    @Published var codeArxivFavoriteSyncStatus: String?
-    @Published var isSavingCodeArxivPreferences = false
     @Published var paperThumbnailURLsByID: [String: [URL]] = [:]
     @Published var librarySidebarWidth: CGFloat = {
         let stored = UserDefaults.standard.double(forKey: librarySidebarWidthDefaultsKey)
@@ -359,18 +400,6 @@ final class AppModel: ObservableObject {
         pdfJumpTarget = nil
     }
 
-    func setArxivFeedConnection(baseURL: String, token: String, username: String? = nil) {
-        let trimmedBaseURL = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        let trimmedToken = token.trimmingCharacters(in: .whitespacesAndNewlines)
-        let trimmedUsername = (username ?? arxivFeedUsername).trimmingCharacters(in: .whitespacesAndNewlines)
-        arxivFeedBaseURL = trimmedBaseURL
-        arxivFeedToken = trimmedToken
-        arxivFeedUsername = trimmedUsername.isEmpty ? "caopu" : trimmedUsername
-        UserDefaults.standard.set(trimmedBaseURL, forKey: arxivFeedBaseURLDefaultsKey)
-        UserDefaults.standard.set(trimmedToken, forKey: arxivFeedTokenDefaultsKey)
-        UserDefaults.standard.set(arxivFeedUsername, forKey: arxivFeedUsernameDefaultsKey)
-    }
-
     func setLocalArxivCategories(_ categories: [String]) {
         var preferences = localDiscoverPreferences
         preferences.categories = categories
@@ -389,6 +418,13 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func setLocalSimilaritySourceTagIDs(_ tagIDs: [String]) {
+        var preferences = localDiscoverPreferences
+        preferences.similaritySourceTagIDs = tagIDs
+        localDiscoverPreferences = preferences.normalized
+        saveLocalDiscoverPreferencesToDefaults(localDiscoverPreferences)
+    }
+
     func setLocalEnrichmentPreferences(autoOpen: Bool, autoSave: Bool) {
         var preferences = localDiscoverPreferences
         preferences.enrichment = LocalEnrichmentPreferences(autoEnrichOnOpen: autoOpen, autoEnrichOnSave: autoSave)
@@ -396,11 +432,18 @@ final class AppModel: ObservableObject {
         saveLocalDiscoverPreferencesToDefaults(localDiscoverPreferences)
     }
 
-    func setEmbeddingProviderSettings(enabled: Bool, baseURL: String, model: String) {
-        var preferences = localDiscoverPreferences
-        preferences.embedding = EmbeddingProviderSettings(enabled: enabled, baseURL: baseURL, model: model)
-        localDiscoverPreferences = preferences.normalized
-        saveLocalDiscoverPreferencesToDefaults(localDiscoverPreferences)
+    func setEmbeddingProviderSettings(enabled: Bool, baseURL: String, apiKey: String, model: String) {
+        do {
+            let trimmedAPIKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+            try saveEmbeddingProviderAPIKeyToKeychain(trimmedAPIKey)
+            embeddingProviderAPIKey = trimmedAPIKey
+            var preferences = localDiscoverPreferences
+            preferences.embedding = EmbeddingProviderSettings(enabled: enabled, baseURL: baseURL, model: model)
+            localDiscoverPreferences = preferences.normalized
+            saveLocalDiscoverPreferencesToDefaults(localDiscoverPreferences)
+        } catch {
+            errorMessage = String(describing: error)
+        }
     }
 
     func setArxivSaveOrganization(_ organization: ArxivSaveOrganization) {
@@ -478,27 +521,6 @@ final class AppModel: ObservableObject {
             }
         } catch {
             errorMessage = String(describing: error)
-        }
-    }
-
-    func refreshCodeArxivUserState() async {
-        codeArxivUserState = nil
-    }
-
-    func updateCodeArxivPreferences(
-        categories: [String],
-        whitelistTags: [String],
-        blacklistTags: [String],
-        simFavoriteIDs: [Int]
-    ) async {
-        isSavingCodeArxivPreferences = true
-        defer {
-            isSavingCodeArxivPreferences = false
-        }
-        setLocalArxivCategories(categories)
-        setLocalTagFilters(whitelist: whitelistTags, blacklist: blacklistTags)
-        if let selectedArxivDate {
-            await loadArxivFeed(date: selectedArxivDate)
         }
     }
 
@@ -690,20 +712,12 @@ final class AppModel: ObservableObject {
             try removeDirectoryIfExists(supportRoot.appendingPathComponent("cache", isDirectory: true))
             try removeDirectoryIfExists(supportRoot.appendingPathComponent("arxiv-cache", isDirectory: true))
             arxivFeed = nil
-            codeArxivUserState = nil
             selectedArxivPaper = nil
             arxivAssetURLs = [:]
             try reloadLibrary()
         } catch {
             errorMessage = String(describing: error)
         }
-    }
-
-    func syncCodeArxivFavorites() async {
-        isSyncingCodeArxivFavorites = false
-        codeArxivFavoriteSyncStatus = nil
-        codeArxivUserState = nil
-        errorMessage = "CodeArXiv favorite sync is retired in local-first mode. Use local folders and tags in Library."
     }
 
     func createCategory(name: String, parentID: String?) {
@@ -1257,7 +1271,6 @@ final class AppModel: ObservableObject {
             completed: summary.cached,
             total: summary.total
         )
-        codeArxivUserState = nil
         if let selected = selectedArxivPaper,
            feed.papers.contains(where: { $0.id == selected.id }) {
             selectedArxivPaper = selected
@@ -1431,62 +1444,6 @@ final class AppModel: ObservableObject {
         }
     }
 
-    private func codeArxivCategoryID(for favorite: CodeArxivFavorite) -> String {
-        "codearxiv-favorite-\(favorite.id)-\(makeSlug(from: favorite.name))"
-    }
-
-    private func resolvedFavoritePapers(_ favorite: CodeArxivFavorite, client: ArxivFeedClient) async throws -> [ArxivFeedPaper] {
-        var papersByID: [String: ArxivFeedPaper] = [:]
-        for paper in favorite.papers {
-            papersByID[paper.id] = paper
-            papersByID[paper.arxivID] = paper
-            if let versionedID = paper.arxivIDVersioned {
-                papersByID[versionedID] = paper
-            }
-        }
-
-        guard !favorite.paperIDs.isEmpty else {
-            return favorite.papers
-        }
-
-        var resolved: [ArxivFeedPaper] = []
-        for paperID in favorite.paperIDs {
-            if let paper = papersByID[paperID] {
-                resolved.append(paper)
-                continue
-            }
-            let envelope = try await client.fetchPaper(id: paperID)
-            let paper = envelope.paper
-            papersByID[paper.id] = paper
-            papersByID[paper.arxivID] = paper
-            if let versionedID = paper.arxivIDVersioned {
-                papersByID[versionedID] = paper
-            }
-            resolved.append(paper)
-        }
-        return resolved
-    }
-
-    private func repositoryPaper(for arxivPaper: ArxivFeedPaper, repository: PaperRepository) throws -> Paper? {
-        let absURL = arxivPaper.links.abs
-        let pdfURL = arxivPaper.links.pdf
-        return try repository.fetchPapers().first { paper in
-            paper.sourceURL == absURL
-                || paper.sourceURL == pdfURL
-                || paper.sourceURL?.contains(arxivPaper.id) == true
-                || paper.sourceURL?.contains(arxivPaper.arxivID) == true
-        }
-    }
-
-    private func pruneCategory(_ categoryID: String, keepingPaperIDs paperIDs: Set<String>, repository: PaperRepository) throws {
-        for paper in try repository.fetchPapers() where !paperIDs.contains(paper.id) {
-            let categoryIDs = try repository.fetchCategoryIDs(forPaperID: paper.id)
-            if categoryIDs.contains(categoryID) {
-                try repository.removePaper(paper.id, fromCategory: categoryID)
-            }
-        }
-    }
-
     private func ensureTag(named name: String, repository: PaperRepository) throws -> PaperTag {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
@@ -1495,7 +1452,7 @@ final class AppModel: ObservableObject {
         if let existing = try repository.fetchTags().first(where: { $0.name.localizedCaseInsensitiveCompare(trimmed) == .orderedSame }) {
             return existing
         }
-        let tag = PaperTag(id: "codearxiv-tag-\(makeSlug(from: trimmed))", name: trimmed)
+        let tag = PaperTag(id: "tag-\(makeSlug(from: trimmed))", name: trimmed)
         try repository.upsertTag(tag)
         return tag
     }
@@ -1607,17 +1564,6 @@ final class AppModel: ObservableObject {
             configuration: LocalArxivClientConfiguration(categories: categories),
             session: URLSession(configuration: configuration)
         )
-    }
-
-    private func makeArxivFeedClient() throws -> ArxivFeedClient {
-        let trimmedBaseURL = arxivFeedBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let url = URL(string: trimmedBaseURL), url.scheme != nil else {
-            throw ArxivFeedClientError.invalidURL(trimmedBaseURL)
-        }
-        let configuration = URLSessionConfiguration.default
-        configuration.timeoutIntervalForRequest = 12
-        configuration.timeoutIntervalForResource = 30
-        return try ArxivFeedClient(baseURL: url, token: arxivFeedToken, session: URLSession(configuration: configuration))
     }
 
     private func makeManualID(prefix: String, name: String) -> String {
@@ -1927,6 +1873,7 @@ enum AppModelError: Error, CustomStringConvertible {
     case anchorMatchFailed
     case noRecoverableCodexTurn
     case downloadedFileIsNotPDF(String)
+    case keychainFailure(OSStatus)
 
     var description: String {
         switch self {
@@ -1946,6 +1893,8 @@ enum AppModelError: Error, CustomStringConvertible {
             "No failed Codex turn could be retried."
         case let .downloadedFileIsNotPDF(arxivID):
             "Downloaded content for \(arxivID) was not a PDF."
+        case let .keychainFailure(status):
+            "Keychain operation failed with status \(status)."
         }
     }
 }

@@ -3,15 +3,18 @@ import SwiftUI
 
 struct SettingsView: View {
     @EnvironmentObject private var model: AppModel
-    @State private var draftBaseURL = ""
-    @State private var draftToken = ""
-    @State private var draftUsername = ""
-    @State private var newPromptTitle = ""
-    @State private var newPromptContent = ""
-    @State private var draftFilterCategories = ""
+    @State private var draftArxivCategories = ""
     @State private var draftWhitelistTags = ""
     @State private var draftBlacklistTags = ""
-    @State private var draftSimilarityFavoriteIDs: Set<Int> = []
+    @State private var draftSimilaritySources = ""
+    @State private var draftAutoEnrichOnOpen = false
+    @State private var draftAutoEnrichOnSave = false
+    @State private var draftEmbeddingEnabled = false
+    @State private var draftEmbeddingBaseURL = ""
+    @State private var draftEmbeddingAPIKey = ""
+    @State private var draftEmbeddingModel = ""
+    @State private var newPromptTitle = ""
+    @State private var newPromptContent = ""
 
     var body: some View {
         SidebarSplitLayout(minContentWidth: 720) {
@@ -20,8 +23,10 @@ struct SettingsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 22) {
                     header
-                    feedConnection
-                    codeArxivPreferences
+                    arxivFeedSettings
+                    localRankingSettings
+                    codexEnrichmentSettings
+                    embeddingProviderSettings
                     quickPromptSettings
                     storageRules
                     cacheControls
@@ -32,13 +37,10 @@ struct SettingsView: View {
             .frame(minWidth: 720)
         }
         .onAppear {
-            draftBaseURL = model.arxivFeedBaseURL
-            draftToken = model.arxivFeedToken
-            draftUsername = model.arxivFeedUsername
-            syncCodeArxivDrafts()
+            syncLocalDrafts()
         }
-        .onChange(of: model.codeArxivUserState) { _, _ in
-            syncCodeArxivDrafts()
+        .onChange(of: model.localDiscoverPreferences) { _, _ in
+            syncLocalDrafts()
         }
     }
 
@@ -67,28 +69,24 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 4) {
             Text("Settings")
                 .font(.system(size: 30, weight: .semibold))
-            Text("Feed connection, disposable cache, and saved-paper organization.")
+            Text("Local arXiv, storage, ranking, and Codex preferences.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
     }
 
-    private var feedConnection: some View {
-        settingsSection(title: "CodeArXiv Feed", systemImage: "server.rack") {
-            TextField("Base URL", text: $draftBaseURL)
-                .textFieldStyle(.roundedBorder)
-            TextField("CodeArXiv username", text: $draftUsername)
-                .textFieldStyle(.roundedBorder)
-            SecureField("API token", text: $draftToken)
+    private var arxivFeedSettings: some View {
+        settingsSection(title: "arXiv Feed", systemImage: "network") {
+            TextField("Categories, comma separated", text: $draftArxivCategories)
                 .textFieldStyle(.roundedBorder)
             HStack {
                 Button {
-                    model.setArxivFeedConnection(baseURL: draftBaseURL, token: draftToken, username: draftUsername)
+                    model.setLocalArxivCategories(splitDraftList(draftArxivCategories))
                     Task {
                         await model.refreshArxivDatesAndFeed()
                     }
                 } label: {
-                    Label("Save & Connect", systemImage: "point.3.connected.trianglepath.dotted")
+                    Label("Save Categories", systemImage: "checkmark")
                 }
                 .buttonStyle(.borderedProminent)
 
@@ -97,128 +95,95 @@ struct SettingsView: View {
                         await model.refreshArxivDatesAndFeed()
                     }
                 } label: {
-                    Label("Refresh Feed", systemImage: "arrow.clockwise")
+                    Label(model.isRefreshingArxivDates ? "Refreshing" : "Refresh arXiv", systemImage: "arrow.clockwise")
                 }
                 .buttonStyle(.bordered)
+                .disabled(model.isRefreshingArxivDates)
+
+                Spacer()
+
+                Text(model.selectedArxivDate ?? "No cached date")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
             }
         }
     }
 
-    private var codeArxivPreferences: some View {
-        settingsSection(title: "CodeArXiv Preferences", systemImage: "slider.horizontal.3") {
-            if let state = model.codeArxivUserState {
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack {
-                        Label(state.user.username, systemImage: "person.crop.circle")
-                        Spacer()
-                        Button {
-                            Task {
-                                await model.refreshCodeArxivUserState()
-                            }
-                        } label: {
-                            Label("Refresh", systemImage: "arrow.clockwise")
-                        }
-                        .buttonStyle(.bordered)
-                    }
-
-                    TextField("Categories, comma separated", text: $draftFilterCategories)
-                        .textFieldStyle(.roundedBorder)
-                    TextField("Whitelist tags, comma separated", text: $draftWhitelistTags)
-                        .textFieldStyle(.roundedBorder)
-                    TextField("Blacklist tags, comma separated", text: $draftBlacklistTags)
-                        .textFieldStyle(.roundedBorder)
-
-                    VStack(alignment: .leading, spacing: 7) {
-                        HStack {
-                            Text("Similarity folders")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                            Text(draftSimilarityFavoriteIDs.isEmpty ? "All favorites" : "\(draftSimilarityFavoriteIDs.count) selected")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        if state.favorites.isEmpty {
-                            Text("No CodeArXiv favorites yet.")
-                                .font(.caption)
-                                .foregroundStyle(.tertiary)
-                        } else {
-                            ScrollView {
-                                VStack(alignment: .leading, spacing: 5) {
-                                    ForEach(state.favorites) { favorite in
-                                        Toggle(isOn: Binding(
-                                            get: { draftSimilarityFavoriteIDs.contains(favorite.id) },
-                                            set: { isOn in
-                                                if isOn {
-                                                    draftSimilarityFavoriteIDs.insert(favorite.id)
-                                                } else {
-                                                    draftSimilarityFavoriteIDs.remove(favorite.id)
-                                                }
-                                            }
-                                        )) {
-                                            Text("\(favorite.name) · \(favorite.paperIDs.count)")
-                                                .lineLimit(1)
-                                        }
-                                        .toggleStyle(.checkbox)
-                                    }
-                                }
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                            .frame(maxHeight: 150, alignment: .top)
-                        }
-                    }
-
-                    HStack {
-                        Button {
-                            Task {
-                                await model.updateCodeArxivPreferences(
-                                    categories: splitDraftList(draftFilterCategories),
-                                    whitelistTags: splitDraftList(draftWhitelistTags),
-                                    blacklistTags: splitDraftList(draftBlacklistTags),
-                                    simFavoriteIDs: draftSimilarityFavoriteIDs.sorted()
-                                )
-                            }
-                        } label: {
-                            Label(model.isSavingCodeArxivPreferences ? "Saving Preferences" : "Save Preferences", systemImage: "slider.horizontal.3")
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(model.isSavingCodeArxivPreferences)
-
-                        Button {
-                            Task {
-                                await model.syncCodeArxivFavorites()
-                            }
-                        } label: {
-                            Label(model.isSyncingCodeArxivFavorites ? "Syncing Favorites" : "Sync \(state.user.username) Favorites", systemImage: "square.and.arrow.down.on.square")
-                        }
-                        .buttonStyle(.bordered)
-                        .disabled(model.isSyncingCodeArxivFavorites || state.favorites.isEmpty)
-                    }
-
-                    if let status = model.codeArxivFavoriteSyncStatus {
-                        HStack(spacing: 8) {
-                            ProgressView()
-                                .controlSize(.small)
-                            Text(status)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
+    private var localRankingSettings: some View {
+        settingsSection(title: "Local Ranking", systemImage: "slider.horizontal.3") {
+            TextField("Whitelist tags, comma separated", text: $draftWhitelistTags)
+                .textFieldStyle(.roundedBorder)
+            TextField("Blacklist tags, comma separated", text: $draftBlacklistTags)
+                .textFieldStyle(.roundedBorder)
+            TextField("Similarity source tags or folders, comma separated", text: $draftSimilaritySources)
+                .textFieldStyle(.roundedBorder)
+            HStack {
+                Button {
+                    model.setLocalTagFilters(
+                        whitelist: splitDraftList(draftWhitelistTags),
+                        blacklist: splitDraftList(draftBlacklistTags)
+                    )
+                    model.setLocalSimilaritySourceTagIDs(splitDraftList(draftSimilaritySources))
+                } label: {
+                    Label("Save Ranking", systemImage: "line.3.horizontal.decrease.circle")
                 }
-            } else {
-                HStack {
-                    Text("No CodeArXiv user state loaded.")
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Button {
-                        Task {
-                            await model.refreshCodeArxivUserState()
-                        }
-                    } label: {
-                        Label("Load", systemImage: "arrow.clockwise")
-                    }
-                    .buttonStyle(.bordered)
+                .buttonStyle(.borderedProminent)
+
+                Spacer()
+
+                Text("\(model.localDiscoverPreferences.whitelistTags.count) white · \(model.localDiscoverPreferences.blacklistTags.count) black")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var codexEnrichmentSettings: some View {
+        settingsSection(title: "Codex Enrichment", systemImage: "sparkles") {
+            Toggle("Auto-enrich when opening arXiv papers", isOn: $draftAutoEnrichOnOpen)
+                .toggleStyle(.checkbox)
+            Toggle("Auto-enrich when saving to Library", isOn: $draftAutoEnrichOnSave)
+                .toggleStyle(.checkbox)
+            Button {
+                model.setLocalEnrichmentPreferences(
+                    autoOpen: draftAutoEnrichOnOpen,
+                    autoSave: draftAutoEnrichOnSave
+                )
+            } label: {
+                Label("Save Enrichment", systemImage: "checkmark")
+            }
+            .buttonStyle(.borderedProminent)
+        }
+    }
+
+    private var embeddingProviderSettings: some View {
+        settingsSection(title: "Embedding Provider", systemImage: "point.3.connected.trianglepath.dotted") {
+            Toggle("Enable embedding similarity", isOn: $draftEmbeddingEnabled)
+                .toggleStyle(.checkbox)
+            TextField("Base URL", text: $draftEmbeddingBaseURL)
+                .textFieldStyle(.roundedBorder)
+            SecureField("API key", text: $draftEmbeddingAPIKey)
+                .textFieldStyle(.roundedBorder)
+            TextField("Model", text: $draftEmbeddingModel)
+                .textFieldStyle(.roundedBorder)
+            HStack {
+                Button {
+                    model.setEmbeddingProviderSettings(
+                        enabled: draftEmbeddingEnabled,
+                        baseURL: draftEmbeddingBaseURL,
+                        apiKey: draftEmbeddingAPIKey,
+                        model: draftEmbeddingModel
+                    )
+                } label: {
+                    Label("Save Embedding", systemImage: "key")
                 }
+                .buttonStyle(.borderedProminent)
+
+                Spacer()
+
+                Text(model.localDiscoverPreferences.embedding.enabled ? "Enabled" : "Disabled")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -296,7 +261,7 @@ struct SettingsView: View {
                     Label("Clear arXiv Cache", systemImage: "trash")
                 }
                 .buttonStyle(.bordered)
-                Text("Clears thumbnails, feed JSON, temporary PDFs, and unsaved opened papers.")
+                Text("Clears feed JSON, temporary PDFs, and unsaved opened papers.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -338,18 +303,18 @@ struct SettingsView: View {
         SidebarRowButton(title: title, systemImage: systemImage, selected: selected, action: action)
     }
 
-    private func syncCodeArxivDrafts() {
-        guard let state = model.codeArxivUserState else {
-            draftFilterCategories = ""
-            draftWhitelistTags = ""
-            draftBlacklistTags = ""
-            draftSimilarityFavoriteIDs = []
-            return
-        }
-        draftFilterCategories = state.filters.categories.joined(separator: ", ")
-        draftWhitelistTags = state.filters.tags.whitelist.joined(separator: ", ")
-        draftBlacklistTags = state.filters.tags.blacklist.joined(separator: ", ")
-        draftSimilarityFavoriteIDs = Set(state.filters.simFavorites)
+    private func syncLocalDrafts() {
+        let preferences = model.localDiscoverPreferences.normalized
+        draftArxivCategories = preferences.categories.joined(separator: ", ")
+        draftWhitelistTags = preferences.whitelistTags.joined(separator: ", ")
+        draftBlacklistTags = preferences.blacklistTags.joined(separator: ", ")
+        draftSimilaritySources = preferences.similaritySourceTagIDs.joined(separator: ", ")
+        draftAutoEnrichOnOpen = preferences.enrichment.autoEnrichOnOpen
+        draftAutoEnrichOnSave = preferences.enrichment.autoEnrichOnSave
+        draftEmbeddingEnabled = preferences.embedding.enabled
+        draftEmbeddingBaseURL = preferences.embedding.baseURL
+        draftEmbeddingModel = preferences.embedding.model
+        draftEmbeddingAPIKey = model.embeddingProviderAPIKey
     }
 
     private func splitDraftList(_ text: String) -> [String] {
