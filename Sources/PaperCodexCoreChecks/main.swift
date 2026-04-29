@@ -1518,6 +1518,57 @@ func runArxivFeedChecks() throws {
     try check(!FileManager.default.fileExists(atPath: oldCachedPath), "promoted arXiv PDF should be moved out of disposable cache")
 }
 
+func runLocalArxivClientChecks() throws {
+    let listHTML = """
+    <html><body>
+    <h3>Wed, 29 Apr 2026 (showing first 3 of 3 entries)</h3>
+    <dl>
+      <dt><a name="item1">[1]</a><a href="/abs/2604.18803">arXiv:2604.18803</a></dt>
+      <dt><a name="item2">[2]</a><a href="/abs/2604.18804v2">arXiv:2604.18804v2</a></dt>
+      <dt><a name="item3">[3]</a><a href="/abs/2604.18803v2">arXiv:2604.18803v2</a></dt>
+    </dl>
+    <h3>Tue, 28 Apr 2026 (showing first 1 of 1 entries)</h3>
+    </body></html>
+    """
+    let parsedList = try LocalArxivClient.parseListPage(listHTML)
+    try check(parsedList.date == "2026-04-29", "local arXiv list parser should parse newest date heading")
+    try check(parsedList.ids == ["2604.18803", "2604.18804"], "local arXiv list parser should dedupe versioned IDs")
+
+    let atomXML = """
+    <?xml version="1.0" encoding="UTF-8"?>
+    <feed xmlns="http://www.w3.org/2005/Atom" xmlns:arxiv="http://arxiv.org/schemas/atom">
+      <entry>
+        <id>http://arxiv.org/abs/2604.18803v1</id>
+        <updated>2026-04-29T12:00:00Z</updated>
+        <published>2026-04-29T08:00:00Z</published>
+        <title>  A Local Paper Reader  </title>
+        <summary>  We present a local-first paper reader.  </summary>
+        <author><name>Alice Example</name></author>
+        <author><name>Bob Example</name></author>
+        <arxiv:comment>Code: https://github.com/example/paper-reader</arxiv:comment>
+        <arxiv:primary_category term="cs.CL" />
+        <category term="cs.CL" />
+        <category term="cs.AI" />
+      </entry>
+    </feed>
+    """
+    let parsedPapers = try LocalArxivClient.parseAtomFeed(
+        atomXML,
+        listDate: "2026-04-29",
+        listCategoriesByID: ["2604.18803": ["cs.CL"]]
+    )
+    try check(parsedPapers.count == 1, "local arXiv Atom parser should parse one entry")
+    let paper = parsedPapers[0]
+    try check(paper.id == "2604.18803", "local arXiv Atom parser should normalize arXiv ID")
+    try check(paper.arxivIDVersioned == "2604.18803v1", "local arXiv Atom parser should keep versioned ID")
+    try check(paper.title.en == "A Local Paper Reader", "local arXiv Atom parser should normalize title whitespace")
+    try check(paper.abstract.en == "We present a local-first paper reader.", "local arXiv Atom parser should normalize abstract whitespace")
+    try check(paper.links.abs == "https://arxiv.org/abs/2604.18803", "local arXiv mapper should provide canonical abs link")
+    try check(paper.links.pdf == "https://arxiv.org/pdf/2604.18803.pdf", "local arXiv mapper should provide canonical PDF link")
+    try check(paper.links.github == "https://github.com/example/paper-reader", "local arXiv mapper should extract GitHub links from comments")
+    try check(paper.listCategories == ["cs.CL"], "local arXiv mapper should preserve list categories")
+}
+
 func runArxivLiveFeedChecks() async throws {
     let environment = ProcessInfo.processInfo.environment
     guard let baseURLValue = environment["PAPER_CODEX_ARXIV_FEED_BASE_URL"],
@@ -1836,6 +1887,10 @@ do {
     if selectedChecks.isEmpty || selectedChecks.contains("arxiv-feed") {
         try runArxivFeedChecks()
         print("arxiv-feed: pass")
+    }
+    if selectedChecks.isEmpty || selectedChecks.contains("local-arxiv-client") {
+        try runLocalArxivClientChecks()
+        print("local-arxiv-client: pass")
     }
     if selectedChecks.contains("arxiv-live") {
         try await runArxivLiveFeedChecks()
