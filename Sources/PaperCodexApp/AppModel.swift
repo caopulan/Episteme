@@ -109,6 +109,7 @@ private struct SessionPaperContext {
 private let codexModelOverrideDefaultsKey = "PaperCodexCodexModelOverride"
 private let codexReasoningEffortDefaultsKey = "PaperCodexCodexReasoningEffort"
 private let codexSystemPromptDefaultsKey = "PaperCodexCodexSystemPrompt"
+private let globalLanguageModeDefaultsKey = "PaperCodexGlobalLanguageMode"
 private let discoverCodexModelOverrideDefaultsKey = "PaperCodexDiscoverCodexModelOverride"
 private let discoverCodexConcurrencyDefaultsKey = "PaperCodexDiscoverCodexConcurrency"
 private let localDiscoverPreferencesDefaultsKey = "PaperCodexLocalDiscoverPreferences"
@@ -153,6 +154,14 @@ private func loadCodexSystemPromptFromDefaults() -> String {
         return PromptBuilder.defaultSystemPrompt
     }
     return stored
+}
+
+private func loadGlobalLanguageModeFromDefaults() -> PaperCodexLanguageMode {
+    guard let stored = UserDefaults.standard.string(forKey: globalLanguageModeDefaultsKey),
+          let mode = PaperCodexLanguageMode(rawValue: stored) else {
+        return .automatic
+    }
+    return mode
 }
 
 private func loadLocalDiscoverPreferencesFromDefaults() -> LocalDiscoverPreferences {
@@ -262,6 +271,7 @@ final class AppModel: ObservableObject {
         return stored.flatMap(CodexReasoningEffort.init(rawValue:)) ?? .default
     }()
     @Published var codexSystemPrompt: String = loadCodexSystemPromptFromDefaults()
+    @Published var globalLanguageMode: PaperCodexLanguageMode = loadGlobalLanguageModeFromDefaults()
     @Published var activeCodexRun: ActiveCodexRun?
     @Published var errorMessage: String?
     @Published var isSending = false
@@ -569,6 +579,11 @@ final class AppModel: ObservableObject {
     func resetCodexSystemPrompt() {
         codexSystemPrompt = PromptBuilder.defaultSystemPrompt
         UserDefaults.standard.removeObject(forKey: codexSystemPromptDefaultsKey)
+    }
+
+    func setGlobalLanguageMode(_ mode: PaperCodexLanguageMode) {
+        globalLanguageMode = mode
+        UserDefaults.standard.set(mode.rawValue, forKey: globalLanguageModeDefaultsKey)
     }
 
     func setArxivSaveOrganization(_ organization: ArxivSaveOrganization) {
@@ -2349,7 +2364,7 @@ final class AppModel: ObservableObject {
         _ = try refreshDiscoverPDFThumbnails(for: arxivPaper, pdfURL: pdfURL)
 
         let metadata = PaperImportMetadata(
-            title: arxivPaper.displayTitle(language: "en"),
+            title: arxivPaper.displayTitle(language: globalLanguageMode.metadataLanguageCode),
             authors: arxivPaper.authors,
             year: arxivPaper.publishedYear,
             sourceURL: arxivPaper.links.abs
@@ -3047,7 +3062,8 @@ final class AppModel: ObservableObject {
                 papers: context.papers,
                 selectedAnchors: selectedAnchors,
                 relevantSpans: [],
-                systemPromptTemplate: codexSystemPrompt
+                systemPromptTemplate: codexSystemPrompt,
+                languageMode: globalLanguageMode
             )
         )
         appendCodexRunEvent(

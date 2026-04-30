@@ -109,7 +109,7 @@ struct DiscoverView: View {
             }
             .sheet(item: $paperPendingSave) { paper in
                 SaveToLibrarySheet(
-                    paperTitle: paper.displayTitle(language: "zh"),
+                    paperTitle: paper.displayTitle(language: model.globalLanguageMode.discoverLanguageCode),
                     detail: paper.authors.prefix(4).joined(separator: ", "),
                     libraryTags: model.tags,
                     suggestedTagNames: model.suggestedTagNames(for: paper),
@@ -352,6 +352,7 @@ struct DiscoverView: View {
             inLibrary: model.libraryPaper(for: paper) != nil,
             isBusy: model.isDownloadingArxivPaper(paper),
             downloadProgress: model.arxivDownloadProgress(for: paper),
+            languageMode: model.globalLanguageMode,
             minimumHeight: discoverRowHeights[rowIndex] ?? 0,
             onPreview: {
                 previewPaper = paper
@@ -948,6 +949,7 @@ private struct ArxivPaperCard: View {
     var inLibrary: Bool
     var isBusy: Bool
     var downloadProgress: Double?
+    var languageMode: PaperCodexLanguageMode
     var minimumHeight: CGFloat = 0
     var onPreview: () -> Void
     var onSave: () -> Void
@@ -984,7 +986,7 @@ private struct ArxivPaperCard: View {
                 Text(primaryTitle)
                     .font(.system(size: 16, weight: .semibold))
                     .fixedSize(horizontal: false, vertical: true)
-                if secondaryTitle != primaryTitle {
+                if !secondaryTitle.isEmpty, secondaryTitle != primaryTitle {
                     Text(secondaryTitle)
                         .font(.system(size: 13))
                         .foregroundStyle(.secondary)
@@ -1123,22 +1125,30 @@ private struct ArxivPaperCard: View {
     }
 
     private var primaryTitle: String {
-        if let title = enrichment?.titleZH.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty {
-            return title
+        if languageMode.discoverLanguageCode == "zh" {
+            if let title = enrichment?.titleZH.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty {
+                return title
+            }
+            return paper.displayTitle(language: "zh")
         }
         return paper.title.en
     }
 
     private var secondaryTitle: String {
-        paper.title.en
+        guard languageMode.discoverLanguageCode == "zh" else {
+            return ""
+        }
+        return paper.title.en
     }
 
     private var summaryText: String {
-        if let summary = enrichment?.summaryZH.trimmingCharacters(in: .whitespacesAndNewlines), !summary.isEmpty {
-            return summary
-        }
-        if !paper.summary.zh.isEmpty {
-            return paper.summary.zh
+        if languageMode.discoverLanguageCode == "zh" {
+            if let summary = enrichment?.summaryZH.trimmingCharacters(in: .whitespacesAndNewlines), !summary.isEmpty {
+                return summary
+            }
+            if !paper.summary.zh.isEmpty {
+                return paper.summary.zh
+            }
         }
         if !paper.summary.en.isEmpty {
             return paper.summary.en

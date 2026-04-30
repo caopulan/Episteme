@@ -74,6 +74,54 @@ public enum PromptDefaults {
     """
 }
 
+public enum PaperCodexLanguageMode: String, Codable, CaseIterable, Identifiable, Sendable {
+    case automatic = "auto"
+    case chinese = "zh"
+    case english = "en"
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .automatic:
+            "Auto"
+        case .chinese:
+            "中文"
+        case .english:
+            "English"
+        }
+    }
+
+    public var discoverLanguageCode: String {
+        switch self {
+        case .automatic, .chinese:
+            "zh"
+        case .english:
+            "en"
+        }
+    }
+
+    public var metadataLanguageCode: String {
+        switch self {
+        case .automatic, .english:
+            "en"
+        case .chinese:
+            "zh"
+        }
+    }
+
+    public var promptInstruction: String {
+        switch self {
+        case .automatic:
+            "Global language preference: Automatic. Match the user's language for each answer unless the user explicitly asks for a different language."
+        case .chinese:
+            "Global language preference: Chinese. Answer in Chinese by default unless the user explicitly asks for a different language."
+        case .english:
+            "Global language preference: English. Answer in English by default unless the user explicitly asks for a different language."
+        }
+    }
+}
+
 public struct PromptRequest: Equatable, Sendable {
     public var userMessage: String
     public var workspacePath: String
@@ -81,6 +129,7 @@ public struct PromptRequest: Equatable, Sendable {
     public var selectedAnchors: [Anchor]
     public var relevantSpans: [Span]
     public var systemPromptTemplate: String
+    public var languageMode: PaperCodexLanguageMode
 
     public init(
         userMessage: String,
@@ -88,7 +137,8 @@ public struct PromptRequest: Equatable, Sendable {
         papers: [Paper],
         selectedAnchors: [Anchor],
         relevantSpans: [Span],
-        systemPromptTemplate: String = PromptDefaults.codexSystemPrompt
+        systemPromptTemplate: String = PromptDefaults.codexSystemPrompt,
+        languageMode: PaperCodexLanguageMode = .automatic
     ) {
         self.userMessage = userMessage
         self.workspacePath = workspacePath
@@ -96,6 +146,7 @@ public struct PromptRequest: Equatable, Sendable {
         self.selectedAnchors = selectedAnchors
         self.relevantSpans = relevantSpans
         self.systemPromptTemplate = systemPromptTemplate
+        self.languageMode = languageMode
     }
 }
 
@@ -108,6 +159,10 @@ public struct PromptBuilder: Sendable {
     public func buildPrompt(request: PromptRequest) -> String {
         var sections: [String] = []
         sections.append(Self.renderSystemPrompt(request.systemPromptTemplate, workspacePath: request.workspacePath))
+        sections.append("""
+        [global language]
+        \(request.languageMode.promptInstruction)
+        """)
 
         sections.append("""
         [user message]

@@ -322,6 +322,8 @@ func runUILayoutSourceChecks() throws {
     let appModelSource = try String(contentsOf: appModelURL)
     let settingsViewURL = root.appendingPathComponent("Sources/PaperCodexApp/SettingsView.swift")
     let settingsViewSource = try String(contentsOf: settingsViewURL)
+    let discoverViewURL = root.appendingPathComponent("Sources/PaperCodexApp/DiscoverView.swift")
+    let discoverSource = try String(contentsOf: discoverViewURL)
     try check(
         appModelSource.contains("assignPapers(_ paperIDs: [String], toCategory categoryID: String)"),
         "AppModel should provide a batch paper-to-category assignment path for drag and drop"
@@ -373,6 +375,30 @@ func runUILayoutSourceChecks() throws {
     try check(
         settingsViewSource.contains("model.resetCodexSystemPrompt()"),
         "settings should let users restore the default Codex system prompt"
+    )
+    try check(
+        appModelSource.contains("globalLanguageModeDefaultsKey"),
+        "AppModel should persist the global language mode"
+    )
+    try check(
+        appModelSource.contains("languageMode: globalLanguageMode"),
+        "AppModel should pass the global language mode into prompt building"
+    )
+    try check(
+        settingsViewSource.contains("globalLanguageSettings"),
+        "settings should include a dedicated global language section"
+    )
+    try check(
+        settingsViewSource.contains("Picker(\"Global language\""),
+        "settings should expose a global language picker"
+    )
+    try check(
+        discoverSource.contains("languageMode: model.globalLanguageMode"),
+        "Discover cards should render with the configured global language"
+    )
+    try check(
+        discoverSource.contains("paper.displayTitle(language: model.globalLanguageMode.discoverLanguageCode)"),
+        "Discover save sheet should use the configured global language"
     )
 
     let chatViewURL = root.appendingPathComponent("Sources/PaperCodexApp/ChatView.swift")
@@ -1159,6 +1185,10 @@ func runPromptChecks() throws {
     )
 
     try check(prompt.contains("Compare this selection with Paper B."), "prompt should include the user message")
+    try check(prompt.contains("Global language preference: Automatic"), "prompt should include the default automatic language preference")
+    try check(PaperCodexLanguageMode.chinese.discoverLanguageCode == "zh", "Chinese language mode should prefer Chinese discover metadata")
+    try check(PaperCodexLanguageMode.english.discoverLanguageCode == "en", "English language mode should prefer English discover metadata")
+    try check(PaperCodexLanguageMode.automatic.metadataLanguageCode == "en", "automatic language mode should preserve English library metadata by default")
     try check(prompt.contains("anchor_id: paper:paper-a:p5:asel1"), "prompt should include selected anchor ID")
     try check(prompt.contains("workspace: /tmp/session-a"), "prompt should include workspace guidance")
     try check(prompt.contains("original_pdf: /tmp/session-a/papers/paper-a/original.pdf"), "prompt should point Codex at the workspace PDF copy")
@@ -1192,6 +1222,30 @@ func runPromptChecks() throws {
     try check(customPrompt.hasPrefix("CUSTOM CODEX SYSTEM"), "custom Codex system prompt should replace the built-in default")
     try check(customPrompt.contains("workspace: /tmp/custom-session"), "custom Codex system prompt should render the workspace placeholder")
     try check(!customPrompt.contains("Use citations sparingly"), "custom Codex system prompt should not silently append the default instructions")
+    let englishPrompt = PromptBuilder().buildPrompt(
+        request: PromptRequest(
+            userMessage: "Explain Figure 2.",
+            workspacePath: "/tmp/custom-session",
+            papers: [paper],
+            selectedAnchors: [],
+            relevantSpans: [],
+            languageMode: .english
+        )
+    )
+    try check(englishPrompt.contains("Global language preference: English"), "prompt should include the English global language preference")
+    try check(englishPrompt.contains("Answer in English by default"), "English language mode should ask Codex to answer in English")
+    let chinesePrompt = PromptBuilder().buildPrompt(
+        request: PromptRequest(
+            userMessage: "Explain Figure 2.",
+            workspacePath: "/tmp/custom-session",
+            papers: [paper],
+            selectedAnchors: [],
+            relevantSpans: [],
+            languageMode: .chinese
+        )
+    )
+    try check(chinesePrompt.contains("Global language preference: Chinese"), "prompt should include the Chinese global language preference")
+    try check(chinesePrompt.contains("Answer in Chinese by default"), "Chinese language mode should ask Codex to answer in Chinese")
 }
 
 func runWorkspaceChecks() throws {

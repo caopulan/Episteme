@@ -26,6 +26,7 @@ struct SettingsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 22) {
                     header
+                    globalLanguageSettings
                     arxivFeedSettings
                     localRankingSettings
                     codexEnrichmentSettings
@@ -117,6 +118,24 @@ struct SettingsView: View {
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
             }
+        }
+    }
+
+    private var globalLanguageSettings: some View {
+        settingsSection(title: "Language", systemImage: "globe") {
+            Picker("Global language", selection: Binding(
+                get: { model.globalLanguageMode },
+                set: { model.setGlobalLanguageMode($0) }
+            )) {
+                ForEach(PaperCodexLanguageMode.allCases) { mode in
+                    Text(mode.title).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            Text("Controls Codex answers and the preferred language for Discover titles and summaries.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 
