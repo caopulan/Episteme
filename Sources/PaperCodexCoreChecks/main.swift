@@ -334,8 +334,8 @@ func runUILayoutSourceChecks() throws {
         "pending arXiv placeholder rows should disable read/open actions until the PDF is ready"
     )
     try check(
-        librarySource.contains(".onDrag {") && librarySource.contains("NSItemProvider(object: paper.id as NSString)"),
-        "library paper rows should expose the paper ID as an NSItemProvider drag payload"
+        librarySource.contains(".onDrag {") && librarySource.contains("NSItemProvider(object: paperDragPayload(for: paper) as NSString)"),
+        "library paper rows should expose selected paper IDs as an NSItemProvider drag payload"
     )
     try check(
         librarySource.contains(".onDrop(of: [UTType.plainText]"),
@@ -540,12 +540,32 @@ func runUILayoutSourceChecks() throws {
         "library paper rows should track hover state for row feedback and selection affordances"
     )
     try check(
-        librarySource.contains("showSelectionToggle"),
-        "library paper row multi-select controls should appear only on hover or active selection"
+        librarySource.contains("bulkActionBarOverlay"),
+        "library bulk action controls should float over the list instead of shifting rows down"
+    )
+    try check(
+        !librarySource.contains("onSelectionToggle"),
+        "library paper rows should not show checkbox-style selection controls"
+    )
+    try check(
+        !librarySource.contains("showSelectionToggle"),
+        "library paper rows should rely on command/shift multi-select instead of hover checkboxes"
     )
     try check(
         librarySource.contains("arxivDisplayID"),
         "library paper rows should show the arXiv ID in the visible card area when available"
+    )
+    try check(
+        librarySource.contains(".font(.system(size: 12.5"),
+        "library arXiv, folder, and tag chips should be slightly larger than caption text"
+    )
+    try check(
+        librarySource.contains("paperIDsForDrag(startingWith:"),
+        "dragging a library paper should carry the selected paper set when the row is part of a multi-selection"
+    )
+    try check(
+        librarySource.contains("CategoryDepthGuide"),
+        "library folder hierarchy should render an explicit depth guide"
     )
     try check(
         librarySource.contains("LazyVStack(spacing: 1)"),

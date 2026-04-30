@@ -424,27 +424,6 @@ struct LibraryView: View {
                 }
             }
 
-            if !selectedPaperIDs.isEmpty {
-                BulkLibraryActionBar(
-                    selectedCount: selectedPaperIDs.count,
-                    canMove: true,
-                    canTag: !model.tags.isEmpty,
-                    onMove: {
-                        isShowingBulkMove = true
-                    },
-                    onTag: {
-                        isShowingBulkTag = true
-                    },
-                    onDelete: {
-                        isConfirmingBulkDelete = true
-                    },
-                    onClear: {
-                        selectedPaperIDs.removeAll()
-                        lastSelectedPaperID = nil
-                    }
-                )
-            }
-
             if selectedCategoryID != nil || selectedTagID != nil || !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 Button {
                     searchText = ""
@@ -471,19 +450,18 @@ struct LibraryView: View {
                                 isImportPlaceholder: paper.isArxivImportPlaceholder,
                                 placeholderDetail: model.arxivImportPlaceholderDetail(for: paper),
                                 isSelected: model.selectedLibraryPaper?.id == paper.id,
-                                isMultiSelected: selectedPaperIDs.contains(paper.id),
-                                selectionModeActive: !selectedPaperIDs.isEmpty,
-                                onSelectionToggle: {
-                                    togglePaperSelection(paper)
-                                }
+                                isMultiSelected: selectedPaperIDs.contains(paper.id)
                             ) {
                                 model.openPaper(paper)
                             }
                             .contentShape(Rectangle())
                             .onDrag {
-                                NSItemProvider(object: paper.id as NSString)
+                                NSItemProvider(object: paperDragPayload(for: paper) as NSString)
                             } preview: {
-                                PaperDragPreview(paper: paper)
+                                PaperDragPreview(
+                                    paper: paper,
+                                    selectedCount: paperIDsForDrag(startingWith: paper).count
+                                )
                             }
                             .onTapGesture {
                                 handlePaperRowClick(paper)
@@ -493,9 +471,42 @@ struct LibraryView: View {
                     }
                     .padding(.vertical, 4)
                 }
+                .overlay(alignment: .top) {
+                    bulkActionBarOverlay
+                }
             }
         }
         .padding(24)
+    }
+
+    private var bulkActionBarOverlay: some View {
+        Group {
+            if !selectedPaperIDs.isEmpty {
+                BulkLibraryActionBar(
+                    selectedCount: selectedPaperIDs.count,
+                    canMove: true,
+                    canTag: !model.tags.isEmpty,
+                    onMove: {
+                        isShowingBulkMove = true
+                    },
+                    onTag: {
+                        isShowingBulkTag = true
+                    },
+                    onDelete: {
+                        isConfirmingBulkDelete = true
+                    },
+                    onClear: {
+                        selectedPaperIDs.removeAll()
+                        lastSelectedPaperID = nil
+                    }
+                )
+                .padding(.horizontal, 10)
+                .padding(.top, 8)
+                .transition(.move(edge: .top).combined(with: .opacity))
+                .shadow(color: Color.black.opacity(0.16), radius: 14, y: 5)
+            }
+        }
+        .animation(.easeOut(duration: 0.16), value: selectedPaperIDs.isEmpty)
     }
 
     private var sortDirectionButton: some View {
@@ -883,7 +894,7 @@ struct LibraryView: View {
         Group {
             if let activePaperDrag,
                let paper = model.papers.first(where: { $0.id == activePaperDrag.paperID }) {
-                PaperDragPreview(paper: paper)
+                PaperDragPreview(paper: paper, selectedCount: activePaperDrag.paperIDs.count)
                     .opacity(0.94)
                     .offset(x: activePaperDrag.location.x + 14, y: activePaperDrag.location.y + 14)
                     .allowsHitTesting(false)
@@ -894,11 +905,26 @@ struct LibraryView: View {
     private func paperDragGesture(for paper: Paper) -> some Gesture {
         DragGesture(minimumDistance: 8, coordinateSpace: .named(LibraryDragCoordinateSpace.name))
             .onChanged { value in
-                activePaperDrag = ActiveLibraryPaperDrag(paperID: paper.id, location: value.location)
+                activePaperDrag = ActiveLibraryPaperDrag(
+                    paperID: paper.id,
+                    paperIDs: paperIDsForDrag(startingWith: paper),
+                    location: value.location
+                )
             }
             .onEnded { value in
                 completePaperDrag(paper.id, at: value.location)
             }
+    }
+
+    private func paperIDsForDrag(startingWith paper: Paper) -> [String] {
+        if selectedPaperIDs.contains(paper.id) {
+            return selectedPaperIDsInOrder
+        }
+        return [paper.id]
+    }
+
+    private func paperDragPayload(for paper: Paper) -> String {
+        paperIDsForDrag(startingWith: paper).joined(separator: "\n")
     }
 
     private func completePaperDrag(_ paperID: String, at location: CGPoint) {
@@ -908,7 +934,8 @@ struct LibraryView: View {
         guard let categoryID = categoryID(at: location) else {
             return
         }
-        model.assignPapers([paperID], toCategory: categoryID)
+        let paperIDs = activePaperDrag?.paperIDs ?? [paperID]
+        model.assignPapers(paperIDs, toCategory: categoryID)
         selectedCategoryID = categoryID
         selectedTagID = nil
     }
@@ -1152,6 +1179,7 @@ private struct CategoryListItem: Identifiable {
 
 private struct ActiveLibraryPaperDrag: Equatable {
     var paperID: String
+    var paperIDs: [String]
     var location: CGPoint
 }
 
@@ -1198,28 +1226,12 @@ private struct PaperRow: View {
     var placeholderDetail: String
     var isSelected: Bool
     var isMultiSelected: Bool
-    var selectionModeActive: Bool
-    var onSelectionToggle: () -> Void
     var onRead: () -> Void
 
     @State private var isHovering = false
 
     var body: some View {
         HStack(alignment: .center, spacing: 14) {
-            Button(action: onSelectionToggle) {
-                Image(systemName: isMultiSelected ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 17, weight: .semibold))
-                    .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(isMultiSelected ? Color.accentColor : Color.secondary)
-                    .frame(width: 22, height: 54)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help(isMultiSelected ? "Remove from selection" : "Add to selection")
-            .opacity(showSelectionToggle ? 1 : 0)
-            .allowsHitTesting(showSelectionToggle)
-            .animation(.easeOut(duration: 0.12), value: showSelectionToggle)
-
             ThumbnailStrip(urls: Array(thumbnailURLs.prefix(5)))
                 .frame(width: 132, height: 54)
                 .opacity(isImportPlaceholder ? 0.45 : 1)
@@ -1269,10 +1281,6 @@ private struct PaperRow: View {
         }
     }
 
-    private var showSelectionToggle: Bool {
-        isHovering || selectionModeActive || isMultiSelected
-    }
-
     private var arxivDisplayID: String? {
         paper.arxivImportPlaceholderCanonicalID
             ?? paper.sourceURL.flatMap(ArxivIDExtractor.firstCanonicalID(in:))
@@ -1307,6 +1315,7 @@ private struct PaperRow: View {
 
 private struct PaperDragPreview: View {
     var paper: Paper
+    var selectedCount: Int = 1
 
     var body: some View {
         HStack(spacing: 10) {
@@ -1321,6 +1330,11 @@ private struct PaperDragPreview: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                if selectedCount > 1 {
+                    Text("\(selectedCount) papers")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(Color.accentColor)
+                }
             }
         }
         .padding(.horizontal, 12)
@@ -1376,7 +1390,7 @@ private struct SmallChip: View {
 
     var body: some View {
         Label(title, systemImage: systemImage)
-            .font(.caption)
+            .font(.system(size: 12.5, weight: .medium))
             .lineLimit(1)
             .padding(.horizontal, 7)
             .padding(.vertical, 3)
@@ -1784,6 +1798,7 @@ private struct CategorySidebarRow: View {
     var body: some View {
         ZStack(alignment: .trailing) {
             HStack(spacing: 4) {
+                CategoryDepthGuide(depth: depth)
                 if hasChildren {
                     Button(action: onToggle) {
                         Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
@@ -1800,7 +1815,7 @@ private struct CategorySidebarRow: View {
                     title: title,
                     systemImage: systemImage,
                     selected: isSelected,
-                    depth: max(depth - 1, 0),
+                    depth: 0,
                     trailingReserve: 70,
                     action: onSelect
                 )
@@ -1883,15 +1898,34 @@ private struct CategorySidebarRow: View {
                     return
                 }
                 let trimmedPaperID = paperID.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !trimmedPaperID.isEmpty else {
+                let paperIDs = trimmedPaperID
+                    .components(separatedBy: .whitespacesAndNewlines)
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+                guard !paperIDs.isEmpty else {
                     return
                 }
                 DispatchQueue.main.async {
-                    onDropPapers([trimmedPaperID])
+                    onDropPapers(paperIDs)
                 }
             }
         }
         return true
+    }
+}
+
+private struct CategoryDepthGuide: View {
+    var depth: Int
+
+    var body: some View {
+        HStack(spacing: 5) {
+            ForEach(0..<max(depth, 0), id: \.self) { level in
+                RoundedRectangle(cornerRadius: 1.5)
+                    .fill(Color.primary.opacity(level == depth - 1 ? 0.22 : 0.10))
+                    .frame(width: 2, height: 24)
+            }
+        }
+        .frame(width: CGFloat(max(depth, 0)) * 16, height: 28, alignment: .trailing)
     }
 }
 
