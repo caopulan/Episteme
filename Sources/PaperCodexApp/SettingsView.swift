@@ -195,20 +195,15 @@ struct SettingsView: View {
 
             Divider()
 
-            VStack(alignment: .leading, spacing: 7) {
+            VStack(alignment: .leading, spacing: 8) {
                 ForEach(SettingsSectionAnchor.allCases) { anchor in
-                    Button {
+                    navButton(
+                        title: anchor.title,
+                        systemImage: anchor.systemImage,
+                        selected: sectionToScroll == anchor
+                    ) {
                         sectionToScroll = anchor
-                    } label: {
-                        Label {
-                            Text(LocalizedStringKey(anchor.title))
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        } icon: {
-                            Image(systemName: anchor.systemImage)
-                        }
                     }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
                     .help("Jump to \(anchor.title)")
                 }
             }

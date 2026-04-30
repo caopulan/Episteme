@@ -757,6 +757,16 @@ func runUILayoutSourceChecks() throws {
         "settings should expose section anchors in the sidebar"
     )
     try check(
+        settingsViewSource.contains("navButton(")
+            && settingsViewSource.contains("title: anchor.title")
+            && settingsViewSource.contains("systemImage: anchor.systemImage"),
+        "settings section shortcuts should use the same sidebar row button treatment as primary navigation"
+    )
+    try check(
+        settingsViewSource.contains("selected: sectionToScroll == anchor"),
+        "settings section shortcuts should show selection using the shared sidebar row selected state"
+    )
+    try check(
         settingsViewSource.contains("isArxivFeedDirty"),
         "settings should show dirty/saved state for editable sections"
     )
