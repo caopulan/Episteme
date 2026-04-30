@@ -514,6 +514,12 @@ func runUILayoutSourceChecks() throws {
         "main sidebars should reserve top space for embedded traffic-light controls"
     )
     try check(
+        windowChromeSource.contains("installTitlebarDoubleClickZoomMonitor")
+            && windowChromeSource.contains("clickCount == 2")
+            && windowChromeSource.contains("performZoom(nil)"),
+        "hidden-titlebar windows should preserve double-click-to-zoom behavior in the top chrome area"
+    )
+    try check(
         rootViewSource.contains(".environment(\\.locale"),
         "root view should drive SwiftUI localization from the app language setting"
     )
