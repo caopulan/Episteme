@@ -24,13 +24,16 @@ struct PDFKitView: NSViewRepresentable {
     var jumpTarget: PDFJumpTarget?
     var readingContextID: String?
     var readingPosition: PaperReaderPosition?
+    var command: PDFKitCommand?
     var onSelection: (PDFSelectionInfo?) -> Void
     var onReadingPositionChange: (PDFViewportPosition) -> Void
+    var onDocumentStatusChange: (PDFDocumentStatus) -> Void
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
             onSelection: onSelection,
-            onReadingPositionChange: onReadingPositionChange
+            onReadingPositionChange: onReadingPositionChange,
+            onDocumentStatusChange: onDocumentStatusChange
         )
     }
 
@@ -61,6 +64,7 @@ struct PDFKitView: NSViewRepresentable {
         DispatchQueue.main.async {
             coordinator.attachScrollObservation(to: view)
             coordinator.applyReadingPosition(readingPosition, contextID: readingContextID)
+            coordinator.reportDocumentStatus()
         }
         return view
     }
@@ -78,8 +82,10 @@ struct PDFKitView: NSViewRepresentable {
         }
         context.coordinator.onSelection = onSelection
         context.coordinator.onReadingPositionChange = onReadingPositionChange
+        context.coordinator.onDocumentStatusChange = onDocumentStatusChange
         context.coordinator.applyReadingPosition(readingPosition, contextID: readingContextID)
         context.coordinator.applyJumpTarget(jumpTarget)
+        context.coordinator.applyCommand(command)
     }
 
     private func loadDocument(in view: PDFView) {
@@ -90,9 +96,13 @@ struct PDFKitView: NSViewRepresentable {
         weak var pdfView: PDFView?
         var onSelection: (PDFSelectionInfo?) -> Void
         var onReadingPositionChange: (PDFViewportPosition) -> Void
+        var onDocumentStatusChange: (PDFDocumentStatus) -> Void
         private var highlightedAnnotations: [(PDFPage, PDFAnnotation)] = []
         private var lastJumpTarget: PDFJumpTarget?
         private var lastAppliedReadingContext: String?
+        private var lastAppliedReadingPositionDate: Date?
+        private var lastAppliedCommand: PDFKitCommand?
+        private var lastReportedStatus: PDFDocumentStatus?
         private var lastReportedPosition: PDFViewportPosition?
         private weak var observedClipView: NSClipView?
         private var pendingViewportReport: DispatchWorkItem?
@@ -100,10 +110,12 @@ struct PDFKitView: NSViewRepresentable {
 
         init(
             onSelection: @escaping (PDFSelectionInfo?) -> Void,
-            onReadingPositionChange: @escaping (PDFViewportPosition) -> Void
+            onReadingPositionChange: @escaping (PDFViewportPosition) -> Void,
+            onDocumentStatusChange: @escaping (PDFDocumentStatus) -> Void
         ) {
             self.onSelection = onSelection
             self.onReadingPositionChange = onReadingPositionChange
+            self.onDocumentStatusChange = onDocumentStatusChange
         }
 
         deinit {
@@ -115,6 +127,9 @@ struct PDFKitView: NSViewRepresentable {
         func documentDidLoad() {
             lastJumpTarget = nil
             lastAppliedReadingContext = nil
+            lastAppliedReadingPositionDate = nil
+            lastAppliedCommand = nil
+            lastReportedStatus = nil
             lastReportedPosition = nil
             clearHighlights()
             detachScrollObservation()
@@ -159,10 +174,11 @@ struct PDFKitView: NSViewRepresentable {
                 lastAppliedReadingContext = nil
                 return
             }
-            guard contextKey != lastAppliedReadingContext else {
+            guard contextKey != lastAppliedReadingContext || position?.updatedAt != lastAppliedReadingPositionDate else {
                 return
             }
             lastAppliedReadingContext = contextKey
+            lastAppliedReadingPositionDate = position?.updatedAt
             guard let position else {
                 return
             }
@@ -187,7 +203,39 @@ struct PDFKitView: NSViewRepresentable {
             DispatchQueue.main.async { [weak self] in
                 self?.isApplyingReadingPosition = false
                 self?.scheduleViewportReport()
+                self?.reportDocumentStatus()
             }
+        }
+
+        @MainActor
+        func applyCommand(_ command: PDFKitCommand?) {
+            guard let command, command != lastAppliedCommand, let pdfView else {
+                return
+            }
+            lastAppliedCommand = command
+            switch command.kind {
+            case .zoomIn:
+                pdfView.autoScales = false
+                pdfView.scaleFactor = min(pdfView.scaleFactor * 1.18, pdfView.maxScaleFactor)
+            case .zoomOut:
+                pdfView.autoScales = false
+                pdfView.scaleFactor = max(pdfView.scaleFactor / 1.18, pdfView.minScaleFactor)
+            case .fitWidth:
+                pdfView.autoScales = true
+                pdfView.scaleFactor = pdfView.scaleFactorForSizeToFit
+            case .fitPage:
+                pdfView.autoScales = true
+                pdfView.displayMode = .singlePage
+                DispatchQueue.main.async {
+                    pdfView.displayMode = .singlePageContinuous
+                }
+            case .previousPage:
+                pdfView.goToPreviousPage(nil)
+            case .nextPage:
+                pdfView.goToNextPage(nil)
+            }
+            scheduleViewportReport()
+            reportDocumentStatus()
         }
 
         @MainActor
@@ -223,6 +271,7 @@ struct PDFKitView: NSViewRepresentable {
                 centerJumpTarget(on: page, boxes: boxes)
             }
             scheduleViewportReport()
+            reportDocumentStatus()
         }
 
         @MainActor
@@ -312,6 +361,7 @@ struct PDFKitView: NSViewRepresentable {
         @MainActor
         @objc func pageChanged(_ notification: Notification) {
             scheduleViewportReport()
+            reportDocumentStatus()
         }
 
         @MainActor
@@ -341,6 +391,31 @@ struct PDFKitView: NSViewRepresentable {
             }
             lastReportedPosition = position
             onReadingPositionChange(position)
+            reportDocumentStatus()
+        }
+
+        @MainActor
+        func reportDocumentStatus() {
+            guard let pdfView,
+                  let document = pdfView.document else {
+                return
+            }
+            let pageIndex: Int
+            if let page = pdfView.currentPage {
+                pageIndex = max(document.index(for: page), 0)
+            } else {
+                pageIndex = 0
+            }
+            let status = PDFDocumentStatus(
+                pageIndex: pageIndex,
+                pageCount: document.pageCount,
+                scaleFactor: Double(pdfView.scaleFactor)
+            )
+            guard status != lastReportedStatus else {
+                return
+            }
+            lastReportedStatus = status
+            onDocumentStatusChange(status)
         }
 
         @MainActor

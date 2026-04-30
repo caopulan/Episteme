@@ -434,6 +434,135 @@ func runUILayoutSourceChecks() throws {
         !pdfKitSource.contains("first.y + first.height"),
         "PDF citation jumps should not align the highlight top edge to the viewport top"
     )
+
+    let rootViewSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/PaperCodexApp.swift"))
+    let interactionSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/InteractionFeedback.swift"))
+    try check(
+        interactionSource.contains("InteractionNoticeStack"),
+        "global feedback should render non-blocking notices instead of forcing every message into an alert"
+    )
+    try check(
+        rootViewSource.contains("PaperCodexCommands"),
+        "the app should expose keyboard shortcuts through a Commands scene"
+    )
+    try check(
+        rootViewSource.contains("GlobalOperationStatusView"),
+        "the root view should show the current long-running operation"
+    )
+    try check(
+        appModelSource.contains("postNotice("),
+        "AppModel should publish success and failure notices for interaction feedback"
+    )
+    try check(
+        appModelSource.contains("CacheStorageSummary"),
+        "AppModel should expose a cache and storage summary for Settings"
+    )
+
+    try check(
+        librarySource.contains("dropPDFs(from providers:"),
+        "library should accept dropped PDF files for import"
+    )
+    try check(
+        librarySource.contains("onTapGesture(count: 2)"),
+        "library paper rows should support double-click to open"
+    )
+    try check(
+        librarySource.contains("categoryManagementSheet"),
+        "library should provide category rename, move, and delete management"
+    )
+    try check(
+        librarySource.contains("tagManagementSheet"),
+        "library should provide tag rename and delete management"
+    )
+    try check(
+        librarySource.contains("collapsedCategoryIDs"),
+        "library category tree should support folding"
+    )
+    try check(
+        librarySource.contains("countText:"),
+        "library sidebar rows should show category and tag counts"
+    )
+    try check(
+        librarySource.contains("paperNotesSection"),
+        "library inspector should expose per-paper notes"
+    )
+    try check(
+        appModelSource.contains("updateCategory(") && appModelSource.contains("deleteCategory("),
+        "AppModel should manage category rename, move, and delete operations"
+    )
+    try check(
+        appModelSource.contains("updateTag(") && appModelSource.contains("deleteTag("),
+        "AppModel should manage tag rename and delete operations"
+    )
+    try check(
+        appModelSource.contains("saveNote("),
+        "AppModel should persist paper notes"
+    )
+
+    let readerSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/ReaderView.swift"))
+    try check(
+        readerSource.contains("ReaderPDFToolbar"),
+        "reader should provide explicit PDF toolbar controls"
+    )
+    try check(
+        appModelSource.contains("returnFromCitationJump"),
+        "AppModel should keep a citation return path"
+    )
+    try check(
+        pdfKitSource.contains("PDFKitCommand"),
+        "PDFKit view should accept explicit toolbar commands"
+    )
+
+    try check(
+        chatSource.contains("ScrollViewReader"),
+        "chat should auto-scroll to the newest message and active run"
+    )
+    try check(
+        chatSource.contains("renameSessionSheet"),
+        "chat sessions should be renameable from the session bar"
+    )
+    try check(
+        chatSource.contains("GeneratedImageGallery"),
+        "chat should render generated local images as an explicit gallery"
+    )
+    try check(
+        appModelSource.contains("appendCodexCancellationMessage"),
+        "cancelling Codex should leave a visible trace in the session"
+    )
+
+    try check(
+        discoverSource.contains("DiscoverPaperStatusBadge"),
+        "Discover cards should show per-paper processing and cache state"
+    )
+    try check(
+        discoverSource.contains("activeFilterChips"),
+        "Discover should show removable active filter chips"
+    )
+    try check(
+        discoverSource.contains("Cache visible"),
+        "Discover cache actions should clarify visible versus full-result scope"
+    )
+
+    try check(
+        settingsViewSource.contains("SettingsSectionAnchor"),
+        "settings should expose section anchors in the sidebar"
+    )
+    try check(
+        settingsViewSource.contains("isArxivFeedDirty"),
+        "settings should show dirty/saved state for editable sections"
+    )
+    try check(
+        settingsViewSource.contains("testEmbeddingProvider"),
+        "settings should provide an embedding-provider test action"
+    )
+    try check(
+        settingsViewSource.contains("moveQuickPrompt"),
+        "settings should allow quick prompts to be reordered"
+    )
+    try check(
+        settingsViewSource.contains("revealPath("),
+        "settings should reveal library and cache paths in Finder"
+    )
 }
 
 func runRepositoryChecks() throws {

@@ -11,49 +11,67 @@ struct ChatView: View {
     @State private var isSendButtonHovered = false
     @State private var composerTextHeight = ChatComposerLayout.loadTextHeight()
     @State private var composerResizeStartHeight: CGFloat?
+    @State private var sessionPendingRename: PaperSession?
+    @State private var renameSessionTitle = ""
 
     var body: some View {
         VStack(spacing: 0) {
             sessionBar
             Divider()
-            ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
-                    if model.messages.isEmpty && model.activeCodexRun == nil {
-                        ContentUnavailableView(
-                            "No Messages",
-                            systemImage: "text.bubble",
-                            description: Text("Select text in the PDF, then ask Codex in this session. The selected source appears as a quoted reply.")
-                        )
-                        .padding(.top, 80)
-                    } else {
-                        ForEach(model.messages) { message in
-                            MessageBubble(
-                                message: message,
-                                isBusy: model.isSending,
-                                onCitation: { citationID in
-                                    model.jumpToCitation(citationID)
-                                },
-                                onRetryFailure: { messageID in
-                                    Task {
-                                        await model.retryCodexFailure(messageID: messageID)
-                                    }
-                                },
-                                onNewSession: {
-                                    model.startFreshSessionFromCurrentPaperSet()
-                                }
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 12) {
+                        if model.messages.isEmpty && model.activeCodexRun == nil {
+                            ContentUnavailableView(
+                                "No Messages",
+                                systemImage: "text.bubble",
+                                description: Text("Select text in the PDF, then ask Codex in this session. The selected source appears as a quoted reply.")
                             )
-                        }
-                        if let activeCodexRun = visibleActiveCodexRun {
-                            CodexRunBubble(run: activeCodexRun)
+                            .padding(.top, 80)
+                        } else {
+                            ForEach(model.messages) { message in
+                                MessageBubble(
+                                    message: message,
+                                    isBusy: model.isSending,
+                                    onCitation: { citationID in
+                                        model.jumpToCitation(citationID)
+                                    },
+                                    onRetryFailure: { messageID in
+                                        Task {
+                                            await model.retryCodexFailure(messageID: messageID)
+                                        }
+                                    },
+                                    onNewSession: {
+                                        model.startFreshSessionFromCurrentPaperSet()
+                                    }
+                                )
+                                .id(message.id)
+                            }
+                            if let activeCodexRun = visibleActiveCodexRun {
+                                CodexRunBubble(run: activeCodexRun)
+                                    .id("active-run")
+                            }
+                            Color.clear
+                                .frame(height: 1)
+                                .id("chat-bottom")
                         }
                     }
+                    .padding(16)
                 }
-                .padding(16)
+                .onChange(of: model.messages.count) { _, _ in
+                    scrollToBottom(proxy)
+                }
+                .onChange(of: model.activeCodexRun?.events.count ?? 0) { _, _ in
+                    scrollToBottom(proxy)
+                }
             }
             Divider()
             composer
         }
         .background(Color(nsColor: .controlBackgroundColor))
+        .sheet(item: $sessionPendingRename) { session in
+            renameSessionSheet(session)
+        }
     }
 
     private var visibleActiveCodexRun: ActiveCodexRun? {
@@ -81,8 +99,56 @@ struct ChatView: View {
                 model.newSessionButtonTapped()
             }
             .buttonStyle(.borderedProminent)
+
+            Menu {
+                Button {
+                    if let session = model.selectedSession {
+                        renameSessionTitle = session.title
+                        sessionPendingRename = session
+                    }
+                } label: {
+                    Label("Rename Session", systemImage: "pencil")
+                }
+                .disabled(model.selectedSession == nil)
+            } label: {
+                Image(systemName: "ellipsis.circle")
+            }
+            .menuStyle(.button)
+            .buttonStyle(.bordered)
+            .help("Session Actions")
         }
         .padding(14)
+    }
+
+    private func scrollToBottom(_ proxy: ScrollViewProxy) {
+        DispatchQueue.main.async {
+            withAnimation(.easeOut(duration: 0.18)) {
+                proxy.scrollTo("chat-bottom", anchor: .bottom)
+            }
+        }
+    }
+
+    private func renameSessionSheet(_ session: PaperSession) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Label("Rename Session", systemImage: "pencil")
+                .font(.title3.weight(.semibold))
+            TextField("Session title", text: $renameSessionTitle)
+                .textFieldStyle(.roundedBorder)
+            HStack {
+                Spacer()
+                Button("Cancel") {
+                    sessionPendingRename = nil
+                }
+                Button("Save") {
+                    model.renameSession(session, title: renameSessionTitle)
+                    sessionPendingRename = nil
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(renameSessionTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(22)
+        .frame(width: 380)
     }
 
     private var composer: some View {
@@ -597,6 +663,10 @@ private struct MessageBubble: View {
                     MarkdownMessageView(messageID: message.id, markdown: renderedMarkdown, onCitation: onCitation)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                let imageURLs = generatedImageURLs(in: message.content)
+                if !imageURLs.isEmpty {
+                    GeneratedImageGallery(urls: imageURLs)
+                }
                 if failureNotice != nil {
                     HStack(spacing: 8) {
                         Button {
@@ -627,6 +697,77 @@ private struct MessageBubble: View {
                 Spacer(minLength: 32)
             }
         }
+    }
+}
+
+private func generatedImageURLs(in markdown: String) -> [URL] {
+    let supportedExtensions: Set<String> = ["png", "jpg", "jpeg", "webp", "gif"]
+    var urls: [URL] = []
+    var seen: Set<String> = []
+    for line in markdown.components(separatedBy: .newlines) {
+        guard line.trimmingCharacters(in: .whitespaces).hasPrefix("!") else {
+            continue
+        }
+        guard let open = line.range(of: "]("),
+              let close = line[open.upperBound...].firstIndex(of: ")") else {
+            continue
+        }
+        var raw = String(line[open.upperBound..<close])
+        if raw.hasPrefix("file://"), let url = URL(string: raw) {
+            raw = url.path
+        }
+        let url = URL(fileURLWithPath: raw)
+        let path = url.standardizedFileURL.path
+        guard supportedExtensions.contains(url.pathExtension.lowercased()),
+              FileManager.default.fileExists(atPath: path),
+              !seen.contains(path) else {
+            continue
+        }
+        seen.insert(path)
+        urls.append(url.standardizedFileURL)
+    }
+    return urls
+}
+
+private struct GeneratedImageGallery: View {
+    var urls: [URL]
+
+    var body: some View {
+        ScrollView(.horizontal) {
+            HStack(spacing: 8) {
+                ForEach(urls, id: \.path) { url in
+                    Button {
+                        NSWorkspace.shared.open(url)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 5) {
+                            if let image = NSImage(contentsOf: url) {
+                                Image(nsImage: image)
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(width: 126, height: 86)
+                                    .clipped()
+                                    .clipShape(RoundedRectangle(cornerRadius: 7))
+                            } else {
+                                Image(systemName: "photo")
+                                    .frame(width: 126, height: 86)
+                                    .background(Color(nsColor: .controlBackgroundColor))
+                                    .clipShape(RoundedRectangle(cornerRadius: 7))
+                            }
+                            Text(url.lastPathComponent)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                        .padding(6)
+                        .background(Color(nsColor: .controlBackgroundColor))
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
+                    .buttonStyle(.plain)
+                    .help("Open generated image")
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -908,6 +1049,13 @@ private struct MarkdownWebView: NSViewRepresentable {
             if let url = navigationAction.request.url,
                let citationID = CitationParser.citationID(from: url) {
                 onCitation(citationID)
+                decisionHandler(.cancel)
+                return
+            }
+            if navigationAction.navigationType == .linkActivated,
+               let url = navigationAction.request.url,
+               ["http", "https", "file"].contains(url.scheme?.lowercased() ?? "") {
+                NSWorkspace.shared.open(url)
                 decisionHandler(.cancel)
                 return
             }

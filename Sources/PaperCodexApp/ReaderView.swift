@@ -42,23 +42,138 @@ struct ReaderView: View {
     private var pdfPane: some View {
         ZStack {
             if let paper = model.selectedPaper {
-                PDFKitView(
-                    filePath: paper.filePath,
-                    jumpTarget: model.pdfJumpTarget,
-                    readingContextID: model.readerPositionContextID,
-                    readingPosition: model.readerPosition,
-                    onSelection: { selection in
-                        model.updateSelection(selection)
-                    },
-                    onReadingPositionChange: { position in
-                        model.updateReaderPosition(position)
-                    }
-                )
+                VStack(spacing: 0) {
+                    ReaderPDFToolbar(
+                        status: model.pdfDocumentStatus,
+                        returnPoint: model.citationReturnPoint,
+                        onCommand: { model.sendPDFKitCommand($0) },
+                        onReturn: { model.returnFromCitationJump() }
+                    )
+                    Divider()
+                    PDFKitView(
+                        filePath: paper.filePath,
+                        jumpTarget: model.pdfJumpTarget,
+                        readingContextID: model.readerPositionContextID,
+                        readingPosition: model.readerPosition,
+                        command: model.pdfKitCommand,
+                        onSelection: { selection in
+                            model.updateSelection(selection)
+                        },
+                        onReadingPositionChange: { position in
+                            model.updateReaderPosition(position)
+                        },
+                        onDocumentStatusChange: { status in
+                            model.updatePDFDocumentStatus(status)
+                        }
+                    )
+                }
             } else {
                 ContentUnavailableView("No Paper Selected", systemImage: "doc.text")
             }
         }
         .background(Color(nsColor: .textBackgroundColor))
+    }
+}
+
+private struct ReaderPDFToolbar: View {
+    var status: PDFDocumentStatus?
+    var returnPoint: CitationReturnPoint?
+    var onCommand: (PDFKitCommandKind) -> Void
+    var onReturn: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Button {
+                onCommand(.previousPage)
+            } label: {
+                Image(systemName: "chevron.up")
+                    .frame(width: 26, height: 24)
+            }
+            .buttonStyle(.borderless)
+            .help("Previous Page")
+            .accessibilityLabel("Previous Page")
+
+            Button {
+                onCommand(.nextPage)
+            } label: {
+                Image(systemName: "chevron.down")
+                    .frame(width: 26, height: 24)
+            }
+            .buttonStyle(.borderless)
+            .help("Next Page")
+            .accessibilityLabel("Next Page")
+
+            Text(pageText)
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .frame(minWidth: 86, alignment: .leading)
+
+            Divider()
+                .frame(height: 18)
+
+            Button {
+                onCommand(.zoomOut)
+            } label: {
+                Image(systemName: "minus.magnifyingglass")
+                    .frame(width: 28, height: 24)
+            }
+            .buttonStyle(.borderless)
+            .help("Zoom Out")
+            .accessibilityLabel("Zoom Out")
+
+            Button {
+                onCommand(.zoomIn)
+            } label: {
+                Image(systemName: "plus.magnifyingglass")
+                    .frame(width: 28, height: 24)
+            }
+            .buttonStyle(.borderless)
+            .help("Zoom In")
+            .accessibilityLabel("Zoom In")
+
+            Button {
+                onCommand(.fitWidth)
+            } label: {
+                Image(systemName: "arrow.left.and.right")
+                    .frame(width: 28, height: 24)
+            }
+            .buttonStyle(.borderless)
+            .help("Fit Width")
+            .accessibilityLabel("Fit Width")
+
+            Text(zoomText)
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .frame(minWidth: 54, alignment: .leading)
+
+            Spacer()
+
+            if let returnPoint {
+                Button(action: onReturn) {
+                    Label("Back to source", systemImage: "arrow.uturn.backward")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .help(returnPoint.paperTitle)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private var pageText: String {
+        guard let status, status.pageCount > 0 else {
+            return "Page --"
+        }
+        return "Page \(status.pageIndex + 1)/\(status.pageCount)"
+    }
+
+    private var zoomText: String {
+        guard let status else {
+            return "--%"
+        }
+        return "\(Int((status.scaleFactor * 100).rounded()))%"
     }
 }
 

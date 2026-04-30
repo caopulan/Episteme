@@ -1,6 +1,71 @@
 import PaperCodexCore
 import SwiftUI
 
+private enum SettingsSectionAnchor: String, CaseIterable, Identifiable {
+    case language
+    case arxiv
+    case ranking
+    case enrichment
+    case prompt
+    case processing
+    case embedding
+    case quickPrompts
+    case storage
+    case cache
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .language:
+            "Language"
+        case .arxiv:
+            "arXiv Feed"
+        case .ranking:
+            "Ranking"
+        case .enrichment:
+            "Enrichment"
+        case .prompt:
+            "Prompt"
+        case .processing:
+            "Processing"
+        case .embedding:
+            "Embedding"
+        case .quickPrompts:
+            "Quick Prompts"
+        case .storage:
+            "Storage"
+        case .cache:
+            "Cache"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .language:
+            "globe"
+        case .arxiv:
+            "network"
+        case .ranking:
+            "slider.horizontal.3"
+        case .enrichment:
+            "sparkles"
+        case .prompt:
+            "text.quote"
+        case .processing:
+            "cpu"
+        case .embedding:
+            "point.3.connected.trianglepath.dotted"
+        case .quickPrompts:
+            "text.bubble"
+        case .storage:
+            "folder.badge.gearshape"
+        case .cache:
+            "internaldrive"
+        }
+    }
+}
+
 struct SettingsView: View {
     @EnvironmentObject private var model: AppModel
     @State private var draftArxivCategories = ""
@@ -18,32 +83,89 @@ struct SettingsView: View {
     @State private var draftEmbeddingModel = ""
     @State private var newPromptTitle = ""
     @State private var newPromptContent = ""
+    @State private var sectionToScroll: SettingsSectionAnchor?
+    @State private var isConfirmingClearCache = false
+    @State private var editingPrompt: QuickPrompt?
+    @State private var editingPromptTitle = ""
+    @State private var editingPromptContent = ""
+
+    private var isArxivFeedDirty: Bool {
+        splitDraftList(draftArxivCategories) != model.localDiscoverPreferences.normalized.categories
+    }
+
+    private var isRankingDirty: Bool {
+        let preferences = model.localDiscoverPreferences.normalized
+        return splitDraftList(draftWhitelistTags) != preferences.whitelistTags
+            || splitDraftList(draftBlacklistTags) != preferences.blacklistTags
+            || splitDraftList(draftSimilaritySources) != preferences.similaritySourceTagIDs
+    }
+
+    private var isEnrichmentDirty: Bool {
+        let enrichment = model.localDiscoverPreferences.normalized.enrichment
+        return draftAutoEnrichOnOpen != enrichment.autoEnrichOnOpen
+            || draftAutoEnrichOnSave != enrichment.autoEnrichOnSave
+    }
+
+    private var isProcessingDirty: Bool {
+        draftDiscoverCodexModel.trimmingCharacters(in: .whitespacesAndNewlines) != model.discoverCodexModelOverride
+            || draftDiscoverCodexConcurrency != model.discoverCodexConcurrency
+    }
+
+    private var isEmbeddingDirty: Bool {
+        let embedding = model.localDiscoverPreferences.normalized.embedding
+        return draftEmbeddingEnabled != embedding.enabled
+            || draftEmbeddingBaseURL.trimmingCharacters(in: .whitespacesAndNewlines) != embedding.baseURL
+            || draftEmbeddingModel.trimmingCharacters(in: .whitespacesAndNewlines) != embedding.model
+            || draftEmbeddingAPIKey.trimmingCharacters(in: .whitespacesAndNewlines) != model.embeddingProviderAPIKey
+    }
 
     var body: some View {
         SidebarSplitLayout(minContentWidth: 760) {
             sidebar
         } content: {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 22) {
-                    header
-                    globalLanguageSettings
-                    arxivFeedSettings
-                    localRankingSettings
-                    codexEnrichmentSettings
-                    codexSystemPromptSettings
-                    discoverCodexProcessingSettings
-                    embeddingProviderSettings
-                    quickPromptSettings
-                    storageRules
-                    cacheControls
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 22) {
+                        header
+                        globalLanguageSettings.id(SettingsSectionAnchor.language)
+                        arxivFeedSettings.id(SettingsSectionAnchor.arxiv)
+                        localRankingSettings.id(SettingsSectionAnchor.ranking)
+                        codexEnrichmentSettings.id(SettingsSectionAnchor.enrichment)
+                        codexSystemPromptSettings.id(SettingsSectionAnchor.prompt)
+                        discoverCodexProcessingSettings.id(SettingsSectionAnchor.processing)
+                        embeddingProviderSettings.id(SettingsSectionAnchor.embedding)
+                        quickPromptSettings.id(SettingsSectionAnchor.quickPrompts)
+                        storageRules.id(SettingsSectionAnchor.storage)
+                        cacheControls.id(SettingsSectionAnchor.cache)
+                    }
+                    .padding(28)
+                    .frame(maxWidth: 820, alignment: .leading)
                 }
-                .padding(28)
-                .frame(maxWidth: 820, alignment: .leading)
+                .onChange(of: sectionToScroll) { _, anchor in
+                    guard let anchor else {
+                        return
+                    }
+                    withAnimation(.easeOut(duration: 0.22)) {
+                        proxy.scrollTo(anchor, anchor: .top)
+                    }
+                }
             }
             .frame(minWidth: 0)
         }
+        .alert("Clear arXiv cache?", isPresented: $isConfirmingClearCache) {
+            Button("Clear", role: .destructive) {
+                model.clearArxivCaches()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes cached feed JSON, temporary PDFs, and unsaved opened arXiv papers.")
+        }
+        .sheet(item: $editingPrompt) { prompt in
+            quickPromptEditSheet(prompt)
+        }
         .onAppear {
             syncLocalDrafts()
+            model.refreshCacheStorageSummary()
             Task {
                 await model.refreshAvailableCodexModels()
             }
@@ -69,6 +191,22 @@ struct SettingsView: View {
                     model.showDiscover()
                 }
                 navButton(title: "Settings", systemImage: "gearshape", selected: true) {}
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 7) {
+                ForEach(SettingsSectionAnchor.allCases) { anchor in
+                    Button {
+                        sectionToScroll = anchor
+                    } label: {
+                        Label(anchor.title, systemImage: anchor.systemImage)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .help("Jump to \(anchor.title)")
+                }
             }
 
             Spacer()
@@ -98,9 +236,10 @@ struct SettingsView: View {
                         await model.refreshArxivDatesAndFeed()
                     }
                 } label: {
-                    Label("Save Categories", systemImage: "checkmark")
+                    Label(isArxivFeedDirty ? "Save Categories" : "Saved", systemImage: isArxivFeedDirty ? "checkmark" : "checkmark.circle")
                 }
                 .buttonStyle(.borderedProminent)
+                .disabled(!isArxivFeedDirty)
 
                 Button {
                     Task {
@@ -155,15 +294,16 @@ struct SettingsView: View {
                     )
                     model.setLocalSimilaritySourceTagIDs(splitDraftList(draftSimilaritySources))
                 } label: {
-                    Label("Save Ranking", systemImage: "line.3.horizontal.decrease.circle")
+                    Label(isRankingDirty ? "Save Ranking" : "Saved", systemImage: isRankingDirty ? "line.3.horizontal.decrease.circle" : "checkmark.circle")
                 }
                 .buttonStyle(.borderedProminent)
+                .disabled(!isRankingDirty)
 
                 Spacer()
 
                 Text("\(model.localDiscoverPreferences.whitelistTags.count) white · \(model.localDiscoverPreferences.blacklistTags.count) black")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(isRankingDirty ? .orange : .secondary)
             }
         }
     }
@@ -180,9 +320,10 @@ struct SettingsView: View {
                     autoSave: draftAutoEnrichOnSave
                 )
             } label: {
-                Label("Save Enrichment", systemImage: "checkmark")
+                Label(isEnrichmentDirty ? "Save Enrichment" : "Saved", systemImage: isEnrichmentDirty ? "checkmark" : "checkmark.circle")
             }
             .buttonStyle(.borderedProminent)
+            .disabled(!isEnrichmentDirty)
         }
     }
 
@@ -216,9 +357,10 @@ struct SettingsView: View {
                         concurrency: draftDiscoverCodexConcurrency
                     )
                 } label: {
-                    Label("Save Processing", systemImage: "checkmark")
+                    Label(isProcessingDirty ? "Save Processing" : "Saved", systemImage: isProcessingDirty ? "checkmark" : "checkmark.circle")
                 }
                 .buttonStyle(.borderedProminent)
+                .disabled(!isProcessingDirty)
 
                 Button {
                     Task {
@@ -310,13 +452,28 @@ struct SettingsView: View {
                         model: draftEmbeddingModel
                     )
                 } label: {
-                    Label("Save Embedding", systemImage: "key")
+                    Label(isEmbeddingDirty ? "Save Embedding" : "Saved", systemImage: isEmbeddingDirty ? "key" : "checkmark.circle")
                 }
                 .buttonStyle(.borderedProminent)
+                .disabled(!isEmbeddingDirty)
+
+                Button {
+                    Task {
+                        await model.testEmbeddingProvider(
+                            baseURL: draftEmbeddingBaseURL,
+                            apiKey: draftEmbeddingAPIKey,
+                            model: draftEmbeddingModel
+                        )
+                    }
+                } label: {
+                    Label(model.isTestingEmbeddingProvider ? "Testing" : "Test", systemImage: "bolt.horizontal.circle")
+                }
+                .buttonStyle(.bordered)
+                .disabled(model.isTestingEmbeddingProvider)
 
                 Spacer()
 
-                Text(model.localDiscoverPreferences.embedding.enabled ? "Enabled" : "Disabled")
+                Text(model.embeddingProviderTestStatus ?? (model.localDiscoverPreferences.embedding.enabled ? "Enabled" : "Disabled"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -337,6 +494,29 @@ struct SettingsView: View {
                                 .lineLimit(2)
                         }
                         Spacer()
+                        Button {
+                            model.moveQuickPrompt(prompt, direction: -1)
+                        } label: {
+                            Image(systemName: "chevron.up")
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Move Up")
+                        Button {
+                            model.moveQuickPrompt(prompt, direction: 1)
+                        } label: {
+                            Image(systemName: "chevron.down")
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Move Down")
+                        Button {
+                            editingPromptTitle = prompt.title
+                            editingPromptContent = prompt.content
+                            editingPrompt = prompt
+                        } label: {
+                            Image(systemName: "pencil")
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Edit Prompt")
                         Button {
                             model.deleteQuickPrompt(prompt)
                         } label: {
@@ -360,12 +540,15 @@ struct SettingsView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                 Button {
                     model.addQuickPrompt(title: newPromptTitle, content: newPromptContent)
-                    newPromptTitle = ""
-                    newPromptContent = ""
+                    if model.errorMessage == nil {
+                        newPromptTitle = ""
+                        newPromptContent = ""
+                    }
                 } label: {
                     Label("Add Prompt", systemImage: "plus")
                 }
                 .buttonStyle(.bordered)
+                .disabled(newPromptTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || newPromptContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
     }
@@ -389,13 +572,29 @@ struct SettingsView: View {
     private var cacheControls: some View {
         settingsSection(title: "Disposable Cache", systemImage: "internaldrive") {
             pathRow(label: "Cache root", value: model.arxivDisposableCachePath)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(model.cacheStorageSummary.detailText)
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                Text("arXiv \(CacheStorageSummary.formatBytes(model.cacheStorageSummary.arxivCacheBytes)) · thumbnails \(CacheStorageSummary.formatBytes(model.cacheStorageSummary.thumbnailBytes))")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.tertiary)
+            }
             HStack {
                 Button(role: .destructive) {
-                    model.clearArxivCaches()
+                    isConfirmingClearCache = true
                 } label: {
                     Label("Clear arXiv Cache", systemImage: "trash")
                 }
                 .buttonStyle(.bordered)
+
+                Button {
+                    model.refreshCacheStorageSummary()
+                } label: {
+                    Label("Refresh Size", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.bordered)
+
                 Text("Clears feed JSON, temporary PDFs, and unsaved opened papers.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -422,15 +621,54 @@ struct SettingsView: View {
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
+    private func quickPromptEditSheet(_ prompt: QuickPrompt) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Label("Edit Quick Prompt", systemImage: "pencil")
+                .font(.title3.weight(.semibold))
+            TextField("Prompt title", text: $editingPromptTitle)
+                .textFieldStyle(.roundedBorder)
+            TextEditor(text: $editingPromptContent)
+                .font(.system(size: 13))
+                .frame(minHeight: 120)
+                .scrollContentBackground(.hidden)
+                .background(Color(nsColor: .controlBackgroundColor))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            HStack {
+                Spacer()
+                Button("Cancel") {
+                    editingPrompt = nil
+                }
+                Button("Save") {
+                    model.updateQuickPrompt(prompt, title: editingPromptTitle, content: editingPromptContent)
+                    editingPrompt = nil
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(editingPromptTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || editingPromptContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(22)
+        .frame(width: 460)
+    }
+
     private func pathRow(label: String, value: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(label)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
-            Text(value)
-                .font(.caption)
-                .textSelection(.enabled)
-                .lineLimit(2)
+            HStack(alignment: .top, spacing: 8) {
+                Text(value)
+                    .font(.caption)
+                    .textSelection(.enabled)
+                    .lineLimit(2)
+                Spacer()
+                Button {
+                    model.revealPath(value)
+                } label: {
+                    Image(systemName: "folder")
+                }
+                .buttonStyle(.borderless)
+                .help("Reveal in Finder")
+            }
         }
     }
 

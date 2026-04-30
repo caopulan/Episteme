@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import PaperCodexCore
 import Security
@@ -274,6 +275,7 @@ final class AppModel: ObservableObject {
     @Published var globalLanguageMode: PaperCodexLanguageMode = loadGlobalLanguageModeFromDefaults()
     @Published var activeCodexRun: ActiveCodexRun?
     @Published var errorMessage: String?
+    @Published var notices: [InteractionNotice] = []
     @Published var isSending = false
     @Published var discoverCodexModelOverride: String = UserDefaults.standard.string(forKey: discoverCodexModelOverrideDefaultsKey) ?? ""
     @Published var discoverCodexConcurrency: Int = loadDiscoverCodexConcurrencyFromDefaults()
@@ -306,6 +308,7 @@ final class AppModel: ObservableObject {
     @Published var discoverPDFCacheProgress: ArxivCacheProgress?
     @Published var arxivAssetURLs: [String: URL] = [:]
     @Published var arxivPDFThumbnailURLsByID: [String: [URL]] = [:]
+    @Published var discoverPaperInteractionStateByID: [String: DiscoverPaperInteractionState] = [:]
     @Published var isLoadingArxivFeed = false
     @Published var isRefreshingArxivDates = false
     @Published var isPreloadingArxivAssets = false
@@ -314,6 +317,13 @@ final class AppModel: ObservableObject {
     @Published var arxivDownloadProgressByID: [String: Double] = [:]
     @Published var arxivCacheProgress: ArxivCacheProgress?
     @Published var paperThumbnailURLsByID: [String: [URL]] = [:]
+    @Published var cacheStorageSummary = CacheStorageSummary()
+    @Published var paperNotesByID: [String: [PaperNote]] = [:]
+    @Published var citationReturnPoint: CitationReturnPoint?
+    @Published var pdfKitCommand: PDFKitCommand?
+    @Published var pdfDocumentStatus: PDFDocumentStatus?
+    @Published var embeddingProviderTestStatus: String?
+    @Published var isTestingEmbeddingProvider = false
     @Published var librarySidebarWidth: CGFloat = {
         let stored = UserDefaults.standard.double(forKey: librarySidebarWidthDefaultsKey)
         return stored > 0 ? CGFloat(stored) : 280
@@ -342,6 +352,50 @@ final class AppModel: ObservableObject {
         supportRoot.appendingPathComponent("papers", isDirectory: true).path
     }
 
+    var globalOperationStatus: AppOperationStatus? {
+        if isSearchingDiscover {
+            return AppOperationStatus(
+                title: isCancellingDiscoverSearch ? "Stopping Discover Search" : "Searching Discover",
+                detail: arxivCacheProgress?.detail ?? "\(discoverStartDate)...\(discoverEndDate)",
+                systemImage: "magnifyingglass",
+                tint: .blue
+            )
+        }
+        if isProcessingDiscoverResults {
+            return AppOperationStatus(
+                title: isCancellingDiscoverProcessing ? "Stopping Discover Processing" : "Processing Discover Results",
+                detail: discoverProcessingProgress?.detail ?? "\(discoverCodexConcurrency) workers",
+                systemImage: "sparkles",
+                tint: .indigo
+            )
+        }
+        if isCachingDiscoverPDFs {
+            return AppOperationStatus(
+                title: isCancellingDiscoverPDFCache ? "Stopping PDF Cache" : "Caching PDFs",
+                detail: discoverPDFCacheProgress?.detail ?? "Downloading arXiv PDFs",
+                systemImage: "tray.and.arrow.down",
+                tint: .green
+            )
+        }
+        if isScanningWatchedFolders {
+            return AppOperationStatus(
+                title: "Scanning Watched Folders",
+                detail: "\(watchedFolders.count) folder\(watchedFolders.count == 1 ? "" : "s")",
+                systemImage: "folder.badge.gearshape",
+                tint: .orange
+            )
+        }
+        if isSending {
+            return AppOperationStatus(
+                title: isCancellingCodexRun ? "Stopping Codex" : "Codex Running",
+                detail: activeCodexRun?.title ?? selectedSession?.title ?? "Current session",
+                systemImage: "brain.head.profile",
+                tint: .purple
+            )
+        }
+        return nil
+    }
+
     var readerPositionContextID: String? {
         guard let session = selectedSession, let paper = selectedPaper else {
             return nil
@@ -363,6 +417,7 @@ final class AppModel: ObservableObject {
             repository = store
             try reloadLibrary()
             loadCachedArxivState()
+            refreshCacheStorageSummary()
             Task {
                 scanWatchedFolders()
                 await refreshCodexDiagnostic()
@@ -377,6 +432,74 @@ final class AppModel: ObservableObject {
     deinit {
         watchedFolderAutoScanTask?.cancel()
         activeDiscoverPDFCacheTask?.cancel()
+    }
+
+    func postNotice(
+        kind: InteractionNoticeKind,
+        title: String,
+        message: String = "",
+        autoDismissAfter: TimeInterval? = 4
+    ) {
+        let notice = InteractionNotice(
+            kind: kind,
+            title: title,
+            message: message,
+            autoDismissAfter: autoDismissAfter
+        )
+        notices.append(notice)
+        if let autoDismissAfter {
+            Task { [weak self] in
+                try? await Task.sleep(nanoseconds: UInt64(autoDismissAfter * 1_000_000_000))
+                await MainActor.run {
+                    self?.dismissNotice(id: notice.id)
+                }
+            }
+        }
+    }
+
+    func dismissNotice(id: InteractionNotice.ID) {
+        notices.removeAll { $0.id == id }
+    }
+
+    func refreshCacheStorageSummary() {
+        let libraryRoot = supportRoot.appendingPathComponent("papers", isDirectory: true)
+        let disposableCacheRoot = supportRoot.appendingPathComponent("cache", isDirectory: true)
+        let arxivCacheRoot = supportRoot.appendingPathComponent("arxiv-cache", isDirectory: true)
+        let thumbnailRoot = supportRoot.appendingPathComponent("thumbnails", isDirectory: true)
+        cacheStorageSummary = CacheStorageSummary(
+            libraryBytes: directorySize(libraryRoot),
+            disposableCacheBytes: directorySize(disposableCacheRoot),
+            arxivCacheBytes: directorySize(arxivCacheRoot),
+            thumbnailBytes: directorySize(thumbnailRoot),
+            refreshedAt: Date()
+        )
+    }
+
+    func revealPath(_ path: String) {
+        let url = URL(fileURLWithPath: path)
+        if FileManager.default.fileExists(atPath: path) {
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+        } else {
+            NSWorkspace.shared.activateFileViewerSelecting([url.deletingLastPathComponent()])
+        }
+    }
+
+    private func directorySize(_ root: URL) -> Int64 {
+        guard let enumerator = FileManager.default.enumerator(
+            at: root,
+            includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return 0
+        }
+        var total: Int64 = 0
+        for case let url as URL in enumerator {
+            let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+            if values?.isRegularFile == true {
+                total += Int64(values?.fileSize ?? 0)
+            }
+        }
+        return total
     }
 
     func reloadLibrary() throws {
@@ -415,7 +538,57 @@ final class AppModel: ObservableObject {
             let result = try PaperLibraryImporter(repository: repository, supportRoot: supportRoot)
                 .importPDF(from: sourceURL)
             try reloadLibrary()
+            refreshCacheStorageSummary()
+            postNotice(
+                kind: result.didImport ? .success : .info,
+                title: result.didImport ? "PDF Imported" : "Already in Library",
+                message: result.paper.title
+            )
             openPaper(result.paper)
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func importPDFs(from sourceURLs: [URL]) {
+        let pdfURLs = sourceURLs.filter { $0.pathExtension.compare("pdf", options: [.caseInsensitive]) == .orderedSame }
+        guard !pdfURLs.isEmpty else {
+            postNotice(kind: .warning, title: "No PDFs Found", message: "Drop or choose PDF files to import.")
+            return
+        }
+        var imported = 0
+        var existing = 0
+        var lastPaper: Paper?
+        do {
+            guard let repository else {
+                throw AppModelError.repositoryUnavailable
+            }
+            let importer = PaperLibraryImporter(repository: repository, supportRoot: supportRoot)
+            for sourceURL in pdfURLs {
+                let accessed = sourceURL.startAccessingSecurityScopedResource()
+                defer {
+                    if accessed {
+                        sourceURL.stopAccessingSecurityScopedResource()
+                    }
+                }
+                let result = try importer.importPDF(from: sourceURL)
+                if result.didImport {
+                    imported += 1
+                } else {
+                    existing += 1
+                }
+                lastPaper = result.paper
+            }
+            try reloadLibrary()
+            refreshCacheStorageSummary()
+            if let lastPaper {
+                selectedLibraryPaper = papers.first { $0.id == lastPaper.id } ?? lastPaper
+            }
+            postNotice(
+                kind: imported > 0 ? .success : .info,
+                title: "PDF Import Finished",
+                message: "\(imported) imported · \(existing) already in Library"
+            )
         } catch {
             errorMessage = String(describing: error)
         }
@@ -444,6 +617,7 @@ final class AppModel: ObservableObject {
             try reloadLibrary()
             try scanWatchedFolder(folder)
             try reloadLibrary()
+            postNotice(kind: .success, title: "Watched Folder Added", message: sourceURL.lastPathComponent)
         } catch {
             errorMessage = String(describing: error)
         }
@@ -462,8 +636,15 @@ final class AppModel: ObservableObject {
                 isScanningWatchedFolders = false
             }
 
-            _ = try scanAllWatchedFolders()
+            let results = try scanAllWatchedFolders()
             try reloadLibrary()
+            let imported = results.flatMap(\.importedPapers).count
+            let existing = results.flatMap(\.existingPapers).count
+            postNotice(
+                kind: imported > 0 ? .success : .info,
+                title: "Folder Scan Finished",
+                message: "\(imported) imported · \(existing) already known"
+            )
         } catch {
             errorMessage = String(describing: error)
         }
@@ -476,6 +657,7 @@ final class AppModel: ObservableObject {
             }
             try repository.deleteWatchedFolder(id: folder.id)
             try reloadLibrary()
+            postNotice(kind: .success, title: "Watched Folder Removed", message: URL(fileURLWithPath: folder.path).lastPathComponent)
         } catch {
             errorMessage = String(describing: error)
         }
@@ -483,6 +665,7 @@ final class AppModel: ObservableObject {
 
     func selectLibraryPaper(_ paper: Paper) {
         selectedLibraryPaper = paper
+        loadPaperNotes(for: paper)
     }
 
     func showDiscover() {
@@ -512,6 +695,7 @@ final class AppModel: ObservableObject {
         preferences.categories = categories
         localDiscoverPreferences = preferences.normalized
         saveLocalDiscoverPreferencesToDefaults(localDiscoverPreferences)
+        postNotice(kind: .success, title: "arXiv Categories Saved", message: localDiscoverPreferences.categories.joined(separator: ", "))
     }
 
     func setLocalTagFilters(whitelist: [String], blacklist: [String]) {
@@ -523,6 +707,7 @@ final class AppModel: ObservableObject {
         if let feed = arxivFeed {
             arxivFeed = applyLocalDiscoverPreferences(to: feed)
         }
+        postNotice(kind: .success, title: "Ranking Filters Saved")
     }
 
     func setLocalSimilaritySourceTagIDs(_ tagIDs: [String]) {
@@ -530,6 +715,7 @@ final class AppModel: ObservableObject {
         preferences.similaritySourceTagIDs = tagIDs
         localDiscoverPreferences = preferences.normalized
         saveLocalDiscoverPreferencesToDefaults(localDiscoverPreferences)
+        postNotice(kind: .success, title: "Similarity Sources Saved")
     }
 
     func setLocalEnrichmentPreferences(autoOpen: Bool, autoSave: Bool) {
@@ -537,6 +723,7 @@ final class AppModel: ObservableObject {
         preferences.enrichment = LocalEnrichmentPreferences(autoEnrichOnOpen: autoOpen, autoEnrichOnSave: autoSave)
         localDiscoverPreferences = preferences.normalized
         saveLocalDiscoverPreferencesToDefaults(localDiscoverPreferences)
+        postNotice(kind: .success, title: "Enrichment Preferences Saved")
     }
 
     func setEmbeddingProviderSettings(enabled: Bool, baseURL: String, apiKey: String, model: String) {
@@ -548,8 +735,31 @@ final class AppModel: ObservableObject {
             preferences.embedding = EmbeddingProviderSettings(enabled: enabled, baseURL: baseURL, model: model)
             localDiscoverPreferences = preferences.normalized
             saveLocalDiscoverPreferencesToDefaults(localDiscoverPreferences)
+            postNotice(kind: .success, title: "Embedding Provider Saved")
         } catch {
             errorMessage = String(describing: error)
+        }
+    }
+
+    func testEmbeddingProvider(baseURL: String, apiKey: String, model: String) async {
+        guard !isTestingEmbeddingProvider else {
+            return
+        }
+        isTestingEmbeddingProvider = true
+        embeddingProviderTestStatus = "Testing..."
+        defer {
+            isTestingEmbeddingProvider = false
+        }
+        do {
+            let settings = EmbeddingProviderSettings(enabled: true, baseURL: baseURL, model: model)
+            let client = try OpenAICompatibleEmbeddingClient(settings: settings, apiKey: apiKey)
+            let vectors = try await client.embed(texts: ["Paper Codex embedding connection test."])
+            let dimensions = vectors.first?.count ?? 0
+            embeddingProviderTestStatus = "Connected · \(dimensions) dimensions"
+            postNotice(kind: .success, title: "Embedding Test Passed", message: "\(dimensions) dimensions")
+        } catch {
+            embeddingProviderTestStatus = "Failed: \(error)"
+            postNotice(kind: .error, title: "Embedding Test Failed", message: String(describing: error), autoDismissAfter: nil)
         }
     }
 
@@ -564,6 +774,7 @@ final class AppModel: ObservableObject {
         }
         UserDefaults.standard.set(discoverCodexConcurrency, forKey: discoverCodexConcurrencyDefaultsKey)
         mergeAvailableCodexModelIDs([trimmedModel])
+        postNotice(kind: .success, title: "Discover Processing Saved", message: "\(discoverCodexConcurrency) workers")
     }
 
     func setCodexSystemPrompt(_ prompt: String) {
@@ -574,21 +785,25 @@ final class AppModel: ObservableObject {
         }
         codexSystemPrompt = normalized
         UserDefaults.standard.set(normalized, forKey: codexSystemPromptDefaultsKey)
+        postNotice(kind: .success, title: "System Prompt Saved")
     }
 
     func resetCodexSystemPrompt() {
         codexSystemPrompt = PromptBuilder.defaultSystemPrompt
         UserDefaults.standard.removeObject(forKey: codexSystemPromptDefaultsKey)
+        postNotice(kind: .success, title: "System Prompt Reset")
     }
 
     func setGlobalLanguageMode(_ mode: PaperCodexLanguageMode) {
         globalLanguageMode = mode
         UserDefaults.standard.set(mode.rawValue, forKey: globalLanguageModeDefaultsKey)
+        postNotice(kind: .success, title: "Language Saved", message: mode.title)
     }
 
     func setArxivSaveOrganization(_ organization: ArxivSaveOrganization) {
         arxivSaveOrganization = organization
         UserDefaults.standard.set(organization.rawValue, forKey: arxivSaveOrganizationDefaultsKey)
+        postNotice(kind: .success, title: "Storage Rule Saved", message: organization.title)
     }
 
     func setLibrarySidebarWidth(_ width: CGFloat) {
@@ -612,11 +827,41 @@ final class AppModel: ObservableObject {
             )
         )
         saveQuickPromptsToDefaults(quickPrompts)
+        postNotice(kind: .success, title: "Prompt Added", message: trimmedTitle)
+    }
+
+    func updateQuickPrompt(_ prompt: QuickPrompt, title: String, content: String) {
+        let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedContent = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedTitle.isEmpty, !trimmedContent.isEmpty else {
+            errorMessage = AppModelError.emptyName.description
+            return
+        }
+        guard let index = quickPrompts.firstIndex(where: { $0.id == prompt.id }) else {
+            return
+        }
+        quickPrompts[index] = QuickPrompt(id: prompt.id, title: trimmedTitle, content: trimmedContent)
+        saveQuickPromptsToDefaults(quickPrompts)
+        postNotice(kind: .success, title: "Prompt Updated", message: trimmedTitle)
+    }
+
+    func moveQuickPrompt(_ prompt: QuickPrompt, direction: Int) {
+        guard let index = quickPrompts.firstIndex(where: { $0.id == prompt.id }) else {
+            return
+        }
+        let target = index + direction
+        guard quickPrompts.indices.contains(target) else {
+            return
+        }
+        quickPrompts.swapAt(index, target)
+        saveQuickPromptsToDefaults(quickPrompts)
+        postNotice(kind: .success, title: "Prompt Reordered", message: prompt.title)
     }
 
     func deleteQuickPrompt(_ prompt: QuickPrompt) {
         quickPrompts.removeAll { $0.id == prompt.id }
         saveQuickPromptsToDefaults(quickPrompts)
+        postNotice(kind: .success, title: "Prompt Deleted", message: prompt.title)
     }
 
     func sendQuickPrompt(_ prompt: QuickPrompt) {
@@ -674,6 +919,7 @@ final class AppModel: ObservableObject {
             discoverStartDate = query.dateRange.start
             discoverEndDate = query.dateRange.end
             discoverSelectedCategories = query.categories
+            discoverPaperInteractionStateByID = [:]
 
             arxivCacheProgress = ArxivCacheProgress(
                 date: "\(range.start)...\(range.end)",
@@ -716,6 +962,9 @@ final class AppModel: ObservableObject {
 
         let visiblePapers = papers
         let total = visiblePapers.count
+        for paper in visiblePapers {
+            discoverPaperInteractionStateByID[paper.id] = .queued
+        }
         var completed = 0
         var cached = 0
         var failed = 0
@@ -805,6 +1054,7 @@ final class AppModel: ObservableObject {
                 break
             }
             arxivDownloadingPaperIDs.insert(paper.id)
+            discoverPaperInteractionStateByID[paper.id] = .downloading
             arxivDownloadProgressByID[paper.id] = 0.08
             do {
                 let wasCached = try cachedArxivPDFURL(for: paper) != nil
@@ -815,12 +1065,15 @@ final class AppModel: ObservableObject {
                     cached += 1
                 }
                 arxivDownloadProgressByID[paper.id] = 1
+                discoverPaperInteractionStateByID[paper.id] = .pdfCached
             } catch {
                 arxivDownloadingPaperIDs.remove(paper.id)
                 arxivDownloadProgressByID.removeValue(forKey: paper.id)
                 if isCancellationError(error) || isCancellingDiscoverPDFCache || Task.isCancelled {
+                    discoverPaperInteractionStateByID[paper.id] = .cancelled
                     break
                 }
+                discoverPaperInteractionStateByID[paper.id] = .failed
                 failed += 1
             }
             completed += 1
@@ -832,22 +1085,27 @@ final class AppModel: ObservableObject {
 
     private func processDiscoverPaperForEnrichment(_ paper: ArxivFeedPaper) async -> DiscoverPaperProcessingResult {
         if isCancellingDiscoverProcessing || Task.isCancelled {
+            discoverPaperInteractionStateByID[paper.id] = .cancelled
             return DiscoverPaperProcessingResult(paperID: paper.id, state: .cancelled)
         }
 
         if let existing = try? localDiscoverCache.loadEnrichment(arxivID: paper.id),
            existing.isCurrent {
             discoverEnrichmentsByID[paper.id] = existing
+            discoverPaperInteractionStateByID[paper.id] = .cached
             return DiscoverPaperProcessingResult(paperID: paper.id, state: .cached)
         }
 
         do {
+            discoverPaperInteractionStateByID[paper.id] = .processing
             let enrichment = try await runDiscoverCodexEnrichment(for: paper)
             try localDiscoverCache.saveEnrichment(enrichment)
             discoverEnrichmentsByID[paper.id] = enrichment
+            discoverPaperInteractionStateByID[paper.id] = .processed
             return DiscoverPaperProcessingResult(paperID: paper.id, state: .processed)
         } catch {
             if isCancellingDiscoverProcessing || Task.isCancelled || isCancellationError(error) {
+                discoverPaperInteractionStateByID[paper.id] = .cancelled
                 return DiscoverPaperProcessingResult(paperID: paper.id, state: .cancelled)
             }
             let failedEnrichment = DiscoverPaperEnrichment(
@@ -865,6 +1123,7 @@ final class AppModel: ObservableObject {
             )
             try? localDiscoverCache.saveEnrichment(failedEnrichment)
             discoverEnrichmentsByID[paper.id] = failedEnrichment
+            discoverPaperInteractionStateByID[paper.id] = .failed
             return DiscoverPaperProcessingResult(paperID: paper.id, state: .failed)
         }
     }
@@ -1183,6 +1442,8 @@ final class AppModel: ObservableObject {
             arxivPDFThumbnailURLsByID = [:]
             discoverPDFCacheProgress = nil
             try reloadLibrary()
+            refreshCacheStorageSummary()
+            postNotice(kind: .success, title: "arXiv Cache Cleared", message: "Temporary feeds, PDFs, and previews were removed.")
         } catch {
             errorMessage = String(describing: error)
         }
@@ -1206,6 +1467,46 @@ final class AppModel: ObservableObject {
             )
             try repository.upsertCategory(category)
             try reloadLibrary()
+            postNotice(kind: .success, title: "Category Created", message: trimmed)
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func updateCategory(_ categoryID: String, name: String, parentID: String?) {
+        do {
+            guard let repository else {
+                throw AppModelError.repositoryUnavailable
+            }
+            guard var category = categories.first(where: { $0.id == categoryID }) else {
+                throw AppModelError.categoryNotFound(categoryID)
+            }
+            let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else {
+                throw AppModelError.emptyName
+            }
+            if parentID == categoryID || categoryDescendantIDs(of: categoryID).contains(parentID ?? "") {
+                throw AppModelError.invalidCategoryMove
+            }
+            category.name = trimmed
+            category.parentID = parentID
+            try repository.upsertCategory(category)
+            try reloadLibrary()
+            postNotice(kind: .success, title: "Category Updated", message: trimmed)
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func deleteCategory(_ categoryID: String) {
+        do {
+            guard let repository else {
+                throw AppModelError.repositoryUnavailable
+            }
+            let name = categories.first { $0.id == categoryID }?.name ?? "Category"
+            try repository.deleteCategory(id: categoryID)
+            try reloadLibrary()
+            postNotice(kind: .success, title: "Category Deleted", message: name)
         } catch {
             errorMessage = String(describing: error)
         }
@@ -1221,13 +1522,59 @@ final class AppModel: ObservableObject {
                 throw AppModelError.emptyName
             }
             if tags.contains(where: { $0.name.compare(trimmed, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame }) {
+                postNotice(kind: .info, title: "Tag Already Exists", message: trimmed)
                 return
             }
             try repository.upsertTag(PaperTag(id: makeManualID(prefix: "tag", name: trimmed), name: trimmed))
             try reloadLibrary()
+            postNotice(kind: .success, title: "Tag Created", message: trimmed)
         } catch {
             errorMessage = String(describing: error)
         }
+    }
+
+    func updateTag(_ tagID: String, name: String) {
+        do {
+            guard let repository else {
+                throw AppModelError.repositoryUnavailable
+            }
+            let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else {
+                throw AppModelError.emptyName
+            }
+            try repository.upsertTag(PaperTag(id: tagID, name: trimmed))
+            try reloadLibrary()
+            postNotice(kind: .success, title: "Tag Updated", message: trimmed)
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func deleteTag(_ tagID: String) {
+        do {
+            guard let repository else {
+                throw AppModelError.repositoryUnavailable
+            }
+            let name = tags.first { $0.id == tagID }?.name ?? "Tag"
+            try repository.deleteTag(id: tagID)
+            try reloadLibrary()
+            postNotice(kind: .success, title: "Tag Deleted", message: name)
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    private func categoryDescendantIDs(of categoryID: String) -> Set<String> {
+        var descendants: Set<String> = []
+        var didChange = true
+        while didChange {
+            didChange = false
+            for category in categories where category.parentID.map({ $0 == categoryID || descendants.contains($0) }) == true && !descendants.contains(category.id) {
+                descendants.insert(category.id)
+                didChange = true
+            }
+        }
+        return descendants
     }
 
     func setCategory(_ categoryID: String, assigned: Bool, for paper: Paper) {
@@ -1241,6 +1588,7 @@ final class AppModel: ObservableObject {
                 try repository.removePaper(paper.id, fromCategory: categoryID)
             }
             try reloadLibrary()
+            postNotice(kind: .success, title: assigned ? "Category Assigned" : "Category Removed", message: paper.title)
         } catch {
             errorMessage = String(describing: error)
         }
@@ -1264,6 +1612,7 @@ final class AppModel: ObservableObject {
                 return
             }
             try reloadLibrary()
+            postNotice(kind: .success, title: "Papers Assigned", message: "\(assignedPaperIDs.count) moved into category")
         } catch {
             errorMessage = String(describing: error)
         }
@@ -1292,6 +1641,7 @@ final class AppModel: ObservableObject {
                 return
             }
             try reloadLibrary()
+            postNotice(kind: .success, title: "Papers Moved", message: "\(movedPaperIDs.count) updated")
         } catch {
             errorMessage = String(describing: error)
         }
@@ -1319,6 +1669,7 @@ final class AppModel: ObservableObject {
                 return
             }
             try reloadLibrary()
+            postNotice(kind: .success, title: "Tags Applied", message: "\(assignableTagIDs.count) tag\(assignableTagIDs.count == 1 ? "" : "s") · \(assignedPaperIDs.count) paper\(assignedPaperIDs.count == 1 ? "" : "s")")
         } catch {
             errorMessage = String(describing: error)
         }
@@ -1361,6 +1712,8 @@ final class AppModel: ObservableObject {
             }
             readerTabState = tabState
             try reloadLibrary()
+            refreshCacheStorageSummary()
+            postNotice(kind: .success, title: "Papers Deleted", message: "\(deletedIDs.count) removed")
         } catch {
             errorMessage = String(describing: error)
         }
@@ -1377,6 +1730,62 @@ final class AppModel: ObservableObject {
                 try repository.removePaper(paper.id, fromTag: tagID)
             }
             try reloadLibrary()
+            postNotice(kind: .success, title: assigned ? "Tag Assigned" : "Tag Removed", message: paper.title)
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func loadPaperNotes(for paper: Paper) {
+        do {
+            guard let repository else {
+                throw AppModelError.repositoryUnavailable
+            }
+            paperNotesByID[paper.id] = try repository.fetchNotes(paperID: paper.id)
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func saveNote(paperID: String, noteID: String?, title: String, bodyMarkdown: String) {
+        do {
+            guard let repository else {
+                throw AppModelError.repositoryUnavailable
+            }
+            let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+            let trimmedBody = bodyMarkdown.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedTitle.isEmpty || !trimmedBody.isEmpty else {
+                throw AppModelError.emptyName
+            }
+            let existing = noteID.flatMap { id in paperNotesByID[paperID, default: []].first { $0.id == id } }
+            let now = Date()
+            let note = PaperNote(
+                id: existing?.id ?? "note-\(UUID().uuidString.lowercased())",
+                paperID: paperID,
+                anchorID: existing?.anchorID,
+                title: trimmedTitle.isEmpty ? "Untitled note" : trimmedTitle,
+                bodyMarkdown: trimmedBody,
+                createdAt: existing?.createdAt ?? now,
+                updatedAt: now,
+                deletedAt: nil,
+                syncRevision: (existing?.syncRevision ?? 0) + 1
+            )
+            try repository.upsertNote(note)
+            paperNotesByID[paperID] = try repository.fetchNotes(paperID: paperID)
+            postNotice(kind: .success, title: existing == nil ? "Note Added" : "Note Updated", message: note.title)
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func deleteNote(_ note: PaperNote) {
+        do {
+            guard let repository else {
+                throw AppModelError.repositoryUnavailable
+            }
+            try repository.deleteNote(id: note.id)
+            paperNotesByID[note.paperID] = try repository.fetchNotes(paperID: note.paperID)
+            postNotice(kind: .success, title: "Note Deleted", message: note.title)
         } catch {
             errorMessage = String(describing: error)
         }
@@ -1442,6 +1851,14 @@ final class AppModel: ObservableObject {
         } catch {
             errorMessage = String(describing: error)
         }
+    }
+
+    func updatePDFDocumentStatus(_ status: PDFDocumentStatus) {
+        pdfDocumentStatus = status
+    }
+
+    func sendPDFKitCommand(_ kind: PDFKitCommandKind) {
+        pdfKitCommand = PDFKitCommand(kind: kind)
     }
 
     private func paperForReaderTab(_ tab: ReaderPaperTab) throws -> Paper? {
@@ -1582,6 +1999,31 @@ final class AppModel: ObservableObject {
     func newSessionButtonTapped() {
         do {
             try createSession(paperIDs: selectedSession?.paperIDs)
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func renameSession(_ session: PaperSession, title: String) {
+        do {
+            guard let repository else {
+                throw AppModelError.repositoryUnavailable
+            }
+            let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else {
+                throw AppModelError.emptyName
+            }
+            var updated = session
+            updated.title = trimmed
+            updated.updatedAt = Date()
+            try repository.upsertSession(updated)
+            if selectedSession?.id == session.id {
+                selectedSession = updated
+            }
+            if let selectedPaper {
+                sessions = try repository.fetchSessions(paperID: selectedPaper.id)
+            }
+            postNotice(kind: .success, title: "Session Renamed", message: trimmed)
         } catch {
             errorMessage = String(describing: error)
         }
@@ -1748,13 +2190,21 @@ final class AppModel: ObservableObject {
         }
         isCancellingCodexRun = true
         activeCodexRunHandle?.cancel()
-        activeCodexRun = nil
+        postNotice(kind: .info, title: "Stopping Codex", message: selectedSession?.title ?? "Current session")
     }
 
     func jumpToCitation(_ citationID: String) {
         do {
             guard let repository else {
                 throw AppModelError.repositoryUnavailable
+            }
+            if let selectedPaper, let readerPosition {
+                citationReturnPoint = CitationReturnPoint(
+                    paperID: selectedPaper.id,
+                    paperTitle: selectedPaper.title,
+                    position: readerPosition,
+                    label: "Before citation jump"
+                )
             }
             if let span = try repository.fetchSpan(id: citationID) {
                 if selectedPaper?.id != span.paperID, let paper = papers.first(where: { $0.id == span.paperID }) {
@@ -1798,6 +2248,29 @@ final class AppModel: ObservableObject {
                 return
             }
             throw AppModelError.sourceNotFound(citationID)
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func returnFromCitationJump() {
+        do {
+            guard let returnPoint = citationReturnPoint else {
+                return
+            }
+            guard let repository else {
+                throw AppModelError.repositoryUnavailable
+            }
+            if selectedPaper?.id != returnPoint.paperID,
+               let paper = try repository.fetchPapers(ids: [returnPoint.paperID]).first {
+                try focusPaperInCurrentReaderSession(paper)
+            }
+            var position = returnPoint.position
+            position.updatedAt = Date()
+            readerPosition = position
+            pdfJumpTarget = nil
+            citationReturnPoint = nil
+            postNotice(kind: .info, title: "Returned to Previous Reading Position", message: returnPoint.paperTitle)
         } catch {
             errorMessage = String(describing: error)
         }
@@ -1892,6 +2365,7 @@ final class AppModel: ObservableObject {
             errorMessage = AppModelError.anchorMatchFailed.description
         } catch {
             if isCancellingCodexRun {
+                await appendCodexCancellationMessage()
                 return
             }
             await appendCodexFailureMessage(String(describing: error))
@@ -1937,6 +2411,7 @@ final class AppModel: ObservableObject {
             messages = try repository.fetchMessages(sessionID: session.id)
         } catch {
             if isCancellingCodexRun {
+                await appendCodexCancellationMessage()
                 return
             }
             await appendCodexFailureMessage(String(describing: error))
@@ -3148,6 +3623,26 @@ final class AppModel: ObservableObject {
             errorMessage = "\(failure)\n\nAlso failed to store error message: \(error)"
         }
     }
+
+    private func appendCodexCancellationMessage() async {
+        guard let repository, let session = selectedSession else {
+            return
+        }
+        do {
+            let message = ChatMessage(
+                id: UUID().uuidString.lowercased(),
+                sessionID: session.id,
+                role: .codex,
+                content: "_Codex run stopped by the user._",
+                createdAt: Date()
+            )
+            try repository.appendMessage(message)
+            messages = try repository.fetchMessages(sessionID: session.id)
+            postNotice(kind: .info, title: "Codex Stopped", message: session.title)
+        } catch {
+            errorMessage = "Codex stopped, but the cancellation note could not be saved: \(error)"
+        }
+    }
 }
 
 enum AppModelError: Error, CustomStringConvertible {
@@ -3161,6 +3656,7 @@ enum AppModelError: Error, CustomStringConvertible {
     case downloadedFileIsNotPDF(String)
     case arxivMetadataNotFound(String)
     case categoryNotFound(String)
+    case invalidCategoryMove
     case keychainFailure(OSStatus)
 
     var description: String {
@@ -3185,6 +3681,8 @@ enum AppModelError: Error, CustomStringConvertible {
             "No arXiv metadata was found for \(arxivID)."
         case let .categoryNotFound(categoryID):
             "No folder was found for \(categoryID)."
+        case .invalidCategoryMove:
+            "A category cannot be moved into itself or one of its subcategories."
         case let .keychainFailure(status):
             "Keychain operation failed with status \(status)."
         }

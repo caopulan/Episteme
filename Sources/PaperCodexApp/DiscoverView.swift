@@ -352,6 +352,7 @@ struct DiscoverView: View {
             inLibrary: model.libraryPaper(for: paper) != nil,
             isBusy: model.isDownloadingArxivPaper(paper),
             downloadProgress: model.arxivDownloadProgress(for: paper),
+            interactionState: model.discoverPaperInteractionStateByID[paper.id],
             languageMode: model.globalLanguageMode,
             minimumHeight: discoverRowHeights[rowIndex] ?? 0,
             onPreview: {
@@ -443,18 +444,24 @@ struct DiscoverView: View {
                             }
                         }
 
-                        ToolbarActionButton(
-                            title: "Cache PDFs",
-                            systemImage: "tray.and.arrow.down",
-                            tint: .green,
-                            disabled: (model.arxivFeed?.papers.isEmpty ?? papers.isEmpty) || model.isSearchingDiscover
-                        ) {
-                            model.startCachingDiscoverPDFs(model.arxivFeed?.papers ?? papers)
+                        Menu {
+                            Button("Cache visible") {
+                                model.startCachingDiscoverPDFs(papers)
+                            }
+                            Button("Cache all results") {
+                                model.startCachingDiscoverPDFs(model.arxivFeed?.papers ?? papers)
+                            }
+                        } label: {
+                            Label("Cache PDFs", systemImage: "tray.and.arrow.down")
                         }
+                        .menuStyle(.button)
+                        .disabled((model.arxivFeed?.papers.isEmpty ?? papers.isEmpty) || model.isSearchingDiscover)
                     }
 
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+
+                activeFilterChips
 
                 if (model.isSearchingDiscover || model.isPreloadingArxivAssets),
                    let progress = model.arxivCacheProgress {
@@ -478,6 +485,42 @@ struct DiscoverView: View {
 
     private func filterButton(title: String, detail: String? = nil, selected: Bool, action: @escaping () -> Void) -> some View {
         SidebarFilterButton(title: title, detail: detail, selected: selected, action: action)
+    }
+
+    private var activeFilterChips: some View {
+        FlowLayout(spacing: 8) {
+            if let selectedCategory {
+                DiscoverFilterChip(title: selectedCategory) {
+                    self.selectedCategory = nil
+                }
+            }
+            if let selectedTag {
+                DiscoverFilterChip(title: selectedTag) {
+                    self.selectedTag = nil
+                }
+            }
+            if selectedProcessingFilter != .all {
+                DiscoverFilterChip(title: selectedProcessingFilter.title) {
+                    selectedProcessingFilter = .all
+                }
+            }
+            if selectedLibraryFilter != .all {
+                DiscoverFilterChip(title: selectedLibraryFilter.title) {
+                    selectedLibraryFilter = .all
+                }
+            }
+            if requiresProjectLink {
+                DiscoverFilterChip(title: "Has Code / Project") {
+                    requiresProjectLink = false
+                }
+            }
+            if selectedSimilarityBucket != .all {
+                DiscoverFilterChip(title: selectedSimilarityBucket.title) {
+                    selectedSimilarityBucket = .all
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -608,6 +651,98 @@ private struct SidebarFilterButton: View {
                 RoundedRectangle(cornerRadius: 8)
                     .stroke(isHovering ? Color.accentColor.opacity(0.20) : Color.clear, lineWidth: 1)
             )
+    }
+}
+
+private struct DiscoverFilterChip: View {
+    var title: String
+    var onRemove: () -> Void
+
+    var body: some View {
+        Button(action: onRemove) {
+            Label(title, systemImage: "xmark.circle.fill")
+                .font(.caption.weight(.medium))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color.accentColor.opacity(0.10), in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(Color.accentColor)
+        .help("Remove \(title) filter")
+    }
+}
+
+private struct DiscoverPaperStatusBadge: View {
+    var state: DiscoverPaperInteractionState
+
+    var body: some View {
+        Label(title, systemImage: systemImage)
+            .font(.caption2.weight(.semibold))
+            .lineLimit(1)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 4)
+            .foregroundStyle(tint)
+            .background(tint.opacity(0.10), in: Capsule())
+            .help(title)
+    }
+
+    private var title: String {
+        switch state {
+        case .queued:
+            "Queued"
+        case .processing:
+            "Processing"
+        case .processed:
+            "Processed"
+        case .cached:
+            "Cached"
+        case .failed:
+            "Failed"
+        case .cancelled:
+            "Stopped"
+        case .downloading:
+            "Caching PDF"
+        case .pdfCached:
+            "PDF Cached"
+        }
+    }
+
+    private var systemImage: String {
+        switch state {
+        case .queued:
+            "clock"
+        case .processing:
+            "sparkles"
+        case .processed:
+            "checkmark.circle.fill"
+        case .cached:
+            "archivebox.fill"
+        case .failed:
+            "xmark.octagon.fill"
+        case .cancelled:
+            "stop.circle.fill"
+        case .downloading:
+            "arrow.down.circle.fill"
+        case .pdfCached:
+            "doc.fill"
+        }
+    }
+
+    private var tint: Color {
+        switch state {
+        case .queued:
+            .secondary
+        case .processing:
+            .indigo
+        case .processed, .cached, .pdfCached:
+            .green
+        case .failed:
+            .red
+        case .cancelled:
+            .orange
+        case .downloading:
+            .blue
+        }
     }
 }
 
@@ -949,6 +1084,7 @@ private struct ArxivPaperCard: View {
     var inLibrary: Bool
     var isBusy: Bool
     var downloadProgress: Double?
+    var interactionState: DiscoverPaperInteractionState?
     var languageMode: PaperCodexLanguageMode
     var minimumHeight: CGFloat = 0
     var onPreview: () -> Void
@@ -981,7 +1117,13 @@ private struct ArxivPaperCard: View {
             }
 
             VStack(alignment: .leading, spacing: 10) {
-                metadataRow
+                HStack(alignment: .top, spacing: 8) {
+                    metadataRow
+                    Spacer()
+                    if let interactionState {
+                        DiscoverPaperStatusBadge(state: interactionState)
+                    }
+                }
 
                 Text(primaryTitle)
                     .font(.system(size: 16, weight: .semibold))
@@ -1780,9 +1922,12 @@ private extension ArxivFeedPaper {
 
 private func openExternalURL(_ urlString: String) {
     guard let url = URL(string: urlString) else {
+        NSSound.beep()
         return
     }
-    NSWorkspace.shared.open(url)
+    if !NSWorkspace.shared.open(url) {
+        NSSound.beep()
+    }
 }
 
 private struct FlowTags: View {

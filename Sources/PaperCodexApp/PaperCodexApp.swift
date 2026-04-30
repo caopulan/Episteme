@@ -11,6 +11,9 @@ struct PaperCodexApp: App {
                 .frame(minWidth: 1100, minHeight: 720)
         }
         .windowStyle(.titleBar)
+        .commands {
+            PaperCodexCommands(model: model)
+        }
     }
 }
 
@@ -30,15 +33,71 @@ struct RootView: View {
                 ReaderView()
             }
         }
-        .alert("Paper Codex", isPresented: Binding(
-            get: { model.errorMessage != nil },
-            set: { if !$0 { model.errorMessage = nil } }
-        )) {
-            Button("OK") {
-                model.errorMessage = nil
+        .overlay(alignment: .topTrailing) {
+            InteractionNoticeStack(notices: model.notices) { noticeID in
+                model.dismissNotice(id: noticeID)
             }
-        } message: {
-            Text(model.errorMessage ?? "")
+        }
+        .overlay(alignment: .bottom) {
+            if let status = model.globalOperationStatus {
+                GlobalOperationStatusView(status: status)
+                    .padding(.bottom, 14)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .onChange(of: model.errorMessage) { _, message in
+            guard let message else {
+                return
+            }
+            model.postNotice(kind: .error, title: "Paper Codex", message: message, autoDismissAfter: nil)
+            model.errorMessage = nil
+        }
+    }
+}
+
+struct PaperCodexCommands: Commands {
+    @ObservedObject var model: AppModel
+
+    var body: some Commands {
+        CommandMenu("Paper Codex") {
+            Button("Library") {
+                model.goToLibrary()
+            }
+            .keyboardShortcut("1", modifiers: [.command])
+
+            Button("Discover") {
+                model.showDiscover()
+            }
+            .keyboardShortcut("2", modifiers: [.command])
+
+            Button("Reader") {
+                if model.selectedPaper != nil {
+                    model.route = .reader
+                }
+            }
+            .keyboardShortcut("3", modifiers: [.command])
+            .disabled(model.selectedPaper == nil)
+
+            Divider()
+
+            Button("New Session") {
+                model.newSessionButtonTapped()
+            }
+            .keyboardShortcut("n", modifiers: [.command])
+            .disabled(model.selectedPaper == nil || model.route != .reader)
+
+            Button("Stop Codex") {
+                model.cancelActiveCodexRun()
+            }
+            .keyboardShortcut(".", modifiers: [.command])
+            .disabled(!model.isSending)
+
+            Divider()
+
+            Button("Settings") {
+                model.showSettings()
+            }
+            .keyboardShortcut(",", modifiers: [.command])
         }
     }
 }

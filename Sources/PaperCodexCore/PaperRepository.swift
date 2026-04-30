@@ -268,20 +268,86 @@ public final class PaperRepository {
         }
     }
 
+    public func deleteCategory(id: String, deletedAt: Date = Date()) throws {
+        let categories = try fetchCategories()
+        var idsToDelete: Set<String> = [id]
+        var didChange = true
+        while didChange {
+            didChange = false
+            for category in categories where category.parentID.map({ idsToDelete.contains($0) }) == true && !idsToDelete.contains(category.id) {
+                idsToDelete.insert(category.id)
+                didChange = true
+            }
+        }
+        let ids = Array(idsToDelete).sorted()
+        guard !ids.isEmpty else {
+            return
+        }
+        let placeholders = Array(repeating: "?", count: ids.count).joined(separator: ",")
+        try database.transaction {
+            try database.run(
+                "DELETE FROM paper_categories WHERE category_id IN (\(placeholders));",
+                bindings: ids.map(SQLiteValue.text)
+            )
+            try database.run(
+                "DELETE FROM categories WHERE id IN (\(placeholders));",
+                bindings: ids.map(SQLiteValue.text)
+            )
+            try database.run(
+                "UPDATE folders SET deleted_at = ?, sync_revision = COALESCE(sync_revision, 0) + 1 WHERE id IN (\(placeholders));",
+                bindings: [.text(dates.string(from: deletedAt))] + ids.map(SQLiteValue.text)
+            )
+        }
+    }
+
     public func upsertTag(_ tag: PaperTag) throws {
         try database.transaction {
             try database.run("""
             INSERT INTO tags (id, name) VALUES (?, ?)
-            ON CONFLICT(id) DO UPDATE SET name = excluded.name;
+            ON CONFLICT(id) DO UPDATE SET
+              name = excluded.name,
+              deleted_at = NULL
+            ON CONFLICT(name) DO UPDATE SET
+              deleted_at = NULL,
+              sync_revision = COALESCE(sync_revision, 0) + 1;
             """, bindings: [.text(tag.id), .text(tag.name)])
             try syncLocalStoreV2Tag(tag)
         }
     }
 
     public func fetchTags() throws -> [PaperTag] {
-        try database.query("SELECT id, name FROM tags ORDER BY name, id;") { row in
+        try database.query("SELECT id, name FROM tags WHERE deleted_at IS NULL ORDER BY name, id;") { row in
             PaperTag(id: try row.text(0), name: try row.text(1))
         }
+    }
+
+    public func deleteTag(id: String, deletedAt: Date = Date()) throws {
+        try database.transaction {
+            try database.run("DELETE FROM paper_tags WHERE tag_id = ?;", bindings: [.text(id)])
+            try database.run(
+                "UPDATE tags SET deleted_at = ?, sync_revision = COALESCE(sync_revision, 0) + 1 WHERE id = ?;",
+                bindings: [.text(dates.string(from: deletedAt)), .text(id)]
+            )
+        }
+    }
+
+    public func upsertNote(_ note: PaperNote) throws {
+        try LibraryDataStore(database: database).upsertNote(note)
+    }
+
+    public func fetchNotes(paperID: String) throws -> [PaperNote] {
+        try LibraryDataStore(database: database).fetchNotes(paperID: paperID)
+    }
+
+    public func deleteNote(id: String, deletedAt: Date = Date()) throws {
+        try database.run(
+            "UPDATE paper_notes SET deleted_at = ?, updated_at = ?, sync_revision = COALESCE(sync_revision, 0) + 1 WHERE id = ?;",
+            bindings: [
+                .text(dates.string(from: deletedAt)),
+                .text(dates.string(from: deletedAt)),
+                .text(id)
+            ]
+        )
     }
 
     public func assignPaper(_ paperID: String, toCategory categoryID: String) throws {

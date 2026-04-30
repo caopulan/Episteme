@@ -22,6 +22,15 @@ struct LibraryView: View {
     @State private var isShowingBulkMove = false
     @State private var isShowingBulkTag = false
     @State private var isConfirmingBulkDelete = false
+    @State private var collapsedCategoryIDs: Set<String> = []
+    @State private var categoryPendingManagement: PaperCodexCore.Category?
+    @State private var categoryPendingDelete: PaperCodexCore.Category?
+    @State private var tagPendingManagement: PaperTag?
+    @State private var tagPendingDelete: PaperTag?
+    @State private var watchedFolderPendingRemoval: WatchedFolder?
+    @State private var noteTitle = ""
+    @State private var noteBody = ""
+    @State private var editingNoteID: String?
     @AppStorage("PaperCodexLibrarySortOption") private var librarySortRawValue = LibrarySortOption.addedNewest.rawValue
 
     private var filteredPapers: [Paper] {
@@ -39,8 +48,15 @@ struct LibraryView: View {
         }
         if !query.isEmpty {
             result = result.filter {
-                $0.title.localizedCaseInsensitiveContains(query)
+                let categories = categories(for: $0).map(\.name).joined(separator: " ")
+                let tags = model.paperTagsByID[$0.id, default: []].map(\.name).joined(separator: " ")
+                let year = $0.year.map(String.init) ?? ""
+                return $0.title.localizedCaseInsensitiveContains(query)
                     || $0.authors.joined(separator: " ").localizedCaseInsensitiveContains(query)
+                    || categories.localizedCaseInsensitiveContains(query)
+                    || tags.localizedCaseInsensitiveContains(query)
+                    || year.localizedCaseInsensitiveContains(query)
+                    || ($0.sourceURL ?? "").localizedCaseInsensitiveContains(query)
             }
         }
         return result
@@ -87,6 +103,56 @@ struct LibraryView: View {
         } message: {
             Text("This removes \(selectedPaperIDs.count) papers from the local library and deletes app-managed PDF/cache files. This cannot be undone.")
         }
+        .alert("Delete category?", isPresented: Binding(
+            get: { categoryPendingDelete != nil },
+            set: { if !$0 { categoryPendingDelete = nil } }
+        )) {
+            Button("Delete", role: .destructive) {
+                if let categoryPendingDelete {
+                    model.deleteCategory(categoryPendingDelete.id)
+                    selectedCategoryID = nil
+                }
+                categoryPendingDelete = nil
+            }
+            Button("Cancel", role: .cancel) {
+                categoryPendingDelete = nil
+            }
+        } message: {
+            Text("This removes the category, its subcategories, and their assignments. Papers stay in the library.")
+        }
+        .alert("Delete tag?", isPresented: Binding(
+            get: { tagPendingDelete != nil },
+            set: { if !$0 { tagPendingDelete = nil } }
+        )) {
+            Button("Delete", role: .destructive) {
+                if let tagPendingDelete {
+                    model.deleteTag(tagPendingDelete.id)
+                    selectedTagID = nil
+                }
+                tagPendingDelete = nil
+            }
+            Button("Cancel", role: .cancel) {
+                tagPendingDelete = nil
+            }
+        } message: {
+            Text("This removes the tag from every paper. Papers stay in the library.")
+        }
+        .alert("Remove watched folder?", isPresented: Binding(
+            get: { watchedFolderPendingRemoval != nil },
+            set: { if !$0 { watchedFolderPendingRemoval = nil } }
+        )) {
+            Button("Remove", role: .destructive) {
+                if let watchedFolderPendingRemoval {
+                    model.removeWatchedFolder(watchedFolderPendingRemoval)
+                }
+                watchedFolderPendingRemoval = nil
+            }
+            Button("Cancel", role: .cancel) {
+                watchedFolderPendingRemoval = nil
+            }
+        } message: {
+            Text("The folder will stop being scanned. Imported papers remain in the library.")
+        }
         .sheet(isPresented: $isCreatingCategory) {
             CategoryEditorSheet(
                 categoryItems: flattenedCategoryItems(),
@@ -113,11 +179,19 @@ struct LibraryView: View {
                 isCreatingTag = false
             }
         }
+        .sheet(item: $categoryPendingManagement) { category in
+            categoryManagementSheet(category)
+        }
+        .sheet(item: $tagPendingManagement) { tag in
+            tagManagementSheet(tag)
+        }
         .sheet(isPresented: $isShowingWatchedFolders) {
             WatchedFoldersSheet {
                 presentWatchedFolderPanel()
             } onClose: {
                 isShowingWatchedFolders = false
+            } onRemove: { folder in
+                watchedFolderPendingRemoval = folder
             }
             .environmentObject(model)
         }
@@ -159,6 +233,9 @@ struct LibraryView: View {
             } onCancel: {
                 isShowingBulkTag = false
             }
+        }
+        .onDrop(of: [UTType.fileURL], isTargeted: nil) { providers in
+            dropPDFs(from: providers)
         }
     }
 
@@ -206,13 +283,19 @@ struct LibraryView: View {
                 if model.categories.isEmpty {
                     SidebarEmptyText("No categories")
                 } else {
-                    ForEach(flattenedCategoryItems()) { item in
+                    ForEach(visibleCategoryItems()) { item in
                         CategorySidebarRow(
                             title: item.category.name,
+                            countText: "\(paperCount(inCategory: item.category.id))",
                             systemImage: selectedCategoryID == item.category.id ? "folder.fill" : "folder",
                             isSelected: selectedCategoryID == item.category.id,
                             depth: item.depth,
+                            hasChildren: hasChildCategories(item.category.id),
+                            isExpanded: !collapsedCategoryIDs.contains(item.category.id),
                             isPaperDragTargeted: isPaperDragTargeting(item.category.id),
+                            onToggle: {
+                                toggleCategoryCollapsed(item.category.id)
+                            },
                             onSelect: {
                                 selectedCategoryID = item.category.id
                                 selectedTagID = nil
@@ -220,6 +303,9 @@ struct LibraryView: View {
                             onCreateChild: {
                                 newCategoryParentID = item.category.id
                                 startCreatingCategory(parentID: item.category.id)
+                            },
+                            onManage: {
+                                categoryPendingManagement = item.category
                             },
                             onDropPapers: { paperIDs in
                                 model.assignPapers(paperIDs, toCategory: item.category.id)
@@ -242,13 +328,15 @@ struct LibraryView: View {
                     SidebarEmptyText("No tags")
                 } else {
                     ForEach(model.tags) { tag in
-                        filterButton(
+                        TagSidebarRow(
                             title: tag.name,
-                            systemImage: selectedTagID == tag.id ? "tag.fill" : "tag",
+                            countText: "\(paperCount(forTag: tag.id))",
                             isSelected: selectedTagID == tag.id
                         ) {
                             selectedTagID = tag.id
                             selectedCategoryID = nil
+                        } onManage: {
+                            tagPendingManagement = tag
                         }
                     }
                 }
@@ -295,9 +383,20 @@ struct LibraryView: View {
                 .buttonStyle(.borderedProminent)
             }
 
-            TextField("Search title or author", text: $searchText)
-                .textFieldStyle(.roundedBorder)
-                .font(.system(size: 15))
+            HStack(spacing: 8) {
+                TextField("Search title, author, tag, category, year, or source", text: $searchText)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 15))
+                if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Button {
+                        searchText = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Clear Search")
+                }
+            }
 
             if !selectedPaperIDs.isEmpty {
                 BulkLibraryActionBar(
@@ -320,12 +419,13 @@ struct LibraryView: View {
                 )
             }
 
-            if selectedCategoryID != nil || selectedTagID != nil {
+            if selectedCategoryID != nil || selectedTagID != nil || !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 Button {
+                    searchText = ""
                     selectedCategoryID = nil
                     selectedTagID = nil
                 } label: {
-                    Label("Clear Filter", systemImage: "xmark.circle")
+                    Label("Clear Filters", systemImage: "xmark.circle")
                 }
                 .buttonStyle(.borderless)
             }
@@ -359,6 +459,9 @@ struct LibraryView: View {
                             }
                             .onTapGesture {
                                 handlePaperRowTap(paper)
+                            }
+                            .onTapGesture(count: 2) {
+                                model.openPaper(paper)
                             }
                             .highPriorityGesture(paperDragGesture(for: paper))
                         }
@@ -402,8 +505,16 @@ struct LibraryView: View {
                         categoryAssignments(for: paper)
                         Divider()
                         tagAssignments(for: paper)
+                        Divider()
+                        paperNotesSection(for: paper)
                     }
                     .padding(.trailing, 4)
+                    .onAppear {
+                        model.loadPaperNotes(for: paper)
+                    }
+                    .onChange(of: paper.id) { _, _ in
+                        model.loadPaperNotes(for: paper)
+                    }
                 }
             } else {
                 ContentUnavailableView("Select Paper", systemImage: "sidebar.right")
@@ -480,6 +591,72 @@ struct LibraryView: View {
                             model.setTag(tag.id, assigned: !assigned, for: paper)
                         }
                     }
+                }
+            }
+        }
+    }
+
+    private func paperNotesSection(for paper: Paper) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("Notes", systemImage: "note.text")
+                    .font(.headline)
+                Spacer()
+                if editingNoteID != nil {
+                    Button("New") {
+                        clearNoteDraft()
+                    }
+                    .buttonStyle(.borderless)
+                }
+            }
+
+            let notes = model.paperNotesByID[paper.id, default: []]
+            if notes.isEmpty {
+                SidebarEmptyText("No notes")
+            } else {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(notes) { note in
+                        PaperNoteRow(note: note) {
+                            editingNoteID = note.id
+                            noteTitle = note.title
+                            noteBody = note.bodyMarkdown
+                        } onDelete: {
+                            model.deleteNote(note)
+                            if editingNoteID == note.id {
+                                clearNoteDraft()
+                            }
+                        }
+                    }
+                }
+            }
+
+            TextField("Note title", text: $noteTitle)
+                .textFieldStyle(.roundedBorder)
+            TextEditor(text: $noteBody)
+                .font(.system(size: 12.5))
+                .frame(minHeight: 72)
+                .scrollContentBackground(.hidden)
+                .background(Color(nsColor: .textBackgroundColor))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 7)
+                        .stroke(Color.black.opacity(0.08), lineWidth: 1)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 7))
+            HStack {
+                Button {
+                    model.saveNote(paperID: paper.id, noteID: editingNoteID, title: noteTitle, bodyMarkdown: noteBody)
+                    clearNoteDraft()
+                } label: {
+                    Label(editingNoteID == nil ? "Add Note" : "Save Note", systemImage: "checkmark")
+                }
+                .buttonStyle(.bordered)
+                .disabled(noteTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && noteBody.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                if editingNoteID != nil {
+                    Button("Cancel") {
+                        clearNoteDraft()
+                    }
+                    .buttonStyle(.borderless)
                 }
             }
         }
@@ -584,6 +761,62 @@ struct LibraryView: View {
         model.deletePapers(paperIDs)
         selectedPaperIDs.removeAll()
         lastSelectedPaperID = nil
+    }
+
+    private func clearNoteDraft() {
+        editingNoteID = nil
+        noteTitle = ""
+        noteBody = ""
+    }
+
+    private func toggleCategoryCollapsed(_ categoryID: String) {
+        if collapsedCategoryIDs.contains(categoryID) {
+            collapsedCategoryIDs.remove(categoryID)
+        } else {
+            collapsedCategoryIDs.insert(categoryID)
+        }
+    }
+
+    private func hasChildCategories(_ categoryID: String) -> Bool {
+        model.categories.contains { $0.parentID == categoryID }
+    }
+
+    private func paperCount(inCategory categoryID: String) -> Int {
+        model.paperCategoryIDsByID.values.filter { $0.contains(categoryID) }.count
+    }
+
+    private func paperCount(forTag tagID: String) -> Int {
+        model.paperTagsByID.values.filter { tags in
+            tags.contains { $0.id == tagID }
+        }.count
+    }
+
+    private func dropPDFs(from providers: [NSItemProvider]) -> Bool {
+        let fileProviders = providers.filter { $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) }
+        guard !fileProviders.isEmpty else {
+            return false
+        }
+        for provider in fileProviders {
+            provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
+                let url: URL?
+                if let itemURL = item as? URL {
+                    url = itemURL
+                } else if let data = item as? Data {
+                    url = URL(dataRepresentation: data, relativeTo: nil)
+                } else if let nsURL = item as? NSURL {
+                    url = nsURL as URL
+                } else {
+                    url = nil
+                }
+                guard let url else {
+                    return
+                }
+                DispatchQueue.main.async {
+                    model.importPDFs(from: [url])
+                }
+            }
+        }
+        return true
     }
 
     private var activePaperDragPreview: some View {
@@ -700,12 +933,63 @@ struct LibraryView: View {
                     + flattenedCategoryItems(parentID: category.id, depth: depth + 1)
             }
     }
+
+    private func visibleCategoryItems(parentID: String? = nil, depth: Int = 0) -> [CategoryListItem] {
+        model.categories
+            .filter { $0.parentID == parentID }
+            .sorted { left, right in
+                if left.sortOrder == right.sortOrder {
+                    return left.name.localizedCaseInsensitiveCompare(right.name) == .orderedAscending
+                }
+                return left.sortOrder < right.sortOrder
+            }
+            .flatMap { category in
+                let children = collapsedCategoryIDs.contains(category.id) ? [] : visibleCategoryItems(parentID: category.id, depth: depth + 1)
+                return [CategoryListItem(category: category, depth: depth)] + children
+            }
+    }
+
+    private func categoryManagementSheet(_ category: PaperCodexCore.Category) -> some View {
+        CategoryManagementSheet(
+            category: category,
+            categoryItems: flattenedCategoryItems().filter { $0.category.id != category.id },
+            onSave: { name, parentID in
+                model.updateCategory(category.id, name: name, parentID: parentID)
+                categoryPendingManagement = nil
+            },
+            onDelete: {
+                categoryPendingManagement = nil
+                categoryPendingDelete = category
+            },
+            onCancel: {
+                categoryPendingManagement = nil
+            }
+        )
+    }
+
+    private func tagManagementSheet(_ tag: PaperTag) -> some View {
+        TagManagementSheet(
+            tag: tag,
+            onSave: { name in
+                model.updateTag(tag.id, name: name)
+                tagPendingManagement = nil
+            },
+            onDelete: {
+                tagPendingManagement = nil
+                tagPendingDelete = tag
+            },
+            onCancel: {
+                tagPendingManagement = nil
+            }
+        )
+    }
 }
 
 private struct WatchedFoldersSheet: View {
     @EnvironmentObject private var model: AppModel
     var onAdd: () -> Void
     var onClose: () -> Void
+    var onRemove: (WatchedFolder) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -733,7 +1017,7 @@ private struct WatchedFoldersSheet: View {
                 List {
                     ForEach(model.watchedFolders) { folder in
                         WatchedFolderRow(folder: folder) {
-                            model.removeWatchedFolder(folder)
+                            onRemove(folder)
                         }
                     }
                 }
@@ -759,7 +1043,7 @@ private struct WatchedFolderRow: View {
     var body: some View {
         HStack(spacing: 10) {
             Image(systemName: "folder")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(folderExists ? Color.accentColor : Color.orange)
             VStack(alignment: .leading, spacing: 3) {
                 Text(URL(fileURLWithPath: folder.path).lastPathComponent)
                     .font(.system(size: 13, weight: .medium))
@@ -770,7 +1054,7 @@ private struct WatchedFolderRow: View {
                     .truncationMode(.middle)
                 Text(lastScannedText)
                     .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(folderExists ? Color.secondary.opacity(0.72) : Color.orange)
             }
             Spacer()
             Button(action: onRemove) {
@@ -784,10 +1068,18 @@ private struct WatchedFolderRow: View {
     }
 
     private var lastScannedText: String {
+        guard folderExists else {
+            return "Folder missing"
+        }
         guard let date = folder.lastScannedAt else {
             return "Not scanned"
         }
         return "Scanned \(date.formatted(date: .abbreviated, time: .shortened))"
+    }
+
+    private var folderExists: Bool {
+        var isDirectory: ObjCBool = false
+        return FileManager.default.fileExists(atPath: folder.path, isDirectory: &isDirectory) && isDirectory.boolValue
     }
 }
 
@@ -1523,24 +1815,43 @@ private struct CategorySidebarRow: View {
     @State private var isDropTargeted = false
 
     var title: String
+    var countText: String
     var systemImage: String
     var isSelected: Bool
     var depth: Int
+    var hasChildren: Bool
+    var isExpanded: Bool
     var isPaperDragTargeted: Bool
+    var onToggle: () -> Void
     var onSelect: () -> Void
     var onCreateChild: () -> Void
+    var onManage: () -> Void
     var onDropPapers: ([String]) -> Void
 
     var body: some View {
         ZStack(alignment: .trailing) {
-            SidebarRowButton(
-                title: title,
-                systemImage: systemImage,
-                selected: isSelected,
-                depth: depth,
-                trailingReserve: 30,
-                action: onSelect
-            )
+            HStack(spacing: 4) {
+                if hasChildren {
+                    Button(action: onToggle) {
+                        Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                            .font(.system(size: 9, weight: .bold))
+                            .frame(width: 16, height: 24)
+                    }
+                    .buttonStyle(.plain)
+                    .help(isExpanded ? "Collapse" : "Expand")
+                } else {
+                    Color.clear
+                        .frame(width: 16, height: 24)
+                }
+                SidebarRowButton(
+                    title: title,
+                    systemImage: systemImage,
+                    selected: isSelected,
+                    depth: max(depth - 1, 0),
+                    trailingReserve: 70,
+                    action: onSelect
+                )
+            }
 
             if isDropActive {
                 Label("Drop", systemImage: "arrow.down.doc")
@@ -1551,25 +1862,33 @@ private struct CategorySidebarRow: View {
                     .background(Capsule().fill(Color.accentColor.opacity(0.16)))
                     .padding(.trailing, 6)
                     .transition(.opacity.combined(with: .scale(scale: 0.96)))
-            } else if isHovering || isSelected {
-                Button(action: onCreateChild) {
-                    Image(systemName: "plus")
-                        .font(.system(size: 11, weight: .semibold))
-                        .frame(width: 22, height: 22)
-                        .foregroundStyle(Color.accentColor)
-                        .background(
-                            Circle()
-                                .fill(Color.accentColor.opacity(isHovering ? 0.16 : 0.10))
-                        )
-                        .overlay(
-                            Circle()
-                                .stroke(Color.accentColor.opacity(isHovering ? 0.40 : 0.24), lineWidth: 1)
-                        )
-                        .contentShape(Circle())
+            } else {
+                HStack(spacing: 3) {
+                    Text(countText)
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                    if isHovering || isSelected {
+                        Button(action: onCreateChild) {
+                            Image(systemName: "plus")
+                                .font(.system(size: 11, weight: .semibold))
+                                .frame(width: 22, height: 22)
+                                .foregroundStyle(Color.accentColor)
+                                .background(Circle().fill(Color.accentColor.opacity(isHovering ? 0.16 : 0.10)))
+                                .contentShape(Circle())
+                        }
+                        .buttonStyle(.plain)
+                        .help("New subcategory under \(title)")
+
+                        Button(action: onManage) {
+                            Image(systemName: "ellipsis")
+                                .font(.system(size: 11, weight: .bold))
+                                .frame(width: 22, height: 22)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Manage \(title)")
+                    }
                 }
-                .buttonStyle(.plain)
                 .padding(.trailing, 6)
-                .help("New subcategory under \(title)")
                 .transition(.opacity.combined(with: .scale(scale: 0.92)))
             }
         }
@@ -1620,6 +1939,186 @@ private struct CategorySidebarRow: View {
             }
         }
         return true
+    }
+}
+
+private struct TagSidebarRow: View {
+    @State private var isHovering = false
+
+    var title: String
+    var countText: String
+    var isSelected: Bool
+    var onSelect: () -> Void
+    var onManage: () -> Void
+
+    var body: some View {
+        ZStack(alignment: .trailing) {
+            SidebarRowButton(
+                title: title,
+                systemImage: isSelected ? "tag.fill" : "tag",
+                selected: isSelected,
+                trailingReserve: 58,
+                action: onSelect
+            )
+            HStack(spacing: 4) {
+                Text(countText)
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                if isHovering || isSelected {
+                    Button(action: onManage) {
+                        Image(systemName: "ellipsis")
+                            .font(.system(size: 11, weight: .bold))
+                            .frame(width: 22, height: 22)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Manage \(title)")
+                }
+            }
+            .padding(.trailing, 6)
+        }
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.12)) {
+                isHovering = hovering
+            }
+        }
+    }
+}
+
+private struct CategoryManagementSheet: View {
+    var category: PaperCodexCore.Category
+    var categoryItems: [CategoryListItem]
+    var onSave: (String, String?) -> Void
+    var onDelete: () -> Void
+    var onCancel: () -> Void
+
+    @State private var name: String
+    @State private var parentID: String
+
+    init(
+        category: PaperCodexCore.Category,
+        categoryItems: [CategoryListItem],
+        onSave: @escaping (String, String?) -> Void,
+        onDelete: @escaping () -> Void,
+        onCancel: @escaping () -> Void
+    ) {
+        self.category = category
+        self.categoryItems = categoryItems
+        self.onSave = onSave
+        self.onDelete = onDelete
+        self.onCancel = onCancel
+        _name = State(initialValue: category.name)
+        _parentID = State(initialValue: category.parentID ?? "")
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Label("Manage Category", systemImage: "folder")
+                .font(.title3.weight(.semibold))
+            TextField("Name", text: $name)
+                .textFieldStyle(.roundedBorder)
+            Picker("Parent", selection: $parentID) {
+                Text("Top Level").tag("")
+                ForEach(categoryItems) { item in
+                    Text(String(repeating: "  ", count: item.depth) + item.category.name)
+                        .tag(item.category.id)
+                }
+            }
+            HStack {
+                Button(role: .destructive, action: onDelete) {
+                    Label("Delete", systemImage: "trash")
+                }
+                .buttonStyle(.bordered)
+                Spacer()
+                Button("Cancel", action: onCancel)
+                Button("Save") {
+                    onSave(name, parentID.isEmpty ? nil : parentID)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(22)
+        .frame(width: 390)
+    }
+}
+
+private struct TagManagementSheet: View {
+    var tag: PaperTag
+    var onSave: (String) -> Void
+    var onDelete: () -> Void
+    var onCancel: () -> Void
+
+    @State private var name: String
+
+    init(tag: PaperTag, onSave: @escaping (String) -> Void, onDelete: @escaping () -> Void, onCancel: @escaping () -> Void) {
+        self.tag = tag
+        self.onSave = onSave
+        self.onDelete = onDelete
+        self.onCancel = onCancel
+        _name = State(initialValue: tag.name)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Label("Manage Tag", systemImage: "tag")
+                .font(.title3.weight(.semibold))
+            TextField("Name", text: $name)
+                .textFieldStyle(.roundedBorder)
+            HStack {
+                Button(role: .destructive, action: onDelete) {
+                    Label("Delete", systemImage: "trash")
+                }
+                .buttonStyle(.bordered)
+                Spacer()
+                Button("Cancel", action: onCancel)
+                Button("Save") {
+                    onSave(name)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(22)
+        .frame(width: 340)
+    }
+}
+
+private struct PaperNoteRow: View {
+    var note: PaperNote
+    var onEdit: () -> Void
+    var onDelete: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Button(action: onEdit) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(note.title)
+                        .font(.system(size: 13, weight: .semibold))
+                        .lineLimit(1)
+                    if !note.bodyMarkdown.isEmpty {
+                        Text(note.bodyMarkdown)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+            Button(action: onDelete) {
+                Image(systemName: "trash")
+            }
+            .buttonStyle(.borderless)
+            .foregroundStyle(.secondary)
+            .help("Delete Note")
+        }
+        .padding(9)
+        .background(Color(nsColor: .textBackgroundColor))
+        .overlay(
+            RoundedRectangle(cornerRadius: 7)
+                .stroke(Color.black.opacity(0.08), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 7))
     }
 }
 
