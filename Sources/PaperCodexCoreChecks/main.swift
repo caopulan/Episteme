@@ -370,6 +370,10 @@ func runUILayoutSourceChecks() throws {
         "library category rows should accept native plain-text paper drag payloads"
     )
     try check(
+        librarySource.contains("model.movePapers(paperIDs, toCategory: item.category.id)"),
+        "dropping papers onto a folder should move them out of existing folders instead of copying category links"
+    )
+    try check(
         librarySource.contains("bulkActionBarOverlayYOffset"),
         "library bulk action overlay should sit lower over the list instead of hugging the top edge"
     )
@@ -397,8 +401,8 @@ func runUILayoutSourceChecks() throws {
     let discoverViewURL = root.appendingPathComponent("Sources/PaperCodexApp/DiscoverView.swift")
     let discoverSource = try String(contentsOf: discoverViewURL)
     try check(
-        appModelSource.contains("assignPapers(_ paperIDs: [String], toCategory categoryID: String)"),
-        "AppModel should provide a batch paper-to-category assignment path for drag and drop"
+        appModelSource.contains("movePapers(_ paperIDs: [String], toCategory categoryID: String?)"),
+        "AppModel should provide a batch paper category move path for drag and drop"
     )
     try check(
         appModelSource.contains("assignPapers(_ paperIDs: [String], toTags tagIDs: [String])"),

@@ -319,7 +319,7 @@ struct LibraryView: View {
                                 categoryPendingManagement = item.category
                             },
                             onDropPapers: { paperIDs in
-                                model.assignPapers(paperIDs, toCategory: item.category.id)
+                                model.movePapers(paperIDs, toCategory: item.category.id)
                                 selectedCategoryID = item.category.id
                                 selectedTagID = nil
                             }
