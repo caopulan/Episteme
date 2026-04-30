@@ -19,6 +19,7 @@ struct LibraryView: View {
     @State private var categoryDropFrames: [String: CGRect] = [:]
     @State private var selectedPaperIDs: Set<String> = []
     @State private var lastSelectedPaperID: String?
+    @State private var lastPaperRowClick: LibraryPaperRowClick?
     @State private var isShowingBulkMove = false
     @State private var isShowingBulkTag = false
     @State private var isConfirmingBulkDelete = false
@@ -368,8 +369,12 @@ struct LibraryView: View {
                 .buttonStyle(.bordered)
                 Picker("Sort", selection: $librarySortRawValue) {
                     ForEach(LibrarySortOption.allCases) { option in
-                        Label(option.title, systemImage: option.systemImage)
-                            .tag(option.rawValue)
+                        Label {
+                            Text(LocalizedStringKey(option.title))
+                        } icon: {
+                            Image(systemName: option.systemImage)
+                        }
+                        .tag(option.rawValue)
                     }
                 }
                 .pickerStyle(.menu)
@@ -458,10 +463,7 @@ struct LibraryView: View {
                                 PaperDragPreview(paper: paper)
                             }
                             .onTapGesture {
-                                handlePaperRowTap(paper)
-                            }
-                            .onTapGesture(count: 2) {
-                                model.openPaper(paper)
+                                handlePaperRowClick(paper)
                             }
                             .highPriorityGesture(paperDragGesture(for: paper))
                         }
@@ -694,6 +696,27 @@ struct LibraryView: View {
     private func startCreatingCategory(parentID: String?) {
         newCategoryParentID = parentID ?? ""
         isCreatingCategory = true
+    }
+
+    private func handlePaperRowClick(_ paper: Paper) {
+        let modifiers = NSEvent.modifierFlags.intersection([.command, .shift])
+        let canOpenOnSecondClick = modifiers.isEmpty
+        let clickedAt = Date()
+        handlePaperRowTap(paper)
+
+        guard canOpenOnSecondClick else {
+            lastPaperRowClick = nil
+            return
+        }
+
+        if let lastPaperRowClick,
+           lastPaperRowClick.paperID == paper.id,
+           clickedAt.timeIntervalSince(lastPaperRowClick.clickedAt) <= 0.38 {
+            model.openPaper(paper)
+            self.lastPaperRowClick = nil
+        } else {
+            lastPaperRowClick = LibraryPaperRowClick(paperID: paper.id, clickedAt: clickedAt)
+        }
     }
 
     private func handlePaperRowTap(_ paper: Paper) {
@@ -1095,6 +1118,11 @@ private struct ActiveLibraryPaperDrag: Equatable {
     var location: CGPoint
 }
 
+private struct LibraryPaperRowClick: Equatable {
+    var paperID: String
+    var clickedAt: Date
+}
+
 private enum LibraryDragCoordinateSpace {
     static let name = "PaperCodexLibraryDragSpace"
 }
@@ -1312,7 +1340,7 @@ private struct SidebarEmptyText: View {
     }
 
     var body: some View {
-        Text(text)
+        Text(LocalizedStringKey(text))
             .foregroundStyle(.secondary)
             .padding(.vertical, 5)
     }

@@ -84,6 +84,7 @@ enum PDFKitCommandKind: Equatable {
     case fitPage
     case previousPage
     case nextPage
+    case restorePosition(PaperReaderPosition)
 }
 
 struct PDFKitCommand: Identifiable, Equatable {

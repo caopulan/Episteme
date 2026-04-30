@@ -145,14 +145,14 @@ private func saveQuickPromptsToDefaults(_ prompts: [QuickPrompt]) {
     }
 }
 
-private func loadCodexSystemPromptFromDefaults() -> String {
+private func loadCodexSystemPromptFromDefaults(languageMode: PaperCodexLanguageMode) -> String {
     guard let stored = UserDefaults.standard.string(forKey: codexSystemPromptDefaultsKey),
           !stored.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-        return PromptBuilder.defaultSystemPrompt
+        return PromptBuilder.defaultSystemPrompt(for: languageMode)
     }
-    if stored.trimmingCharacters(in: .whitespacesAndNewlines) == PromptDefaults.legacyCodexSystemPrompt {
+    if PromptBuilder.isBuiltInSystemPrompt(stored) {
         UserDefaults.standard.removeObject(forKey: codexSystemPromptDefaultsKey)
-        return PromptBuilder.defaultSystemPrompt
+        return PromptBuilder.defaultSystemPrompt(for: languageMode)
     }
     return stored
 }
@@ -271,8 +271,8 @@ final class AppModel: ObservableObject {
         let stored = UserDefaults.standard.string(forKey: codexReasoningEffortDefaultsKey)
         return stored.flatMap(CodexReasoningEffort.init(rawValue:)) ?? .default
     }()
-    @Published var codexSystemPrompt: String = loadCodexSystemPromptFromDefaults()
-    @Published var globalLanguageMode: PaperCodexLanguageMode = loadGlobalLanguageModeFromDefaults()
+    @Published var codexSystemPrompt: String = PromptBuilder.defaultSystemPrompt
+    @Published var globalLanguageMode: PaperCodexLanguageMode = .automatic
     @Published var activeCodexRun: ActiveCodexRun?
     @Published var errorMessage: String?
     @Published var notices: [InteractionNotice] = []
@@ -404,6 +404,10 @@ final class AppModel: ObservableObject {
     }
 
     init() {
+        let storedLanguageMode = loadGlobalLanguageModeFromDefaults()
+        globalLanguageMode = storedLanguageMode
+        codexSystemPrompt = loadCodexSystemPromptFromDefaults(languageMode: storedLanguageMode)
+
         let root = PaperCodexPaths.supportRoot()
         supportRoot = root
         arxivCache = ArxivFeedCache(root: root.appendingPathComponent("arxiv-cache", isDirectory: true))
@@ -779,7 +783,7 @@ final class AppModel: ObservableObject {
 
     func setCodexSystemPrompt(_ prompt: String) {
         let normalized = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        if normalized.isEmpty || normalized == PromptBuilder.defaultSystemPrompt {
+        if normalized.isEmpty || PromptBuilder.isBuiltInSystemPrompt(normalized) {
             resetCodexSystemPrompt()
             return
         }
@@ -789,15 +793,21 @@ final class AppModel: ObservableObject {
     }
 
     func resetCodexSystemPrompt() {
-        codexSystemPrompt = PromptBuilder.defaultSystemPrompt
+        codexSystemPrompt = PromptBuilder.defaultSystemPrompt(for: globalLanguageMode)
         UserDefaults.standard.removeObject(forKey: codexSystemPromptDefaultsKey)
         postNotice(kind: .success, title: "System Prompt Reset")
     }
 
     func setGlobalLanguageMode(_ mode: PaperCodexLanguageMode) {
+        let shouldSwitchSystemPrompt = PromptBuilder.isBuiltInSystemPrompt(codexSystemPrompt)
         globalLanguageMode = mode
         UserDefaults.standard.set(mode.rawValue, forKey: globalLanguageModeDefaultsKey)
-        postNotice(kind: .success, title: "Language Saved", message: mode.title)
+        if shouldSwitchSystemPrompt {
+            codexSystemPrompt = PromptBuilder.defaultSystemPrompt(for: mode)
+            UserDefaults.standard.removeObject(forKey: codexSystemPromptDefaultsKey)
+        }
+        let promptMessage = shouldSwitchSystemPrompt ? "System prompt switched" : "Custom prompt preserved"
+        postNotice(kind: .success, title: "Language Saved", message: "\(mode.title(appLanguage: mode)) · \(promptMessage)")
     }
 
     func setArxivSaveOrganization(_ organization: ArxivSaveOrganization) {
@@ -2268,6 +2278,7 @@ final class AppModel: ObservableObject {
             var position = returnPoint.position
             position.updatedAt = Date()
             readerPosition = position
+            sendPDFKitCommand(.restorePosition(position))
             pdfJumpTarget = nil
             citationReturnPoint = nil
             postNotice(kind: .info, title: "Returned to Previous Reading Position", message: returnPoint.paperTitle)

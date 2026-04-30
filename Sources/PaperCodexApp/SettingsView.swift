@@ -200,8 +200,12 @@ struct SettingsView: View {
                     Button {
                         sectionToScroll = anchor
                     } label: {
-                        Label(anchor.title, systemImage: anchor.systemImage)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Label {
+                            Text(LocalizedStringKey(anchor.title))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        } icon: {
+                            Image(systemName: anchor.systemImage)
+                        }
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(.secondary)
@@ -262,17 +266,17 @@ struct SettingsView: View {
 
     private var globalLanguageSettings: some View {
         settingsSection(title: "Language", systemImage: "globe") {
-            Picker("Global language", selection: Binding(
+            Picker("App language", selection: Binding(
                 get: { model.globalLanguageMode },
                 set: { model.setGlobalLanguageMode($0) }
             )) {
                 ForEach(PaperCodexLanguageMode.allCases) { mode in
-                    Text(mode.title).tag(mode)
+                    Text(mode.title(appLanguage: model.globalLanguageMode)).tag(mode)
                 }
             }
             .pickerStyle(.segmented)
 
-            Text("Controls Codex answers and the preferred language for Discover titles and summaries.")
+            Text("Controls the whole app interface, Discover language, and the default Codex prompt.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -560,7 +564,7 @@ struct SettingsView: View {
                 set: { model.setArxivSaveOrganization($0) }
             )) {
                 ForEach(ArxivSaveOrganization.allCases) { option in
-                    Text(option.title).tag(option)
+                    Text(LocalizedStringKey(option.title)).tag(option)
                 }
             }
             .pickerStyle(.radioGroup)
@@ -608,8 +612,12 @@ struct SettingsView: View {
         @ViewBuilder content: () -> Content
     ) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Label(title, systemImage: systemImage)
-                .font(.headline)
+            Label {
+                Text(LocalizedStringKey(title))
+            } icon: {
+                Image(systemName: systemImage)
+            }
+            .font(.headline)
             content()
         }
         .padding(16)
@@ -652,7 +660,7 @@ struct SettingsView: View {
 
     private func pathRow(label: String, value: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(label)
+            Text(LocalizedStringKey(label))
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
             HStack(alignment: .top, spacing: 8) {

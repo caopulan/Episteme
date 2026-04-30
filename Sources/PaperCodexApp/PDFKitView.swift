@@ -100,7 +100,6 @@ struct PDFKitView: NSViewRepresentable {
         private var highlightedAnnotations: [(PDFPage, PDFAnnotation)] = []
         private var lastJumpTarget: PDFJumpTarget?
         private var lastAppliedReadingContext: String?
-        private var lastAppliedReadingPositionDate: Date?
         private var lastAppliedCommand: PDFKitCommand?
         private var lastReportedStatus: PDFDocumentStatus?
         private var lastReportedPosition: PDFViewportPosition?
@@ -127,7 +126,6 @@ struct PDFKitView: NSViewRepresentable {
         func documentDidLoad() {
             lastJumpTarget = nil
             lastAppliedReadingContext = nil
-            lastAppliedReadingPositionDate = nil
             lastAppliedCommand = nil
             lastReportedStatus = nil
             lastReportedPosition = nil
@@ -174,37 +172,14 @@ struct PDFKitView: NSViewRepresentable {
                 lastAppliedReadingContext = nil
                 return
             }
-            guard contextKey != lastAppliedReadingContext || position?.updatedAt != lastAppliedReadingPositionDate else {
-                return
-            }
-            lastAppliedReadingContext = contextKey
-            lastAppliedReadingPositionDate = position?.updatedAt
             guard let position else {
                 return
             }
-
-            guard let pdfView,
-                  let document = pdfView.document,
-                  document.pageCount > 0 else {
+            guard contextKey != lastAppliedReadingContext else {
                 return
             }
-            let pageIndex = min(max(position.pageIndex, 0), document.pageCount - 1)
-            guard let page = document.page(at: pageIndex) else {
-                return
-            }
-
-            isApplyingReadingPosition = true
-            if position.scaleFactor.isFinite, position.scaleFactor > 0 {
-                pdfView.autoScales = false
-                pdfView.scaleFactor = CGFloat(position.scaleFactor)
-            }
-            let point = NSPoint(x: position.pagePointX, y: position.pagePointY)
-            pdfView.go(to: PDFDestination(page: page, at: point))
-            DispatchQueue.main.async { [weak self] in
-                self?.isApplyingReadingPosition = false
-                self?.scheduleViewportReport()
-                self?.reportDocumentStatus()
-            }
+            lastAppliedReadingContext = contextKey
+            applyViewportPosition(position)
         }
 
         @MainActor
@@ -233,9 +208,39 @@ struct PDFKitView: NSViewRepresentable {
                 pdfView.goToPreviousPage(nil)
             case .nextPage:
                 pdfView.goToNextPage(nil)
+            case .restorePosition(let position):
+                lastAppliedReadingContext = "\(position.sessionID)|\(position.paperID)"
+                applyViewportPosition(position)
+                return
             }
             scheduleViewportReport()
             reportDocumentStatus()
+        }
+
+        @MainActor
+        private func applyViewportPosition(_ position: PaperReaderPosition) {
+            guard let pdfView,
+                  let document = pdfView.document,
+                  document.pageCount > 0 else {
+                return
+            }
+            let pageIndex = min(max(position.pageIndex, 0), document.pageCount - 1)
+            guard let page = document.page(at: pageIndex) else {
+                return
+            }
+
+            isApplyingReadingPosition = true
+            if position.scaleFactor.isFinite, position.scaleFactor > 0 {
+                pdfView.autoScales = false
+                pdfView.scaleFactor = CGFloat(position.scaleFactor)
+            }
+            let point = NSPoint(x: position.pagePointX, y: position.pagePointY)
+            pdfView.go(to: PDFDestination(page: page, at: point))
+            DispatchQueue.main.async { [weak self] in
+                self?.isApplyingReadingPosition = false
+                self?.scheduleViewportReport()
+                self?.reportDocumentStatus()
+            }
         }
 
         @MainActor

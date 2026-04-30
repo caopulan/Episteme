@@ -389,8 +389,12 @@ func runUILayoutSourceChecks() throws {
         "settings should include a dedicated global language section"
     )
     try check(
-        settingsViewSource.contains("Picker(\"Global language\""),
-        "settings should expose a global language picker"
+        settingsViewSource.contains("Picker(\"App language\""),
+        "settings should expose an app-wide language picker"
+    )
+    try check(
+        settingsViewSource.contains("Controls the whole app interface"),
+        "settings should describe language as an app-wide setting, not only answer language"
     )
     try check(
         discoverSource.contains("languageMode: model.globalLanguageMode"),
@@ -399,6 +403,21 @@ func runUILayoutSourceChecks() throws {
     try check(
         discoverSource.contains("paper.displayTitle(language: model.globalLanguageMode.discoverLanguageCode)"),
         "Discover save sheet should use the configured global language"
+    )
+    let rootViewSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/PaperCodexApp.swift"))
+    let sidebarRowSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/SidebarRowButton.swift"))
+    let buildScriptSource = try String(contentsOf: root.appendingPathComponent("scripts/build-app-bundle.sh"))
+    try check(
+        rootViewSource.contains(".environment(\\.locale"),
+        "root view should drive SwiftUI localization from the app language setting"
+    )
+    try check(
+        sidebarRowSource.contains("LocalizedStringKey(title)"),
+        "shared sidebar rows should localize dynamic navigation titles"
+    )
+    try check(
+        buildScriptSource.contains("*.lproj"),
+        "app bundle build should copy localization resources"
     )
 
     let chatViewURL = root.appendingPathComponent("Sources/PaperCodexApp/ChatView.swift")
@@ -434,8 +453,6 @@ func runUILayoutSourceChecks() throws {
         !pdfKitSource.contains("first.y + first.height"),
         "PDF citation jumps should not align the highlight top edge to the viewport top"
     )
-
-    let rootViewSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/PaperCodexApp.swift"))
     let interactionSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/InteractionFeedback.swift"))
     try check(
         interactionSource.contains("InteractionNoticeStack"),
@@ -463,8 +480,12 @@ func runUILayoutSourceChecks() throws {
         "library should accept dropped PDF files for import"
     )
     try check(
-        librarySource.contains("onTapGesture(count: 2)"),
-        "library paper rows should support double-click to open"
+        !librarySource.contains(".onTapGesture(count: 2)"),
+        "library paper rows should not use a row-level double-tap recognizer that delays single-click selection"
+    )
+    try check(
+        librarySource.contains("lastPaperRowClick"),
+        "library paper rows should detect a second quick click from the immediate single-click handler"
     )
     try check(
         librarySource.contains("categoryManagementSheet"),
@@ -511,6 +532,14 @@ func runUILayoutSourceChecks() throws {
     try check(
         pdfKitSource.contains("PDFKitCommand"),
         "PDFKit view should accept explicit toolbar commands"
+    )
+    try check(
+        interactionSource.contains("case restorePosition(PaperReaderPosition)"),
+        "PDFKit commands should provide an explicit restore-position command for citation return"
+    )
+    try check(
+        !pdfKitSource.contains("lastAppliedReadingPositionDate"),
+        "PDF reading-position saves should not trigger viewport restoration through updatedAt changes"
     )
 
     try check(
@@ -1363,6 +1392,7 @@ func runPromptChecks() throws {
     )
     try check(englishPrompt.contains("Global language preference: English"), "prompt should include the English global language preference")
     try check(englishPrompt.contains("Answer in English by default"), "English language mode should ask Codex to answer in English")
+    try check(englishPrompt.contains("[global language]"), "English prompt should keep English section labels")
     let chinesePrompt = PromptBuilder().buildPrompt(
         request: PromptRequest(
             userMessage: "Explain Figure 2.",
@@ -1373,8 +1403,11 @@ func runPromptChecks() throws {
             languageMode: .chinese
         )
     )
-    try check(chinesePrompt.contains("Global language preference: Chinese"), "prompt should include the Chinese global language preference")
-    try check(chinesePrompt.contains("Answer in Chinese by default"), "Chinese language mode should ask Codex to answer in Chinese")
+    try check(chinesePrompt.contains("你是 Paper Codex 中的 Codex"), "Chinese language mode should switch the full system prompt to Chinese")
+    try check(chinesePrompt.contains("全局语言偏好：中文"), "prompt should include the Chinese global language preference")
+    try check(chinesePrompt.contains("[全局语言]"), "Chinese prompt should switch prompt section labels to Chinese")
+    try check(!chinesePrompt.contains("[global language]"), "Chinese prompt should not keep English-only language section labels")
+    try check(!chinesePrompt.contains("Response style:"), "Chinese language mode should not keep the English built-in system prompt")
 }
 
 func runWorkspaceChecks() throws {

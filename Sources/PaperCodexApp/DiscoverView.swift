@@ -619,7 +619,7 @@ private struct SidebarFilterButton: View {
                 Image(systemName: selected ? "checkmark.circle.fill" : "circle")
                     .frame(width: 18)
                     .foregroundStyle(selected ? Color.accentColor : Color.secondary)
-                Text(title)
+                Text(LocalizedStringKey(title))
                     .lineLimit(1)
                 Spacer()
                 if let detail {
@@ -676,8 +676,12 @@ private struct DiscoverPaperStatusBadge: View {
     var state: DiscoverPaperInteractionState
 
     var body: some View {
-        Label(title, systemImage: systemImage)
-            .font(.caption2.weight(.semibold))
+        Label {
+            Text(LocalizedStringKey(title))
+        } icon: {
+            Image(systemName: systemImage)
+        }
+        .font(.caption2.weight(.semibold))
             .lineLimit(1)
             .padding(.horizontal, 7)
             .padding(.vertical, 4)
@@ -780,7 +784,11 @@ private struct ToolbarActionButton: View {
 
     var body: some View {
         Button(action: action) {
-            Label(title, systemImage: systemImage)
+            Label {
+                Text(LocalizedStringKey(title))
+            } icon: {
+                Image(systemName: systemImage)
+            }
                 .font(.system(size: 12.5, weight: .semibold))
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)

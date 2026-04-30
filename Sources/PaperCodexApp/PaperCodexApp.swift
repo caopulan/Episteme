@@ -33,6 +33,7 @@ struct RootView: View {
                 ReaderView()
             }
         }
+        .environment(\.locale, Locale(identifier: model.globalLanguageMode.appLocaleIdentifier))
         .overlay(alignment: .topTrailing) {
             InteractionNoticeStack(notices: model.notices) { noticeID in
                 model.dismissNotice(id: noticeID)

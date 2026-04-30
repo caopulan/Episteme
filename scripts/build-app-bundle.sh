@@ -17,6 +17,9 @@ mkdir -p "$(dirname "$app_path")"
 mkdir -p "$macos_path" "$resources_path"
 cp "$binary_path" "$macos_path/PaperCodexApp"
 cp Sources/PaperCodexApp/Resources/AppIcon.icns "$resources_path/AppIcon.icns"
+if compgen -G "Sources/PaperCodexApp/Resources/*.lproj" > /dev/null; then
+  cp -R Sources/PaperCodexApp/Resources/*.lproj "$resources_path/"
+fi
 
 cat > "$contents_path/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -32,6 +35,8 @@ cat > "$contents_path/Info.plist" <<'PLIST'
   <string>Paper Codex</string>
   <key>CFBundleDisplayName</key>
   <string>Paper Codex</string>
+  <key>CFBundleDevelopmentRegion</key>
+  <string>en</string>
   <key>CFBundleIconFile</key>
   <string>AppIcon.icns</string>
   <key>CFBundlePackageType</key>

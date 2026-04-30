@@ -16,7 +16,7 @@ struct SidebarRowButton: View {
                 Image(systemName: systemImage)
                     .frame(width: 18)
                     .foregroundStyle(selected ? Color.accentColor : Color.primary.opacity(0.78))
-                Text(title)
+                Text(LocalizedStringKey(title))
                     .lineLimit(1)
                 Spacer()
             }
