@@ -25,6 +25,8 @@ public struct TextRange: Codable, Equatable, Sendable {
 }
 
 public struct Paper: Codable, Equatable, Identifiable, Sendable {
+    public static let arxivImportPlaceholderFileHashPrefix = "pending-arxiv:"
+
     public var id: String
     public var filePath: String
     public var fileHash: String
@@ -58,6 +60,37 @@ public struct Paper: Codable, Equatable, Identifiable, Sendable {
         self.isSaved = isSaved
         self.importedAt = importedAt
         self.updatedAt = updatedAt
+    }
+
+    public var isArxivImportPlaceholder: Bool {
+        fileHash.hasPrefix(Self.arxivImportPlaceholderFileHashPrefix)
+    }
+
+    public var arxivImportPlaceholderCanonicalID: String? {
+        guard isArxivImportPlaceholder else {
+            return nil
+        }
+        return String(fileHash.dropFirst(Self.arxivImportPlaceholderFileHashPrefix.count))
+    }
+
+    public static func arxivImportPlaceholderFileHash(canonicalID: String) -> String {
+        "\(arxivImportPlaceholderFileHashPrefix)\(canonicalID)"
+    }
+
+    public static func makeArxivImportPlaceholderID(for canonicalID: String) -> String {
+        let safeID = canonicalID
+            .lowercased()
+            .map { character in
+                character.isLetter || character.isNumber ? character : "-"
+            }
+            .reduce(into: "") { partial, character in
+                if character == "-", partial.last == "-" {
+                    return
+                }
+                partial.append(character)
+            }
+            .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+        return "pending-arxiv-\(safeID.isEmpty ? "paper" : safeID)"
     }
 }
 

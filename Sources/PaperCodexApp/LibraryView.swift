@@ -447,6 +447,8 @@ struct LibraryView: View {
                                 categories: categories(for: paper),
                                 tags: model.paperTagsByID[paper.id, default: []],
                                 thumbnailURLs: model.paperThumbnailURLsByID[paper.id, default: []],
+                                isImportPlaceholder: paper.isArxivImportPlaceholder,
+                                placeholderDetail: model.arxivImportPlaceholderDetail(for: paper),
                                 isSelected: model.selectedLibraryPaper?.id == paper.id,
                                 isMultiSelected: selectedPaperIDs.contains(paper.id),
                                 selectionModeActive: !selectedPaperIDs.isEmpty,
@@ -486,9 +488,9 @@ struct LibraryView: View {
                         VStack(alignment: .leading, spacing: 6) {
                             Text(paper.title)
                                 .font(.headline)
-                            Text(paper.authors.isEmpty ? "Authors not set" : paper.authors.joined(separator: ", "))
+                            Text(paper.isArxivImportPlaceholder ? model.arxivImportPlaceholderDetail(for: paper) : (paper.authors.isEmpty ? "Authors not set" : paper.authors.joined(separator: ", ")))
                                 .foregroundStyle(.secondary)
-                            Text(paper.filePath)
+                            Text(paper.isArxivImportPlaceholder ? (paper.sourceURL ?? paper.title) : paper.filePath)
                                 .font(.caption)
                                 .foregroundStyle(.tertiary)
                                 .lineLimit(2)
@@ -502,6 +504,7 @@ struct LibraryView: View {
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.borderedProminent)
+                        .disabled(paper.isArxivImportPlaceholder)
 
                         Divider()
                         categoryAssignments(for: paper)
@@ -711,7 +714,8 @@ struct LibraryView: View {
 
         if let lastPaperRowClick,
            lastPaperRowClick.paperID == paper.id,
-           clickedAt.timeIntervalSince(lastPaperRowClick.clickedAt) <= 0.38 {
+           clickedAt.timeIntervalSince(lastPaperRowClick.clickedAt) <= 0.38,
+           !paper.isArxivImportPlaceholder {
             model.openPaper(paper)
             self.lastPaperRowClick = nil
         } else {
@@ -1157,6 +1161,8 @@ private struct PaperRow: View {
     var categories: [PaperCodexCore.Category]
     var tags: [PaperTag]
     var thumbnailURLs: [URL]
+    var isImportPlaceholder: Bool
+    var placeholderDetail: String
     var isSelected: Bool
     var isMultiSelected: Bool
     var selectionModeActive: Bool
@@ -1178,13 +1184,14 @@ private struct PaperRow: View {
 
             ThumbnailStrip(urls: Array(thumbnailURLs.prefix(5)))
                 .frame(width: 132, height: 54)
+                .opacity(isImportPlaceholder ? 0.45 : 1)
 
             VStack(alignment: .leading, spacing: 7) {
                 Text(paper.title)
                     .font(.headline)
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(isImportPlaceholder ? .secondary : .primary)
                     .lineLimit(2)
-                Text(paper.authors.isEmpty ? "Authors not set" : paper.authors.joined(separator: ", "))
+                Text(isImportPlaceholder ? placeholderDetail : (paper.authors.isEmpty ? "Authors not set" : paper.authors.joined(separator: ", ")))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                 HStack(spacing: 6) {
@@ -1203,11 +1210,13 @@ private struct PaperRow: View {
                 Image(systemName: "book")
             }
             .buttonStyle(.borderless)
+            .disabled(isImportPlaceholder)
             .help("Read")
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 18)
         .background(rowBackground)
+        .opacity(isImportPlaceholder ? 0.66 : 1)
         .overlay(
             RoundedRectangle(cornerRadius: 8)
                 .stroke(rowBorderColor, lineWidth: isMultiSelected ? 1.5 : 1)
@@ -1562,72 +1571,6 @@ private enum LibrarySortOption: String, CaseIterable, Identifiable {
     }
 }
 
-private enum LibraryArxivImportStatus: Equatable {
-    case queued
-    case downloading
-    case imported
-    case alreadyInLibrary
-    case failed(String)
-
-    var title: String {
-        switch self {
-        case .queued:
-            "Queued"
-        case .downloading:
-            "Downloading"
-        case .imported:
-            "Imported"
-        case .alreadyInLibrary:
-            "Already in Library"
-        case .failed:
-            "Failed"
-        }
-    }
-
-    var systemImage: String {
-        switch self {
-        case .queued:
-            "clock"
-        case .downloading:
-            "arrow.down.circle"
-        case .imported:
-            "checkmark.circle.fill"
-        case .alreadyInLibrary:
-            "checkmark.seal.fill"
-        case .failed:
-            "exclamationmark.triangle.fill"
-        }
-    }
-
-    var color: Color {
-        switch self {
-        case .queued:
-            .secondary
-        case .downloading:
-            .accentColor
-        case .imported, .alreadyInLibrary:
-            .green
-        case .failed:
-            .red
-        }
-    }
-
-    var detail: String? {
-        if case let .failed(message) = self {
-            return message
-        }
-        return nil
-    }
-}
-
-private struct LibraryArxivImportRow: Identifiable, Equatable {
-    var id: String { versionedID }
-    var versionedID: String
-    var canonicalID: String
-    var title: String = ""
-    var status: LibraryArxivImportStatus
-}
-
 private struct LibraryArxivImportSheet: View {
     @EnvironmentObject private var model: AppModel
     var categoryItems: [CategoryListItem]
@@ -1635,8 +1578,6 @@ private struct LibraryArxivImportSheet: View {
 
     @State private var inputText = ""
     @State private var targetCategoryID: String
-    @State private var rows: [LibraryArxivImportRow] = []
-    @State private var isImporting = false
     @FocusState private var isInputFocused: Bool
 
     init(categoryItems: [CategoryListItem], initialCategoryID: String?, onClose: @escaping () -> Void) {
@@ -1656,7 +1597,6 @@ private struct LibraryArxivImportSheet: View {
                     .font(.title3.weight(.semibold))
                 Spacer()
                 Button("Close", action: onClose)
-                    .disabled(isImporting)
             }
 
             VStack(alignment: .leading, spacing: 8) {
@@ -1693,60 +1633,21 @@ private struct LibraryArxivImportSheet: View {
                 }
             }
 
-            if !rows.isEmpty {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(rows) { row in
-                            HStack(spacing: 8) {
-                                Image(systemName: row.status.systemImage)
-                                    .foregroundStyle(row.status.color)
-                                    .frame(width: 18)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(row.canonicalID)
-                                        .font(.caption.monospaced().weight(.semibold))
-                                    if !row.title.isEmpty {
-                                        Text(row.title)
-                                            .font(.caption)
-                                            .lineLimit(1)
-                                    }
-                                    if let detail = row.status.detail {
-                                        Text(detail)
-                                            .font(.caption2)
-                                            .foregroundStyle(.red)
-                                            .lineLimit(2)
-                                    }
-                                }
-                                Spacer()
-                                Text(row.status.title)
-                                    .font(.caption)
-                                    .foregroundStyle(row.status.color)
-                            }
-                            .padding(8)
-                            .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .textBackgroundColor)))
-                        }
-                    }
-                }
-                .frame(maxHeight: 180)
-            }
-
             HStack {
                 Spacer()
                 Button("Cancel", action: onClose)
-                    .disabled(isImporting)
                 Button {
-                    Task {
-                        await importParsedIDs()
-                    }
+                    let ids = parsedIDs
+                    model.enqueueArxivIDsForLibrary(
+                        ids,
+                        categoryID: targetCategoryID.isEmpty ? nil : targetCategoryID
+                    )
+                    onClose()
                 } label: {
-                    if isImporting {
-                        ProgressView()
-                            .scaleEffect(0.72)
-                    } else {
-                        Label("Add", systemImage: "arrow.down.doc")
-                    }
+                    Label("Add", systemImage: "arrow.down.doc")
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(parsedIDs.isEmpty || isImporting)
+                .disabled(parsedIDs.isEmpty)
             }
         }
         .padding(22)
@@ -1756,47 +1657,6 @@ private struct LibraryArxivImportSheet: View {
         }
     }
 
-    @MainActor
-    private func importParsedIDs() async {
-        let ids = parsedIDs
-        rows = ids.map { id in
-            LibraryArxivImportRow(
-                versionedID: id,
-                canonicalID: ArxivIDExtractor.canonicalID(from: id),
-                status: .queued
-            )
-        }
-        isImporting = true
-        defer {
-            isImporting = false
-        }
-
-        for id in ids {
-            updateRow(id: id, status: .downloading)
-            let outcome = await model.addArxivIDToLibrary(
-                id,
-                categoryID: targetCategoryID.isEmpty ? nil : targetCategoryID
-            )
-            switch outcome.state {
-            case .imported:
-                updateRow(id: id, title: outcome.title, status: .imported)
-            case .alreadyInLibrary:
-                updateRow(id: id, title: outcome.title, status: .alreadyInLibrary)
-            case .failed:
-                updateRow(id: id, status: .failed(outcome.message))
-            }
-        }
-    }
-
-    private func updateRow(id: String, title: String? = nil, status: LibraryArxivImportStatus) {
-        guard let index = rows.firstIndex(where: { $0.versionedID == id }) else {
-            return
-        }
-        if let title {
-            rows[index].title = title
-        }
-        rows[index].status = status
-    }
 }
 
 private struct FlowLayout: Layout {

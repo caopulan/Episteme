@@ -93,6 +93,22 @@ func runModelsChecks() throws {
     let decodedSession = try decoder.decode(PaperSession.self, from: encoder.encode(session))
     try check(decodedPaper == paper, "paper should JSON round-trip")
     try check(decodedSession == session, "session should JSON round-trip")
+
+    let placeholderID = Paper.makeArxivImportPlaceholderID(for: "2604.18586v2")
+    let placeholder = Paper(
+        id: placeholderID,
+        filePath: "",
+        fileHash: Paper.arxivImportPlaceholderFileHash(canonicalID: "2604.18586"),
+        title: "2604.18586",
+        authors: [],
+        year: nil,
+        sourceURL: "https://arxiv.org/abs/2604.18586",
+        importedAt: Date(timeIntervalSince1970: 1_777_220_000),
+        updatedAt: Date(timeIntervalSince1970: 1_777_220_000)
+    )
+    try check(placeholderID == "pending-arxiv-2604-18586v2", "arXiv import placeholder IDs should be stable and path-safe")
+    try check(placeholder.isArxivImportPlaceholder, "pending arXiv imports should be represented as placeholder papers")
+    try check(placeholder.arxivImportPlaceholderCanonicalID == "2604.18586", "placeholder papers should expose their canonical arXiv ID")
 }
 
 func runLocalStoreV2ModelChecks() throws {
@@ -298,6 +314,18 @@ func runUILayoutSourceChecks() throws {
         "library toolbar should show an arXiv import button next to PDF import"
     )
     try check(
+        librarySource.contains("model.enqueueArxivIDsForLibrary"),
+        "library arXiv import sheet should enqueue IDs and close instead of waiting in the sheet"
+    )
+    try check(
+        librarySource.contains("isImportPlaceholder: paper.isArxivImportPlaceholder"),
+        "library paper rows should render pending arXiv imports as placeholders"
+    )
+    try check(
+        librarySource.contains(".disabled(isImportPlaceholder)"),
+        "pending arXiv placeholder rows should disable read/open actions until the PDF is ready"
+    )
+    try check(
         librarySource.contains(".onDrag {") && librarySource.contains("NSItemProvider(object: paper.id as NSString)"),
         "library paper rows should expose the paper ID as an NSItemProvider drag payload"
     )
@@ -335,6 +363,18 @@ func runUILayoutSourceChecks() throws {
     try check(
         appModelSource.contains("deletePapers(_ paperIDs: [String])"),
         "AppModel should provide a batch library delete path"
+    )
+    try check(
+        appModelSource.contains("pendingArxivLibraryImportIDs"),
+        "AppModel should track active arXiv library imports for placeholder status"
+    )
+    try check(
+        appModelSource.contains("completeQueuedArxivLibraryImports"),
+        "AppModel should finish queued arXiv imports in the background after the sheet closes"
+    )
+    try check(
+        appModelSource.contains("makeArxivImportPlaceholderPaper"),
+        "AppModel should create saved placeholder papers for immediate library display"
     )
     try check(
         librarySource.contains("selectedPaperIDs"),

@@ -322,6 +322,8 @@ final class AppModel: ObservableObject {
     @Published var citationReturnPoint: CitationReturnPoint?
     @Published var pdfKitCommand: PDFKitCommand?
     @Published var pdfDocumentStatus: PDFDocumentStatus?
+    @Published var pendingArxivLibraryImportIDs: Set<String> = []
+    @Published var failedArxivLibraryImportMessagesByID: [String: String] = [:]
     @Published var embeddingProviderTestStatus: String?
     @Published var isTestingEmbeddingProvider = false
     @Published var librarySidebarWidth: CGFloat = {
@@ -1289,15 +1291,39 @@ final class AppModel: ObservableObject {
         activeDiscoverPDFCacheTask?.cancel()
     }
 
-    func libraryPaper(for arxivPaper: ArxivFeedPaper) -> Paper? {
+    func libraryPaper(for arxivPaper: ArxivFeedPaper, includePlaceholders: Bool = true) -> Paper? {
         let absURL = arxivPaper.links.abs
         return papers.first { paper in
-            paper.sourceURL == absURL || paper.sourceURL?.contains(arxivPaper.id) == true
+            if !includePlaceholders, paper.isArxivImportPlaceholder {
+                return false
+            }
+            return paper.sourceURL == absURL || paper.sourceURL?.contains(arxivPaper.id) == true
         }
     }
 
+    func arxivImportPlaceholderDetail(for paper: Paper) -> String {
+        guard let canonicalID = paper.arxivImportPlaceholderCanonicalID else {
+            return paper.authors.isEmpty ? "Authors not set" : paper.authors.joined(separator: ", ")
+        }
+        if let failure = failedArxivLibraryImportMessagesByID[canonicalID] {
+            return globalLanguageMode == .chinese ? "导入失败 · \(failure)" : "Import failed · \(failure)"
+        }
+        if pendingArxivLibraryImportIDs.contains(canonicalID) {
+            return globalLanguageMode == .chinese ? "正在缓存 arXiv 元数据和 PDF..." : "Caching arXiv metadata and PDF..."
+        }
+        return globalLanguageMode == .chinese ? "已加入 arXiv 导入队列" : "Queued for arXiv import"
+    }
+
     func openArxivPaper(_ arxivPaper: ArxivFeedPaper) async {
-        if let existing = libraryPaper(for: arxivPaper) {
+        if let pendingPaper = paper(matchingArxivCanonicalID: arxivPaper.id, includePlaceholders: true),
+           pendingPaper.isArxivImportPlaceholder,
+           pendingArxivLibraryImportIDs.contains(arxivPaper.id) {
+            route = .library
+            selectedLibraryPaper = pendingPaper
+            postNotice(kind: .info, title: "arXiv Import Running", message: arxivPaper.id)
+            return
+        }
+        if let existing = libraryPaper(for: arxivPaper, includePlaceholders: false) {
             openPaper(existing)
             return
         }
@@ -1328,7 +1354,14 @@ final class AppModel: ObservableObject {
             guard let repository else {
                 throw AppModelError.repositoryUnavailable
             }
-            if let existing = libraryPaper(for: arxivPaper) {
+            if let pendingPaper = paper(matchingArxivCanonicalID: arxivPaper.id, includePlaceholders: true),
+               pendingPaper.isArxivImportPlaceholder,
+               pendingArxivLibraryImportIDs.contains(arxivPaper.id) {
+                selectedLibraryPaper = pendingPaper
+                postNotice(kind: .info, title: "arXiv Import Already Queued", message: arxivPaper.id)
+                return
+            }
+            if let existing = libraryPaper(for: arxivPaper, includePlaceholders: false) {
                 try assignTags(named: selectedTagNames, to: existing, repository: repository)
                 try reloadLibrary()
                 openPaper(existing)
@@ -1337,6 +1370,62 @@ final class AppModel: ObservableObject {
             let paper = try await importArxivPaper(arxivPaper, isSaved: true)
             try assignTags(named: selectedTagNames, to: paper, repository: repository)
             try reloadLibrary()
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func enqueueArxivIDsForLibrary(_ versionedIDs: [String], categoryID: String?) {
+        let ids = uniqueVersionedArxivIDs(versionedIDs)
+        guard !ids.isEmpty else {
+            return
+        }
+        do {
+            guard let repository else {
+                throw AppModelError.repositoryUnavailable
+            }
+            var queuedIDs: [String] = []
+            var placeholderPaperIDs: [String] = []
+            var alreadyAvailableCount = 0
+            for versionedID in ids {
+                let canonicalID = ArxivIDExtractor.canonicalID(from: versionedID)
+                if let existing = paper(matchingArxivCanonicalID: canonicalID, includePlaceholders: false) {
+                    try transferAndDeleteArxivImportPlaceholder(canonicalID: canonicalID, toPaperID: existing.id, categoryID: categoryID, repository: repository)
+                    alreadyAvailableCount += 1
+                    continue
+                }
+
+                let placeholder = makeArxivImportPlaceholderPaper(canonicalID: canonicalID)
+                try repository.upsertPaper(placeholder)
+                if let categoryID {
+                    try repository.assignPaper(placeholder.id, toCategory: categoryID)
+                }
+                placeholderPaperIDs.append(placeholder.id)
+                failedArxivLibraryImportMessagesByID.removeValue(forKey: canonicalID)
+                if !pendingArxivLibraryImportIDs.contains(canonicalID) {
+                    pendingArxivLibraryImportIDs.insert(canonicalID)
+                    queuedIDs.append(versionedID)
+                }
+            }
+
+            try reloadLibrary()
+            route = .library
+            if let firstPlaceholderID = placeholderPaperIDs.first,
+               let placeholder = papers.first(where: { $0.id == firstPlaceholderID }) {
+                selectedLibraryPaper = placeholder
+            }
+            if !queuedIDs.isEmpty {
+                postNotice(
+                    kind: .info,
+                    title: "arXiv Import Started",
+                    message: "\(queuedIDs.count) queued\(alreadyAvailableCount > 0 ? " · \(alreadyAvailableCount) already ready" : "")"
+                )
+                Task { [weak self] in
+                    await self?.completeQueuedArxivLibraryImports(queuedIDs, categoryID: categoryID)
+                }
+            } else if alreadyAvailableCount > 0 {
+                postNotice(kind: .info, title: "Already in Library", message: "\(alreadyAvailableCount) paper\(alreadyAvailableCount == 1 ? "" : "s")")
+            }
         } catch {
             errorMessage = String(describing: error)
         }
@@ -1354,10 +1443,8 @@ final class AppModel: ObservableObject {
                 throw AppModelError.arxivMetadataNotFound(versionedID)
             }
 
-            if let existing = libraryPaper(for: arxivPaper) {
-                if let categoryID {
-                    try repository.assignPaper(existing.id, toCategory: categoryID)
-                }
+            if let existing = libraryPaper(for: arxivPaper, includePlaceholders: false) {
+                try transferAndDeleteArxivImportPlaceholder(canonicalID: canonicalID, toPaperID: existing.id, categoryID: categoryID, repository: repository)
                 try reloadLibrary()
                 selectedLibraryPaper = papers.first { $0.id == existing.id } ?? existing
                 return LibraryArxivImportOutcome(
@@ -1370,9 +1457,7 @@ final class AppModel: ObservableObject {
             }
 
             let importedPaper = try await importArxivPaper(arxivPaper, isSaved: true)
-            if let categoryID {
-                try repository.assignPaper(importedPaper.id, toCategory: categoryID)
-            }
+            try transferAndDeleteArxivImportPlaceholder(canonicalID: canonicalID, toPaperID: importedPaper.id, categoryID: categoryID, repository: repository)
             try reloadLibrary()
             selectedLibraryPaper = papers.first { $0.id == importedPaper.id } ?? importedPaper
             return LibraryArxivImportOutcome(
@@ -1393,6 +1478,92 @@ final class AppModel: ObservableObject {
                 message: message
             )
         }
+    }
+
+    private func completeQueuedArxivLibraryImports(_ versionedIDs: [String], categoryID: String?) async {
+        var readyCount = 0
+        for versionedID in versionedIDs {
+            let outcome = await addArxivIDToLibrary(versionedID, categoryID: categoryID)
+            pendingArxivLibraryImportIDs.remove(outcome.canonicalID)
+            switch outcome.state {
+            case .imported:
+                failedArxivLibraryImportMessagesByID.removeValue(forKey: outcome.canonicalID)
+                readyCount += 1
+            case .alreadyInLibrary:
+                failedArxivLibraryImportMessagesByID.removeValue(forKey: outcome.canonicalID)
+            case .failed:
+                failedArxivLibraryImportMessagesByID[outcome.canonicalID] = outcome.message
+                postNotice(kind: .error, title: "arXiv Import Failed", message: "\(outcome.canonicalID) · \(outcome.message)", autoDismissAfter: nil)
+            }
+        }
+        if readyCount > 0 {
+            postNotice(kind: .success, title: "arXiv Import Finished", message: "\(readyCount) paper\(readyCount == 1 ? "" : "s") ready")
+        }
+    }
+
+    private func uniqueVersionedArxivIDs(_ versionedIDs: [String]) -> [String] {
+        var seenCanonicalIDs: Set<String> = []
+        var result: [String] = []
+        for versionedID in versionedIDs {
+            let canonicalID = ArxivIDExtractor.canonicalID(from: versionedID)
+            guard seenCanonicalIDs.insert(canonicalID).inserted else {
+                continue
+            }
+            result.append(versionedID)
+        }
+        return result
+    }
+
+    private func makeArxivImportPlaceholderPaper(canonicalID: String) -> Paper {
+        let now = Date()
+        return Paper(
+            id: Paper.makeArxivImportPlaceholderID(for: canonicalID),
+            filePath: "",
+            fileHash: Paper.arxivImportPlaceholderFileHash(canonicalID: canonicalID),
+            title: canonicalID,
+            authors: [],
+            year: nil,
+            sourceURL: "https://arxiv.org/abs/\(canonicalID)",
+            isSaved: true,
+            importedAt: now,
+            updatedAt: now
+        )
+    }
+
+    private func paper(matchingArxivCanonicalID canonicalID: String, includePlaceholders: Bool) -> Paper? {
+        papers.first { paper in
+            if !includePlaceholders, paper.isArxivImportPlaceholder {
+                return false
+            }
+            return paper.arxivImportPlaceholderCanonicalID == canonicalID
+                || paper.sourceURL == "https://arxiv.org/abs/\(canonicalID)"
+                || paper.sourceURL?.contains(canonicalID) == true
+        }
+    }
+
+    private func transferAndDeleteArxivImportPlaceholder(
+        canonicalID: String,
+        toPaperID paperID: String,
+        categoryID: String?,
+        repository: PaperRepository
+    ) throws {
+        let placeholderID = Paper.makeArxivImportPlaceholderID(for: canonicalID)
+        if let categoryID {
+            try repository.assignPaper(paperID, toCategory: categoryID)
+        }
+        guard placeholderID != paperID,
+              try repository.fetchPapers(ids: [placeholderID]).first != nil else {
+            return
+        }
+        let placeholderCategoryIDs = try repository.fetchCategoryIDs(forPaperID: placeholderID)
+        let placeholderTags = try repository.fetchTags(forPaperID: placeholderID)
+        for categoryID in placeholderCategoryIDs {
+            try repository.assignPaper(paperID, toCategory: categoryID)
+        }
+        for tag in placeholderTags {
+            try repository.assignPaper(paperID, toTag: tag.id)
+        }
+        try repository.deletePapers(ids: [placeholderID])
     }
 
     func saveCachedPaperToLibrary(_ paper: Paper, selectedTagNames: [String] = []) {
