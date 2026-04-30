@@ -776,12 +776,32 @@ func runUILayoutSourceChecks() throws {
         "Discover cards should show per-paper processing and cache state"
     )
     try check(
-        discoverSource.contains("activeFilterChips"),
-        "Discover should show removable active filter chips"
+        discoverSource.contains("DatePicker(") && discoverSource.contains(".datePickerStyle(.compact)"),
+        "Discover date range controls should open native date picker popovers instead of relying on typed text fields"
     )
     try check(
-        discoverSource.contains("Cache visible"),
-        "Discover cache actions should clarify visible versus full-result scope"
+        discoverSource.contains("[DiscoverQuickRange.today, .last7Days, .last30Days]"),
+        "Discover quick ranges should be limited to Today, Last 7 Days, and Last 30 Days"
+    )
+    try check(
+        !discoverSource.contains("ArxivSourceBadge"),
+        "Discover toolbar should not render the decorative arXiv source badge"
+    )
+    try check(
+        !discoverSource.contains("Cache PDFs") && !discoverSource.contains("Cache visible"),
+        "Discover toolbar should not expose a separate PDF cache action"
+    )
+    try check(
+        discoverSource.contains("DiscoverProcessSelectionSheet"),
+        "Discover Process Results should open a selection sheet before starting processing"
+    )
+    try check(
+        appModelSource.contains("discoverLastProcessPaperIDs") && appModelSource.contains("saveDiscoverProcessSelection"),
+        "Discover should remember the user's last process selection"
+    )
+    try check(
+        discoverSource.contains("activeFilterChips"),
+        "Discover should show removable active filter chips"
     )
 
     try check(

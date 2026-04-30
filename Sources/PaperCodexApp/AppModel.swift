@@ -33,6 +33,22 @@ enum ArxivSaveOrganization: String, CaseIterable, Identifiable {
     }
 }
 
+enum DiscoverProcessSource: String, CaseIterable, Identifiable {
+    case visible
+    case allResults = "all-results"
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .visible:
+            "Visible Results"
+        case .allResults:
+            "All Results"
+        }
+    }
+}
+
 struct PDFSelectionInfo: Equatable {
     var text: String
     var page: Int
@@ -119,6 +135,8 @@ private let embeddingProviderAPIKeyAccount = "default"
 private let arxivSaveOrganizationDefaultsKey = "PaperCodexArxivSaveOrganization"
 private let quickPromptsDefaultsKey = "PaperCodexQuickPrompts"
 private let librarySidebarWidthDefaultsKey = "PaperCodexLibrarySidebarWidth"
+private let discoverLastProcessSourceDefaultsKey = "PaperCodexDiscoverLastProcessSource"
+private let discoverLastProcessPaperIDsDefaultsKey = "PaperCodexDiscoverLastProcessPaperIDs"
 private let defaultDiscoverCodexConcurrency = 10
 
 private func loadDiscoverCodexConcurrencyFromDefaults() -> Int {
@@ -143,6 +161,18 @@ private func saveQuickPromptsToDefaults(_ prompts: [QuickPrompt]) {
     if let data = try? JSONEncoder().encode(prompts) {
         UserDefaults.standard.set(data, forKey: quickPromptsDefaultsKey)
     }
+}
+
+private func loadDiscoverLastProcessSourceFromDefaults() -> DiscoverProcessSource {
+    guard let value = UserDefaults.standard.string(forKey: discoverLastProcessSourceDefaultsKey),
+          let source = DiscoverProcessSource(rawValue: value) else {
+        return .visible
+    }
+    return source
+}
+
+private func loadDiscoverLastProcessPaperIDsFromDefaults() -> Set<String> {
+    Set(UserDefaults.standard.stringArray(forKey: discoverLastProcessPaperIDsDefaultsKey) ?? [])
 }
 
 private func loadCodexSystemPromptFromDefaults(languageMode: PaperCodexLanguageMode) -> String {
@@ -314,6 +344,8 @@ final class AppModel: ObservableObject {
     @Published var arxivAssetURLs: [String: URL] = [:]
     @Published var arxivPDFThumbnailURLsByID: [String: [URL]] = [:]
     @Published var discoverPaperInteractionStateByID: [String: DiscoverPaperInteractionState] = [:]
+    @Published var discoverLastProcessSource: DiscoverProcessSource = loadDiscoverLastProcessSourceFromDefaults()
+    @Published var discoverLastProcessPaperIDs: Set<String> = loadDiscoverLastProcessPaperIDsFromDefaults()
     @Published var isLoadingArxivFeed = false
     @Published var isRefreshingArxivDates = false
     @Published var isPreloadingArxivAssets = false
@@ -1026,6 +1058,13 @@ final class AppModel: ObservableObject {
                 }
             }
         }
+    }
+
+    func saveDiscoverProcessSelection(source: DiscoverProcessSource, paperIDs: [String]) {
+        discoverLastProcessSource = source
+        discoverLastProcessPaperIDs = Set(paperIDs)
+        UserDefaults.standard.set(source.rawValue, forKey: discoverLastProcessSourceDefaultsKey)
+        UserDefaults.standard.set(paperIDs, forKey: discoverLastProcessPaperIDsDefaultsKey)
     }
 
     func cancelDiscoverProcessing() {

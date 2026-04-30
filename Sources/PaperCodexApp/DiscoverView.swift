@@ -14,6 +14,7 @@ struct DiscoverView: View {
     @State private var paperPendingSave: ArxivFeedPaper?
     @State private var previewPaper: ArxivFeedPaper?
     @State private var discoverRowHeights: [Int: CGFloat] = [:]
+    @State private var isShowingProcessSelection = false
 
     private var papers: [ArxivFeedPaper] {
         var result = model.arxivFeed?.papers ?? []
@@ -121,6 +122,27 @@ struct DiscoverView: View {
                     },
                     onCancel: {
                         paperPendingSave = nil
+                    }
+                )
+            }
+            .sheet(isPresented: $isShowingProcessSelection) {
+                DiscoverProcessSelectionSheet(
+                    visiblePapers: papers,
+                    allPapers: model.arxivFeed?.papers ?? papers,
+                    enrichmentsByID: model.discoverEnrichmentsByID,
+                    initialSource: model.discoverLastProcessSource,
+                    initialSelectedPaperIDs: model.discoverLastProcessPaperIDs,
+                    languageMode: model.globalLanguageMode,
+                    onConfirm: { source, selectedPaperIDs in
+                        isShowingProcessSelection = false
+                        model.saveDiscoverProcessSelection(source: source, paperIDs: selectedPaperIDs)
+                        let selectedPapers = processPapers(source: source, selectedPaperIDs: selectedPaperIDs)
+                        Task {
+                            await model.processCurrentDiscoverResults(selectedPapers)
+                        }
+                    },
+                    onCancel: {
+                        isShowingProcessSelection = false
                     }
                 )
             }
@@ -395,6 +417,25 @@ struct DiscoverView: View {
         }
     }
 
+    private func processPapers(source: DiscoverProcessSource, selectedPaperIDs: [String]) -> [ArxivFeedPaper] {
+        let selectedIDSet = Set(selectedPaperIDs)
+        let sourcePapers: [ArxivFeedPaper]
+        switch source {
+        case .visible:
+            sourcePapers = papers
+        case .allResults:
+            sourcePapers = model.arxivFeed?.papers ?? papers
+        }
+        var seen: Set<String> = []
+        return sourcePapers.filter { paper in
+            guard selectedIDSet.contains(paper.id), !seen.contains(paper.id) else {
+                return false
+            }
+            seen.insert(paper.id)
+            return true
+        }
+    }
+
     private var toolbar: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 12) {
@@ -417,11 +458,7 @@ struct DiscoverView: View {
                     }
 
                 FlowLayout(spacing: 8) {
-                    ArxivSourceBadge()
-
-                    DateRangeFields(start: $model.discoverStartDate, end: $model.discoverEndDate)
-
-                    QuickRangeButtons { range in
+                    DiscoverDateControls(start: $model.discoverStartDate, end: $model.discoverEndDate) { range in
                         model.applyDiscoverQuickRange(range)
                     }
 
@@ -463,24 +500,8 @@ struct DiscoverView: View {
                             tint: .indigo,
                             disabled: papers.isEmpty || model.isSearchingDiscover
                         ) {
-                            let visible = papers
-                            Task {
-                                await model.processCurrentDiscoverResults(visible)
-                            }
+                            isShowingProcessSelection = true
                         }
-
-                        Menu {
-                            Button("Cache visible") {
-                                model.startCachingDiscoverPDFs(papers)
-                            }
-                            Button("Cache all results") {
-                                model.startCachingDiscoverPDFs(model.arxivFeed?.papers ?? papers)
-                            }
-                        } label: {
-                            Label("Cache PDFs", systemImage: "tray.and.arrow.down")
-                        }
-                        .menuStyle(.button)
-                        .disabled((model.arxivFeed?.papers.isEmpty ?? papers.isEmpty) || model.isSearchingDiscover)
                     }
 
                 }
@@ -775,29 +796,6 @@ private struct DiscoverPaperStatusBadge: View {
     }
 }
 
-private struct ArxivSourceBadge: View {
-    var body: some View {
-        HStack(spacing: 5) {
-            Text("ar")
-                .font(.system(size: 11, weight: .bold, design: .serif))
-            Text("Xiv")
-                .font(.system(size: 12, weight: .semibold))
-        }
-        .foregroundStyle(Color(nsColor: .systemRed))
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color(nsColor: .systemRed).opacity(0.09))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(Color(nsColor: .systemRed).opacity(0.24), lineWidth: 1)
-                )
-        )
-        .help("Daily arXiv source")
-    }
-}
-
 private struct ToolbarActionButton: View {
     @State private var isHovering = false
 
@@ -840,32 +838,96 @@ private struct ToolbarActionButton: View {
     }
 }
 
-private struct DateRangeFields: View {
+private struct DiscoverDateControls: View {
     @Binding var start: String
     @Binding var end: String
+    var onQuickRange: (DiscoverQuickRange) -> Void
 
     var body: some View {
-        HStack(spacing: 5) {
+        HStack(spacing: 7) {
             Image(systemName: "calendar")
                 .foregroundStyle(.secondary)
-            TextField("Start", text: $start)
-                .textFieldStyle(.roundedBorder)
-                .font(.system(size: 12.5, weight: .medium).monospacedDigit())
-                .frame(width: 104)
-            Text("to")
+            CompactDiscoverDatePicker(title: "Start", dateString: $start) { value in
+                if DiscoverDateStrings.date(from: value) > DiscoverDateStrings.date(from: end) {
+                    end = value
+                }
+            }
+            Text(LocalizedStringKey("to"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            TextField("End", text: $end)
-                .textFieldStyle(.roundedBorder)
-                .font(.system(size: 12.5, weight: .medium).monospacedDigit())
-                .frame(width: 104)
+            CompactDiscoverDatePicker(title: "End", dateString: $end) { value in
+                if DiscoverDateStrings.date(from: value) < DiscoverDateStrings.date(from: start) {
+                    start = value
+                }
+            }
+            QuickRangeButtons(onSelect: onQuickRange)
         }
         .help("arXiv date range")
     }
 }
 
+private struct CompactDiscoverDatePicker: View {
+    var title: String
+    @Binding var dateString: String
+    var onChange: (String) -> Void
+
+    private var dateBinding: Binding<Date> {
+        Binding {
+            DiscoverDateStrings.date(from: dateString)
+        } set: { newDate in
+            let value = DiscoverDateStrings.string(from: newDate)
+            dateString = value
+            onChange(value)
+        }
+    }
+
+    var body: some View {
+        DatePicker(LocalizedStringKey(title), selection: dateBinding, displayedComponents: .date)
+            .datePickerStyle(.compact)
+            .labelsHidden()
+            .font(.system(size: 12.5, weight: .medium).monospacedDigit())
+            .frame(width: 118)
+            .help(title)
+    }
+}
+
+private enum DiscoverDateStrings {
+    private static let calendar: Calendar = {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .current
+        return calendar
+    }()
+
+    static func date(from value: String) -> Date {
+        let parts = value.split(separator: "-").compactMap { Int($0) }
+        guard parts.count == 3,
+              let date = calendar.date(from: DateComponents(
+                calendar: calendar,
+                timeZone: calendar.timeZone,
+                year: parts[0],
+                month: parts[1],
+                day: parts[2],
+                hour: 12
+              )) else {
+            return Date()
+        }
+        return date
+    }
+
+    static func string(from date: Date) -> String {
+        let components = calendar.dateComponents([.year, .month, .day], from: date)
+        return String(
+            format: "%04d-%02d-%02d",
+            components.year ?? 1970,
+            components.month ?? 1,
+            components.day ?? 1
+        )
+    }
+}
+
 private struct QuickRangeButtons: View {
     var onSelect: (DiscoverQuickRange) -> Void
+    private let ranges: [DiscoverQuickRange] = [DiscoverQuickRange.today, .last7Days, .last30Days]
 
     var body: some View {
         ViewThatFits(in: .horizontal) {
@@ -873,7 +935,7 @@ private struct QuickRangeButtons: View {
                 quickButtons
             }
             Menu {
-                ForEach([DiscoverQuickRange.thisWeek, .thisMonth, .last7Days, .last30Days]) { range in
+                ForEach(ranges) { range in
                     Button(range.title) {
                         onSelect(range)
                     }
@@ -890,13 +952,254 @@ private struct QuickRangeButtons: View {
     }
 
     private var quickButtons: some View {
-        ForEach([DiscoverQuickRange.thisWeek, .thisMonth, .last7Days, .last30Days]) { range in
+        ForEach(ranges) { range in
             Button(range.title) {
                 onSelect(range)
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
             .help(range.title)
+        }
+    }
+}
+
+private struct DiscoverProcessSelectionSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var visiblePapers: [ArxivFeedPaper]
+    var allPapers: [ArxivFeedPaper]
+    var enrichmentsByID: [String: DiscoverPaperEnrichment]
+    var languageMode: PaperCodexLanguageMode
+    var onConfirm: (DiscoverProcessSource, [String]) -> Void
+    var onCancel: () -> Void
+
+    @State private var source: DiscoverProcessSource
+    @State private var selectedPaperIDs: Set<String>
+
+    init(
+        visiblePapers: [ArxivFeedPaper],
+        allPapers: [ArxivFeedPaper],
+        enrichmentsByID: [String: DiscoverPaperEnrichment],
+        initialSource: DiscoverProcessSource,
+        initialSelectedPaperIDs: Set<String>,
+        languageMode: PaperCodexLanguageMode,
+        onConfirm: @escaping (DiscoverProcessSource, [String]) -> Void,
+        onCancel: @escaping () -> Void
+    ) {
+        self.visiblePapers = visiblePapers
+        self.allPapers = allPapers
+        self.enrichmentsByID = enrichmentsByID
+        self.languageMode = languageMode
+        self.onConfirm = onConfirm
+        self.onCancel = onCancel
+        let resolvedSource = Self.resolveSource(initialSource, visiblePapers: visiblePapers, allPapers: allPapers)
+        let candidates = Self.candidatePapers(source: resolvedSource, visiblePapers: visiblePapers, allPapers: allPapers)
+        let validIDs = Set(candidates.map(\.id))
+        let rememberedIDs = initialSelectedPaperIDs.intersection(validIDs)
+        let selectedIDs = rememberedIDs.isEmpty ? Self.defaultSelectedIDs(candidates, enrichmentsByID: enrichmentsByID) : rememberedIDs
+        _source = State(initialValue: resolvedSource)
+        _selectedPaperIDs = State(initialValue: selectedIDs)
+    }
+
+    private var candidatePapers: [ArxivFeedPaper] {
+        Self.candidatePapers(source: source, visiblePapers: visiblePapers, allPapers: allPapers)
+    }
+
+    private var selectedOrderedPaperIDs: [String] {
+        candidatePapers.map(\.id).filter { selectedPaperIDs.contains($0) }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Select Results to Process")
+                    .font(.system(size: 20, weight: .semibold))
+                Text("\(selectedOrderedPaperIDs.count) selected · \(candidatePapers.count) available")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(20)
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 12) {
+                Picker("Result Scope", selection: $source) {
+                    ForEach(DiscoverProcessSource.allCases) { source in
+                        Text(LocalizedStringKey(source.title)).tag(source)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 320)
+
+                HStack(spacing: 8) {
+                    Button("Select Needed") {
+                        selectedPaperIDs = Self.defaultSelectedIDs(candidatePapers, enrichmentsByID: enrichmentsByID)
+                    }
+                    Button("Select All") {
+                        selectedPaperIDs = Set(candidatePapers.map(\.id))
+                    }
+                    Button("Clear") {
+                        selectedPaperIDs = []
+                    }
+                    Spacer()
+                }
+                .controlSize(.small)
+            }
+            .padding(20)
+
+            Divider()
+
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(candidatePapers) { paper in
+                        DiscoverProcessPaperRow(
+                            paper: paper,
+                            enrichment: enrichmentsByID[paper.id],
+                            languageMode: languageMode,
+                            isSelected: Binding(get: {
+                                selectedPaperIDs.contains(paper.id)
+                            }, set: { selected in
+                                if selected {
+                                    selectedPaperIDs.insert(paper.id)
+                                } else {
+                                    selectedPaperIDs.remove(paper.id)
+                                }
+                            })
+                        )
+                        Divider()
+                    }
+                }
+            }
+            .frame(minHeight: 280)
+
+            Divider()
+
+            HStack {
+                Spacer()
+                Button("Cancel") {
+                    onCancel()
+                    dismiss()
+                }
+                Button("Process \(selectedOrderedPaperIDs.count)") {
+                    onConfirm(source, selectedOrderedPaperIDs)
+                    dismiss()
+                }
+                .keyboardShortcut(.defaultAction)
+                .buttonStyle(.borderedProminent)
+                .disabled(selectedOrderedPaperIDs.isEmpty)
+            }
+            .padding(20)
+        }
+        .frame(minWidth: 640, minHeight: 560)
+        .onChange(of: source) { _, _ in
+            reconcileSelectionForCurrentSource()
+        }
+    }
+
+    private func reconcileSelectionForCurrentSource() {
+        let validIDs = Set(candidatePapers.map(\.id))
+        selectedPaperIDs = selectedPaperIDs.intersection(validIDs)
+        if selectedPaperIDs.isEmpty {
+            selectedPaperIDs = Self.defaultSelectedIDs(candidatePapers, enrichmentsByID: enrichmentsByID)
+        }
+    }
+
+    private static func resolveSource(
+        _ source: DiscoverProcessSource,
+        visiblePapers: [ArxivFeedPaper],
+        allPapers: [ArxivFeedPaper]
+    ) -> DiscoverProcessSource {
+        if source == .allResults, allPapers.isEmpty, !visiblePapers.isEmpty {
+            return .visible
+        }
+        return source
+    }
+
+    private static func candidatePapers(
+        source: DiscoverProcessSource,
+        visiblePapers: [ArxivFeedPaper],
+        allPapers: [ArxivFeedPaper]
+    ) -> [ArxivFeedPaper] {
+        let sourcePapers = source == .allResults ? allPapers : visiblePapers
+        var seen: Set<String> = []
+        return sourcePapers.filter { paper in
+            guard !seen.contains(paper.id) else {
+                return false
+            }
+            seen.insert(paper.id)
+            return true
+        }
+    }
+
+    private static func defaultSelectedIDs(
+        _ papers: [ArxivFeedPaper],
+        enrichmentsByID: [String: DiscoverPaperEnrichment]
+    ) -> Set<String> {
+        let needed = papers.filter { paper in
+            guard let enrichment = enrichmentsByID[paper.id] else {
+                return true
+            }
+            return enrichment.error != nil || !enrichment.isCurrent
+        }
+        return Set((needed.isEmpty ? papers : needed).map(\.id))
+    }
+}
+
+private struct DiscoverProcessPaperRow: View {
+    var paper: ArxivFeedPaper
+    var enrichment: DiscoverPaperEnrichment?
+    var languageMode: PaperCodexLanguageMode
+    @Binding var isSelected: Bool
+
+    var body: some View {
+        Toggle(isOn: $isSelected) {
+            HStack(alignment: .top, spacing: 10) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(paper.displayTitle(language: languageMode.discoverLanguageCode))
+                        .font(.system(size: 13.5, weight: .medium))
+                        .lineLimit(2)
+                    Text("\(paper.id) · \(paper.primaryCategory ?? paper.categories.first ?? "arXiv")")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 12)
+                Text(LocalizedStringKey(statusTitle))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(statusTint)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 4)
+                    .background(statusTint.opacity(0.10), in: Capsule())
+            }
+            .contentShape(Rectangle())
+        }
+        .toggleStyle(.checkbox)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 10)
+    }
+
+    private var statusTitle: String {
+        guard let enrichment else {
+            return "Not Processed"
+        }
+        if enrichment.error != nil {
+            return "Failed"
+        }
+        if enrichment.isCurrent {
+            return "Processed"
+        }
+        return "Needs Update"
+    }
+
+    private var statusTint: Color {
+        switch statusTitle {
+        case "Processed":
+            .green
+        case "Failed":
+            .red
+        case "Needs Update":
+            .orange
+        default:
+            .secondary
         }
     }
 }
