@@ -382,23 +382,22 @@ struct PDFKitView: NSViewRepresentable {
             let pagePoint = pdfView.convert(viewPoint, to: page)
             let clickedLine = page.selectionForLine(at: pagePoint)?.string?
                 .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            guard !clickedLine.isEmpty else {
-                closeCitationPopover()
-                return false
-            }
 
-            if let entry = referenceResolver.referenceEntry(containingLine: clickedLine, page: pageNumber) {
+            if !clickedLine.isEmpty,
+               let entry = referenceResolver.referenceEntry(containingLine: clickedLine, page: pageNumber) {
                 showReferenceCard(entry, at: viewPoint, in: pdfView)
                 return true
             }
-            guard let clickedText = page.selectionForWord(at: pagePoint)?.string?
+            if !clickedLine.isEmpty,
+               let clickedText = page.selectionForWord(at: pagePoint)?.string?
                 .trimmingCharacters(in: .whitespacesAndNewlines),
-                !clickedText.isEmpty else {
-                closeCitationPopover()
-                return false
-            }
-            if let preview = referenceResolver.preview(forLine: clickedLine, clickedText: clickedText, page: pageNumber) {
+               !clickedText.isEmpty,
+               let preview = referenceResolver.preview(forLine: clickedLine, clickedText: clickedText, page: pageNumber) {
                 showCitationPreviewPopover(preview, at: viewPoint, in: pdfView)
+                return true
+            }
+            if let preview = Self.pdfLinkPreview(at: pagePoint, on: page, document: document, clickedLine: clickedLine) {
+                showPDFLinkPreviewPopover(preview, at: viewPoint, in: pdfView)
                 return true
             }
             closeCitationPopover()
@@ -423,6 +422,35 @@ struct PDFKitView: NSViewRepresentable {
                 contentSize: NSSize(width: 420, height: 230),
                 rootView: ReferenceEntryCard(entry: entry)
             )
+        }
+
+        @MainActor
+        private func showPDFLinkPreviewPopover(_ preview: PDFLinkPreview, at point: NSPoint, in pdfView: PDFView) {
+            showPopover(
+                at: point,
+                in: pdfView,
+                contentSize: NSSize(width: 400, height: preview.sourceText == nil ? 156 : 196),
+                rootView: PDFLinkPreviewCard(preview: preview) { [weak self, weak pdfView] in
+                    guard let pdfView else {
+                        return
+                    }
+                    self?.openPDFLinkPreview(preview, in: pdfView)
+                }
+            )
+        }
+
+        @MainActor
+        private func openPDFLinkPreview(_ preview: PDFLinkPreview, in pdfView: PDFView) {
+            closeCitationPopover()
+            if let url = preview.url {
+                NSWorkspace.shared.open(url)
+                return
+            }
+            if let destination = preview.destination {
+                pdfView.go(to: destination)
+                scheduleViewportReport()
+                reportDocumentStatus()
+            }
         }
 
         @MainActor
@@ -570,6 +598,60 @@ struct PDFKitView: NSViewRepresentable {
             return nil
         }
 
+        private static func pdfLinkPreview(
+            at point: NSPoint,
+            on page: PDFPage,
+            document: PDFDocument,
+            clickedLine: String
+        ) -> PDFLinkPreview? {
+            guard let annotation = page.annotation(at: point) else {
+                return nil
+            }
+            let sourceText = clippedSourceText(clickedLine)
+            if let url = annotation.url ?? (annotation.action as? PDFActionURL)?.url {
+                return PDFLinkPreview(
+                    title: "External Link",
+                    target: url.absoluteString,
+                    sourceText: sourceText,
+                    actionTitle: "Open",
+                    systemImage: "link",
+                    url: url,
+                    destination: nil
+                )
+            }
+            let destination = annotation.destination ?? (annotation.action as? PDFActionGoTo)?.destination
+            guard let destination else {
+                return nil
+            }
+            let pageNumber: Int?
+            if let destinationPage = destination.page {
+                let index = document.index(for: destinationPage)
+                pageNumber = index >= 0 ? index + 1 : nil
+            } else {
+                pageNumber = nil
+            }
+            return PDFLinkPreview(
+                title: "PDF Link",
+                target: pageNumber.map { "Page \($0)" } ?? "Internal destination",
+                sourceText: sourceText,
+                actionTitle: "Jump",
+                systemImage: "arrow.turn.down.right",
+                url: nil,
+                destination: destination
+            )
+        }
+
+        private static func clippedSourceText(_ text: String) -> String? {
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else {
+                return nil
+            }
+            if trimmed.count <= 150 {
+                return trimmed
+            }
+            return "\(trimmed.prefix(147))..."
+        }
+
         private static func makeReferenceResolver(from document: PDFDocument?) -> PDFReferenceResolver {
             guard let document else {
                 return PDFReferenceResolver(pageTexts: [:])
@@ -586,6 +668,16 @@ struct PDFKitView: NSViewRepresentable {
             return PDFReferenceResolver(pageTexts: pageTexts)
         }
     }
+}
+
+private struct PDFLinkPreview {
+    var title: String
+    var target: String
+    var sourceText: String?
+    var actionTitle: String
+    var systemImage: String
+    var url: URL?
+    var destination: PDFDestination?
 }
 
 private struct InTextCitationPreview: View {
@@ -630,6 +722,40 @@ private struct InTextCitationPreview: View {
             return "[\(marker)] \(reference.title)"
         }
         return reference.title
+    }
+}
+
+private struct PDFLinkPreviewCard: View {
+    var preview: PDFLinkPreview
+    var onOpen: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label(preview.title, systemImage: preview.systemImage)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Color.accentColor)
+            Text(preview.target)
+                .font(.system(size: 13.5, weight: .semibold))
+                .lineLimit(3)
+                .textSelection(.enabled)
+            if let sourceText = preview.sourceText {
+                Text(sourceText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(3)
+            }
+            HStack {
+                Spacer()
+                Button {
+                    onOpen()
+                } label: {
+                    Label(preview.actionTitle, systemImage: "arrow.up.right")
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(15)
+        .frame(width: 400, alignment: .leading)
     }
 }
 

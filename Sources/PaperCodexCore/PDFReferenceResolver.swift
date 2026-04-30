@@ -31,6 +31,34 @@ public struct PDFReferenceResolver: Sendable {
 
     private let normalizedReferenceLines: [String: PDFReferenceEntry]
 
+    private struct ReferenceTitleTemplate: Sendable {
+        var pattern: String
+        var titleGroup: Int
+    }
+
+    private static let titleTemplates: [ReferenceTitleTemplate] = [
+        ReferenceTitleTemplate(
+            pattern: #"["“”']([^"“”']{4,240})["“”']"#,
+            titleGroup: 1
+        ),
+        ReferenceTitleTemplate(
+            pattern: #"\(\d{4}[a-z]?\)\.?\s+(.+?)(?:\.\s+(?:In|Proceedings|Advances|Journal|Conference|Transactions|NeurIPS|ICML|ICLR|CVPR|ACL|EMNLP|arXiv|CoRR|doi:|https?://)|\.\s*$)"#,
+            titleGroup: 1
+        ),
+        ReferenceTitleTemplate(
+            pattern: #"\b\d{4}[a-z]?\.\s+(.+?)(?:\.\s+(?:In|Proceedings|Advances|Journal|Conference|Transactions|NeurIPS|ICML|ICLR|CVPR|ACL|EMNLP|arXiv|CoRR|doi:|https?://)|\.\s*$)"#,
+            titleGroup: 1
+        ),
+        ReferenceTitleTemplate(
+            pattern: #",\s*([^,\.]{4,240}?)\s*,\s*(?:arXiv|CoRR|doi:|https?://)"#,
+            titleGroup: 1
+        ),
+        ReferenceTitleTemplate(
+            pattern: #",\s*([^,]{4,240}?)\s*,\s+(?:in\s+)?(?:Proceedings|Proc\.|Advances|Journal|Conference|Transactions|NeurIPS|ICML|ICLR|CVPR|ACL|EMNLP|IEEE|ACM)\b"#,
+            titleGroup: 1
+        )
+    ]
+
     public init(pageTexts: [Int: String]) {
         references = Self.parseReferences(pageTexts: pageTexts)
         normalizedReferenceLines = Self.makeReferenceLineIndex(references)
@@ -236,6 +264,14 @@ public struct PDFReferenceResolver: Sendable {
     private static func title(from referenceText: String) -> String {
         let withoutMarker = referenceText
             .replacingOccurrences(of: #"^\s*(?:\[\d+\]|\d+[.)])\s*"#, with: "", options: .regularExpression)
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+        for template in titleTemplates {
+            if let title = firstCapture(pattern: template.pattern, group: template.titleGroup, in: withoutMarker) {
+                return cleanTitle(title)
+            }
+        }
         let parts = withoutMarker
             .components(separatedBy: ". ")
             .map { $0.trimmingCharacters(in: CharacterSet(charactersIn: " .")) }
@@ -248,7 +284,7 @@ public struct PDFReferenceResolver: Sendable {
             }
             return parts[yearIndex - 1]
         }
-        return parts.max(by: { $0.count < $1.count }) ?? withoutMarker
+        return cleanTitle(parts.max(by: { $0.count < $1.count }) ?? withoutMarker)
     }
 
     private static func isReferenceHeading(_ line: String) -> Bool {
@@ -280,6 +316,22 @@ public struct PDFReferenceResolver: Sendable {
             return true
         }
         return hitTokens.contains(requiredHitToken)
+    }
+
+    private static func cleanTitle(_ rawTitle: String) -> String {
+        rawTitle
+            .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: #""'“”.,;:"#)))
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+    }
+
+    private static func firstCapture(pattern: String, group: Int, in text: String) -> String? {
+        guard let match = firstMatch(pattern: pattern, in: text),
+              match.numberOfRanges > group,
+              let range = Range(match.range(at: group), in: text) else {
+            return nil
+        }
+        let capture = String(text[range])
+        return capture.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : capture
     }
 
     private static func matches(pattern: String, in text: String) -> [NSTextCheckingResult] {

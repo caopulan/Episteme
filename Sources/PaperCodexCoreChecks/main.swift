@@ -690,6 +690,18 @@ func runUILayoutSourceChecks() throws {
         "PDFKit view should render non-reference citations as a lightweight preview popup"
     )
     try check(
+        pdfKitSource.contains("showPDFLinkPreviewPopover"),
+        "PDFKit view should preview PDF hyperlinks before following them"
+    )
+    try check(
+        pdfKitSource.contains("PDFLinkPreviewCard"),
+        "PDFKit view should render PDF hyperlink previews as a card"
+    )
+    try check(
+        pdfKitSource.contains("PDFActionURL") && pdfKitSource.contains("PDFActionGoTo"),
+        "PDFKit view should intercept external and internal PDF link actions"
+    )
+    try check(
         readerSource.contains("model.returnFromReader()"),
         "reader back navigation should return to the previous browsing surface instead of always resetting to Library"
     )
@@ -1754,6 +1766,18 @@ func runPDFChecks() throws {
     try check(unnumberedPreview?.references.first?.title == "Attention Is All You Need", "PDF resolver should parse unnumbered author-year references")
     let unnumberedReferenceEntry = unnumberedResolver.referenceEntry(containingLine: "Ho, J., Jain, A., Abbeel, P. (2020). Denoising Diffusion Probabilistic Models. NeurIPS.", page: 3)
     try check(unnumberedReferenceEntry?.title == "Denoising Diffusion Probabilistic Models", "PDF resolver should render unnumbered references as cards")
+    let templateResolver = PDFReferenceResolver(pageTexts: [
+        8: """
+        References
+        [3] A. Vaswani, N. Shazeer, N. Parmar, J. Uszkoreit, L. Jones, A. N. Gomez, L. Kaiser, and I. Polosukhin, "Attention Is All You Need," in Advances in Neural Information Processing Systems, 2017.
+        [4] Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones, L., Gomez, A. N., Kaiser, L., & Polosukhin, I. (2017). Attention Is All You Need. Advances in Neural Information Processing Systems.
+        [5] Vaswani, Ashish, et al. "Attention Is All You Need." Advances in Neural Information Processing Systems 30 (2017).
+        [6] Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N. Gomez, Lukasz Kaiser, and Illia Polosukhin. 2017. Attention Is All You Need. In Proceedings of NeurIPS.
+        [7] A. Vaswani et al., Attention Is All You Need, arXiv:1706.03762, 2017.
+        """
+    ])
+    let templateTitles = templateResolver.references.map(\.title)
+    try check(templateTitles == Array(repeating: "Attention Is All You Need", count: 5), "PDF resolver should extract titles from common reference templates")
 }
 
 func runCodexCLIChecks() throws {
