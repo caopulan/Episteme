@@ -8,6 +8,8 @@ swift build
 
 binary_path="$(swift build --show-bin-path)/PaperCodexApp"
 app_path="${PAPER_CODEX_APP_PATH:-$HOME/Applications/PaperCodex.app}"
+bundle_identifier="${PAPER_CODEX_BUNDLE_IDENTIFIER:-local.paper-codex.app}"
+codesign_identity="${PAPER_CODEX_CODESIGN_IDENTITY:--}"
 contents_path="$app_path/Contents"
 macos_path="$contents_path/MacOS"
 resources_path="$contents_path/Resources"
@@ -21,7 +23,7 @@ if compgen -G "Sources/PaperCodexApp/Resources/*.lproj" > /dev/null; then
   cp -R Sources/PaperCodexApp/Resources/*.lproj "$resources_path/"
 fi
 
-cat > "$contents_path/Info.plist" <<'PLIST'
+cat > "$contents_path/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -30,7 +32,7 @@ cat > "$contents_path/Info.plist" <<'PLIST'
   <key>CFBundleExecutable</key>
   <string>PaperCodexApp</string>
   <key>CFBundleIdentifier</key>
-  <string>local.paper-codex.app</string>
+  <string>${bundle_identifier}</string>
   <key>CFBundleName</key>
   <string>Paper Codex</string>
   <key>CFBundleDisplayName</key>
@@ -52,5 +54,19 @@ cat > "$contents_path/Info.plist" <<'PLIST'
 </dict>
 </plist>
 PLIST
+
+codesign_args=(
+  --force
+  --deep
+  --sign "$codesign_identity"
+  --identifier "$bundle_identifier"
+)
+
+if [[ "$codesign_identity" == "-" ]]; then
+  codesign_args+=(--requirements "=designated => identifier \"$bundle_identifier\"")
+fi
+
+codesign "${codesign_args[@]}" "$app_path"
+codesign --verify --deep --strict --verbose=2 "$app_path"
 
 echo "$app_path"
