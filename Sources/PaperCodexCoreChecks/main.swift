@@ -1521,6 +1521,56 @@ func runCitationChecks() throws {
         "markdown renderer should not treat math brackets before a citation as the citation link label"
     )
 
+    let listTypeSwitch = ChatMarkdownRenderer.renderFragment(markdown: "1. Keep ordered\n- Keep unordered")
+    try check(
+        listTypeSwitch.contains("<ol><li>Keep ordered</li></ol>")
+            && listTypeSwitch.contains("<ul><li>Keep unordered</li></ul>"),
+        "markdown renderer should not drop list items when ordered and unordered lists are adjacent"
+    )
+
+    let tableWithConditionalMath = ChatMarkdownRenderer.renderFragment(
+        markdown: """
+        | Formula | Meaning |
+        | --- | --- |
+        | $p(o = 1|x_0,c)$ | normalized probability |
+        """
+    )
+    try check(
+        tableWithConditionalMath.contains("<td>$p(o = 1|x_0,c)$</td><td>normalized probability</td>"),
+        "markdown renderer should not split table cells on pipes inside inline math"
+    )
+
+    let parenthesizedDestinations = ChatMarkdownRenderer.renderFragment(
+        markdown: "[appendix](https://example.test/a_(b)) and ![figure](/tmp/a_(b).png)"
+    )
+    try check(
+        parenthesizedDestinations.contains(#"href="https://example.test/a_(b)""#)
+            && parenthesizedDestinations.contains(#"src="file:///tmp/a_(b).png""#),
+        "markdown renderer should keep balanced parentheses inside link and image destinations"
+    )
+
+    let nestedBracketLabel = ChatMarkdownRenderer.renderFragment(
+        markdown: "[Appendix [A]](https://example.test/appendix)"
+    )
+    try check(
+        nestedBracketLabel.contains(#"<a href="https://example.test/appendix">Appendix [A]</a>"#),
+        "markdown renderer should keep nested brackets inside link labels"
+    )
+
+    let inlineBracketDisplayMath = ChatMarkdownRenderer.renderFragment(
+        markdown: #"用 \[[1-\alpha(x_t)](v_{old}-v^-)\] 表示更新。 [1](papercodex-cite://open?id=paper%3Apaper-a%3Ap5%3Ab17)"#
+    )
+    try check(
+        inlineBracketDisplayMath.contains(#"\[[1-\alpha(x_t)](v_{old}-v^-)\]"#)
+            && !inlineBracketDisplayMath.contains(#"href="v_{old}-v^-""#),
+        "markdown renderer should not parse links inside bracket-delimited math"
+    )
+
+    try check(
+        rendered.contains("MathJax.startup.promise"),
+        "markdown renderer should report height after MathJax finishes typesetting"
+    )
+
     let displayMath = """
     $$
     \\Delta

@@ -115,11 +115,24 @@ public enum ChatMarkdownRenderer {
             window.webkit.messageHandlers.height.postMessage(height);
           }
         }
-        window.addEventListener('load', reportHeight);
+        let mathJaxHeightReports = new WeakSet();
+        function reportHeightAfterMathJax() {
+          if (window.MathJax && window.MathJax.startup && window.MathJax.startup.promise && !mathJaxHeightReports.has(window.MathJax.startup.promise)) {
+            mathJaxHeightReports.add(window.MathJax.startup.promise);
+            window.MathJax.startup.promise.then(function() {
+              reportHeight();
+              setTimeout(reportHeight, 50);
+            }).catch(reportHeight);
+          }
+        }
+        window.addEventListener('load', function() {
+          reportHeight();
+          reportHeightAfterMathJax();
+        });
         window.addEventListener('resize', reportHeight);
-        setTimeout(reportHeight, 50);
-        setTimeout(reportHeight, 250);
-        setTimeout(reportHeight, 1000);
+        setTimeout(function() { reportHeight(); reportHeightAfterMathJax(); }, 50);
+        setTimeout(function() { reportHeight(); reportHeightAfterMathJax(); }, 250);
+        setTimeout(function() { reportHeight(); reportHeightAfterMathJax(); }, 1000);
         </script>
         </body>
         </html>
@@ -259,7 +272,10 @@ public enum ChatMarkdownRenderer {
 
             if let unordered = parseUnorderedListItem(trimmed) {
                 flushParagraph()
-                orderedListItems.removeAll()
+                if !orderedListItems.isEmpty {
+                    html.append("<ol>\(orderedListItems.map { "<li>\($0)</li>" }.joined())</ol>")
+                    orderedListItems.removeAll()
+                }
                 listItems.append(renderInline(unordered))
                 index += 1
                 continue
@@ -267,7 +283,10 @@ public enum ChatMarkdownRenderer {
 
             if let ordered = parseOrderedListItem(trimmed) {
                 flushParagraph()
-                listItems.removeAll()
+                if !listItems.isEmpty {
+                    html.append("<ul>\(listItems.map { "<li>\($0)</li>" }.joined())</ul>")
+                    listItems.removeAll()
+                }
                 orderedListItems.append(renderInline(ordered))
                 index += 1
                 continue
@@ -368,6 +387,14 @@ public enum ChatMarkdownRenderer {
             return text.index(after: closingStart)
         }
 
+        if text[index...].hasPrefix("\\[") {
+            let afterOpening = text.index(index, offsetBy: 2)
+            guard let closingStart = text[afterOpening...].range(of: "\\]")?.lowerBound else {
+                return nil
+            }
+            return text.index(after: closingStart)
+        }
+
         return nil
     }
 
@@ -375,7 +402,7 @@ public enum ChatMarkdownRenderer {
         in text: String,
         labelStart: String.Index
     ) -> (labelEnd: String.Index, destinationStart: String.Index, destinationEnd: String.Index)? {
-        guard let labelEnd = text[labelStart...].firstIndex(of: "]") else {
+        guard let labelEnd = inlineLinkLabelEnd(in: text, start: labelStart) else {
             return nil
         }
         let openParen = text.index(after: labelEnd)
@@ -383,10 +410,68 @@ public enum ChatMarkdownRenderer {
             return nil
         }
         let destinationStart = text.index(after: openParen)
-        guard let destinationEnd = text[destinationStart...].firstIndex(of: ")") else {
+        guard let destinationEnd = inlineLinkDestinationEnd(in: text, start: destinationStart) else {
             return nil
         }
         return (labelEnd, destinationStart, destinationEnd)
+    }
+
+    private static func inlineLinkLabelEnd(in text: String, start: String.Index) -> String.Index? {
+        var index = start
+        var bracketDepth = 0
+
+        while index < text.endIndex {
+            if text[index] == "\\" {
+                let next = text.index(after: index)
+                guard next < text.endIndex else {
+                    return nil
+                }
+                index = text.index(after: next)
+                continue
+            }
+
+            if text[index] == "[" {
+                bracketDepth += 1
+            } else if text[index] == "]" {
+                if bracketDepth == 0 {
+                    return index
+                }
+                bracketDepth -= 1
+            }
+
+            index = text.index(after: index)
+        }
+
+        return nil
+    }
+
+    private static func inlineLinkDestinationEnd(in text: String, start: String.Index) -> String.Index? {
+        var index = start
+        var parenthesisDepth = 0
+
+        while index < text.endIndex {
+            if text[index] == "\\" {
+                let next = text.index(after: index)
+                guard next < text.endIndex else {
+                    return nil
+                }
+                index = text.index(after: next)
+                continue
+            }
+
+            if text[index] == "(" {
+                parenthesisDepth += 1
+            } else if text[index] == ")" {
+                if parenthesisDepth == 0 {
+                    return index
+                }
+                parenthesisDepth -= 1
+            }
+
+            index = text.index(after: index)
+        }
+
+        return nil
     }
 
     private static func parseHeading(_ line: String) -> (level: Int, text: String)? {
@@ -475,11 +560,102 @@ public enum ChatMarkdownRenderer {
         if trimmed.hasPrefix("|") {
             trimmed.removeFirst()
         }
-        if trimmed.hasSuffix("|") {
+        if trimmed.hasSuffix("|"), !isEscapedPipe(at: trimmed.index(before: trimmed.endIndex), in: trimmed) {
             trimmed.removeLast()
         }
-        return trimmed.split(separator: "|", omittingEmptySubsequences: false)
-            .map { $0.trimmingCharacters(in: .whitespaces) }
+
+        var cells: [String] = []
+        var current = ""
+        var index = trimmed.startIndex
+        var inCode = false
+        var inDollarMath = false
+        var inParenMath = false
+        var inBracketMath = false
+
+        while index < trimmed.endIndex {
+            if trimmed[index] == "\\" {
+                let next = trimmed.index(after: index)
+                if next < trimmed.endIndex {
+                    if inParenMath, trimmed[next] == ")" {
+                        current.append("\\)")
+                        inParenMath = false
+                        index = trimmed.index(after: next)
+                        continue
+                    }
+                    if inBracketMath, trimmed[next] == "]" {
+                        current.append("\\]")
+                        inBracketMath = false
+                        index = trimmed.index(after: next)
+                        continue
+                    }
+                    if !inCode, !inDollarMath, !inParenMath, !inBracketMath, trimmed[next] == "(" {
+                        current.append("\\(")
+                        inParenMath = true
+                        index = trimmed.index(after: next)
+                        continue
+                    }
+                    if !inCode, !inDollarMath, !inParenMath, !inBracketMath, trimmed[next] == "[" {
+                        current.append("\\[")
+                        inBracketMath = true
+                        index = trimmed.index(after: next)
+                        continue
+                    }
+                    if !inCode, !inDollarMath, !inParenMath, !inBracketMath, trimmed[next] == "|" {
+                        current.append("|")
+                        index = trimmed.index(after: next)
+                        continue
+                    }
+                }
+            }
+
+            let character = trimmed[index]
+            if !inDollarMath, !inParenMath, !inBracketMath, character == "`" {
+                inCode.toggle()
+                current.append(character)
+                index = trimmed.index(after: index)
+                continue
+            }
+
+            if !inCode, !inParenMath, !inBracketMath, character == "$" {
+                let next = trimmed.index(after: index)
+                if next < trimmed.endIndex, trimmed[next] == "$" {
+                    current.append(character)
+                } else {
+                    inDollarMath.toggle()
+                    current.append(character)
+                }
+                index = next
+                continue
+            }
+
+            if !inCode, !inDollarMath, !inParenMath, !inBracketMath, character == "|" {
+                cells.append(current.trimmingCharacters(in: .whitespaces))
+                current.removeAll()
+            } else {
+                current.append(character)
+            }
+            index = trimmed.index(after: index)
+        }
+
+        cells.append(current.trimmingCharacters(in: .whitespaces))
+        return cells
+    }
+
+    private static func isEscapedPipe(at index: String.Index, in text: String) -> Bool {
+        guard text[index] == "|" else {
+            return false
+        }
+        var backslashCount = 0
+        var cursor = index
+        while cursor > text.startIndex {
+            let previous = text.index(before: cursor)
+            guard text[previous] == "\\" else {
+                break
+            }
+            backslashCount += 1
+            cursor = previous
+        }
+        return backslashCount % 2 == 1
     }
 
     private static func normalizeImageSource(_ source: String) -> String {
