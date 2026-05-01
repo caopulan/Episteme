@@ -125,22 +125,17 @@ struct ChatView: View {
             }
             .buttonStyle(.borderedProminent)
 
-            Menu {
-                Button {
-                    if let session = model.selectedSession {
-                        renameSessionTitle = session.title
-                        sessionPendingRename = session
-                    }
-                } label: {
-                    Label("Rename Session", systemImage: "pencil")
+            Button {
+                if let session = model.selectedSession {
+                    renameSessionTitle = session.title
+                    sessionPendingRename = session
                 }
-                .disabled(model.selectedSession == nil)
             } label: {
-                Image(systemName: "ellipsis.circle")
+                Label("Rename", systemImage: "pencil")
             }
-            .menuStyle(.button)
             .buttonStyle(.bordered)
-            .help("Session Actions")
+            .disabled(model.selectedSession == nil)
+            .help("Rename Session")
         }
         .padding(14)
     }

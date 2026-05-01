@@ -821,6 +821,14 @@ func runUILayoutSourceChecks() throws {
         "chat sessions should be renameable from the session bar"
     )
     try check(
+        chatSource.contains("Label(\"Rename\", systemImage: \"pencil\")"),
+        "chat session rename should be exposed as a direct button after New"
+    )
+    try check(
+        !chatSource.contains("ellipsis.circle"),
+        "chat session rename should not be hidden behind an ellipsis menu"
+    )
+    try check(
         chatSource.contains("GeneratedImageGallery"),
         "chat should render generated local images as an explicit gallery"
     )
