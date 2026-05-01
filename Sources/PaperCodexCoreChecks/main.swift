@@ -593,12 +593,32 @@ func runUILayoutSourceChecks() throws {
         "chat composer should expose a visible resize handle"
     )
     try check(
-        chatSource.contains("DragGesture(minimumDistance: 1, coordinateSpace: .global)"),
-        "chat composer resize handle should use an explicit vertical drag gesture"
+        chatSource.contains("WindowSafeComposerResizeHandle") && chatSource.contains("mouseDownCanMoveWindow"),
+        "chat composer resize handle should use an AppKit view that cannot initiate window dragging"
+    )
+    try check(
+        !chatSource.contains("DragGesture(minimumDistance: 1, coordinateSpace: .global)"),
+        "chat composer resize handle should not rely on a SwiftUI drag gesture inside the movable window background"
     )
     try check(
         chatSource.contains("ChatComposerLayout.clampedTextHeight"),
         "chat composer height changes should be clamped through a shared layout helper"
+    )
+    try check(
+        appModelSource.contains("codexDefaultModelID")
+            && appModelSource.contains("CodexCLI.configuredDefaultModelID"),
+        "app model should expose the configured default Codex model for chat controls"
+    )
+    try check(
+        chatSource.contains("availableModelIDs")
+            && chatSource.contains("ForEach(availableModelIDs, id: \\.self)")
+            && chatSource.contains("defaultModelLabel"),
+        "chat model menu should use the same available Codex model list as settings and label the default model"
+    )
+    try check(
+        !chatSource.contains("Button(\"gpt-5.4\")")
+            && !chatSource.contains("Button(\"gpt-5.3-codex\")"),
+        "chat model menu should not be limited to hard-coded model names"
     )
 
     let pdfKitViewURL = root.appendingPathComponent("Sources/PaperCodexApp/PDFKitView.swift")
@@ -2107,6 +2127,7 @@ func runCodexCLIChecks() throws {
     model = "gpt-5.4"
     """
     try check(CodexCLI.parseConfiguredModel(from: config) == "gpt-5.5", "Codex config parser should read the top-level model")
+    try check(CodexCLI.configuredDefaultModelID(configText: config) == "gpt-5.5", "Codex default model helper should expose the configured top-level model")
     let modelIssue = CodexCLI.configuredModelIssue(configText: config, cliVersion: "0.114.0")
     try check(modelIssue?.contains("gpt-5.5") == true, "model compatibility issue should name the configured model")
     let blockedDiagnostic = CodexCLI.diagnostic(

@@ -71,6 +71,9 @@ struct ChatView: View {
         .sheet(item: $sessionPendingRename) { session in
             renameSessionSheet(session)
         }
+        .task {
+            await model.refreshAvailableCodexModels()
+        }
     }
 
     private var visibleActiveCodexRun: ActiveCodexRun? {
@@ -185,6 +188,8 @@ struct ChatView: View {
                     prompts: model.quickPrompts,
                     diagnostic: model.codexDiagnostic,
                     modelOverride: model.codexModelOverride,
+                    availableModelIDs: model.availableCodexModelIDs,
+                    defaultModelID: model.codexDefaultModelID,
                     reasoningEffort: model.codexReasoningEffort,
                     onPrompt: { model.sendQuickPrompt($0) },
                     onModelOverride: { model.setCodexModelOverride($0) },
@@ -192,25 +197,27 @@ struct ChatView: View {
                 ) {
                     Task {
                         await model.refreshCodexDiagnostic()
+                        await model.refreshAvailableCodexModels()
                     }
                 }
 
-                ComposerResizeHandle()
-                    .gesture(
-                        DragGesture(minimumDistance: 1, coordinateSpace: .global)
-                            .onChanged { value in
-                                if composerResizeStartHeight == nil {
-                                    composerResizeStartHeight = composerTextHeight
-                                }
-                                let nextHeight = (composerResizeStartHeight ?? composerTextHeight) - value.translation.height
-                                composerTextHeight = ChatComposerLayout.clampedTextHeight(nextHeight)
-                            }
-                            .onEnded { _ in
-                                composerTextHeight = ChatComposerLayout.clampedTextHeight(composerTextHeight)
-                                ChatComposerLayout.saveTextHeight(composerTextHeight)
-                                composerResizeStartHeight = nil
-                            }
-                    )
+                WindowSafeComposerResizeHandle(
+                    onDragChanged: { translationY in
+                        if composerResizeStartHeight == nil {
+                            composerResizeStartHeight = composerTextHeight
+                        }
+                        let nextHeight = (composerResizeStartHeight ?? composerTextHeight) + translationY
+                        composerTextHeight = ChatComposerLayout.clampedTextHeight(nextHeight)
+                    },
+                    onDragEnded: {
+                        composerTextHeight = ChatComposerLayout.clampedTextHeight(composerTextHeight)
+                        ChatComposerLayout.saveTextHeight(composerTextHeight)
+                        composerResizeStartHeight = nil
+                    }
+                )
+                .frame(maxWidth: .infinity)
+                .frame(height: 10)
+                .help("Resize input")
 
                 HStack(alignment: .bottom, spacing: 8) {
                     ComposerTextView(
@@ -307,36 +314,113 @@ private enum ChatComposerLayout {
     }
 }
 
-private struct ComposerResizeHandle: View {
-    @State private var isHovering = false
+private struct WindowSafeComposerResizeHandle: NSViewRepresentable {
+    var onDragChanged: (CGFloat) -> Void
+    var onDragEnded: () -> Void
 
-    var body: some View {
-        HStack {
-            Spacer()
-            Capsule()
-                .fill(isHovering ? Color.accentColor.opacity(0.68) : Color.secondary.opacity(0.34))
-                .frame(width: isHovering ? 58 : 44, height: 4)
-                .shadow(color: isHovering ? Color.accentColor.opacity(0.25) : .clear, radius: 5, y: 1)
-            Spacer()
+    func makeNSView(context: Context) -> ResizeHandleView {
+        let view = ResizeHandleView()
+        view.onDragChanged = onDragChanged
+        view.onDragEnded = onDragEnded
+        return view
+    }
+
+    func updateNSView(_ view: ResizeHandleView, context: Context) {
+        view.onDragChanged = onDragChanged
+        view.onDragEnded = onDragEnded
+    }
+
+    final class ResizeHandleView: NSView {
+        var onDragChanged: (CGFloat) -> Void = { _ in }
+        var onDragEnded: () -> Void = {}
+        private var dragStartWindowY: CGFloat?
+        private var isHovering = false
+        private var trackingArea: NSTrackingArea?
+
+        override var mouseDownCanMoveWindow: Bool {
+            false
         }
-        .frame(height: 10)
-        .contentShape(Rectangle())
-        .onHover { hovering in
-            withAnimation(.easeOut(duration: 0.12)) {
-                isHovering = hovering
+
+        override var acceptsFirstResponder: Bool {
+            true
+        }
+
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+            true
+        }
+
+        override func updateTrackingAreas() {
+            super.updateTrackingAreas()
+            if let trackingArea {
+                removeTrackingArea(trackingArea)
             }
-            if hovering {
-                NSCursor.resizeUpDown.set()
-            } else {
+            let area = NSTrackingArea(
+                rect: bounds,
+                options: [.activeInActiveApp, .mouseEnteredAndExited, .inVisibleRect],
+                owner: self,
+                userInfo: nil
+            )
+            addTrackingArea(area)
+            trackingArea = area
+        }
+
+        override func resetCursorRects() {
+            addCursorRect(bounds, cursor: .resizeUpDown)
+        }
+
+        override func mouseEntered(with event: NSEvent) {
+            isHovering = true
+            needsDisplay = true
+            NSCursor.resizeUpDown.set()
+        }
+
+        override func mouseExited(with event: NSEvent) {
+            isHovering = false
+            needsDisplay = true
+            NSCursor.arrow.set()
+        }
+
+        override func mouseDown(with event: NSEvent) {
+            dragStartWindowY = event.locationInWindow.y
+            window?.makeFirstResponder(self)
+            NSCursor.resizeUpDown.set()
+        }
+
+        override func mouseDragged(with event: NSEvent) {
+            guard let dragStartWindowY else {
+                return
+            }
+            onDragChanged(event.locationInWindow.y - dragStartWindowY)
+        }
+
+        override func mouseUp(with event: NSEvent) {
+            dragStartWindowY = nil
+            onDragEnded()
+            needsDisplay = true
+        }
+
+        override func viewWillMove(toWindow newWindow: NSWindow?) {
+            if newWindow == nil, isHovering {
                 NSCursor.arrow.set()
             }
+            super.viewWillMove(toWindow: newWindow)
         }
-        .onDisappear {
-            if isHovering {
-                NSCursor.arrow.set()
-            }
+
+        override func draw(_ dirtyRect: NSRect) {
+            super.draw(dirtyRect)
+            let width: CGFloat = isHovering ? 58 : 44
+            let rect = NSRect(
+                x: bounds.midX - width / 2,
+                y: bounds.midY - 2,
+                width: width,
+                height: 4
+            )
+            let color = isHovering
+                ? NSColor.controlAccentColor.withAlphaComponent(0.68)
+                : NSColor.secondaryLabelColor.withAlphaComponent(0.34)
+            color.setFill()
+            NSBezierPath(roundedRect: rect, xRadius: 2, yRadius: 2).fill()
         }
-        .help("Resize input")
     }
 }
 
@@ -344,6 +428,8 @@ private struct QuickPromptLine: View {
     var prompts: [QuickPrompt]
     var diagnostic: CodexDiagnostic?
     var modelOverride: String
+    var availableModelIDs: [String]
+    var defaultModelID: String
     var reasoningEffort: CodexReasoningEffort
     var onPrompt: (QuickPrompt) -> Void
     var onModelOverride: (String) -> Void
@@ -371,6 +457,8 @@ private struct QuickPromptLine: View {
             CodexStatusLine(
                 diagnostic: diagnostic,
                 modelOverride: modelOverride,
+                availableModelIDs: availableModelIDs,
+                defaultModelID: defaultModelID,
                 reasoningEffort: reasoningEffort,
                 onModelOverride: onModelOverride,
                 onReasoningEffort: onReasoningEffort,
@@ -384,6 +472,8 @@ private struct QuickPromptLine: View {
 private struct CodexStatusLine: View {
     var diagnostic: CodexDiagnostic?
     var modelOverride: String
+    var availableModelIDs: [String]
+    var defaultModelID: String
     var reasoningEffort: CodexReasoningEffort
     var onModelOverride: (String) -> Void
     var onReasoningEffort: (CodexReasoningEffort) -> Void
@@ -406,18 +496,26 @@ private struct CodexStatusLine: View {
                 .controlSize(.small)
             }
             Menu {
-                Button("Default") {
+                Button {
                     onModelOverride("")
+                } label: {
+                    if modelOverride.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Label(defaultModelLabel, systemImage: "checkmark")
+                    } else {
+                        Text(defaultModelLabel)
+                    }
                 }
                 Divider()
-                Button("gpt-5.4-mini") {
-                    onModelOverride("gpt-5.4-mini")
-                }
-                Button("gpt-5.4") {
-                    onModelOverride("gpt-5.4")
-                }
-                Button("gpt-5.3-codex") {
-                    onModelOverride("gpt-5.3-codex")
+                ForEach(availableModelIDs, id: \.self) { modelID in
+                    Button {
+                        onModelOverride(modelID)
+                    } label: {
+                        if modelID == modelOverride.trimmingCharacters(in: .whitespacesAndNewlines) {
+                            Label(modelID, systemImage: "checkmark")
+                        } else {
+                            Text(modelID)
+                        }
+                    }
                 }
             } label: {
                 Label(modelLabel, systemImage: "slider.horizontal.3")
@@ -471,7 +569,12 @@ private struct CodexStatusLine: View {
 
     private var modelLabel: String {
         let trimmed = modelOverride.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? "Default" : trimmed
+        return trimmed.isEmpty ? defaultModelLabel : trimmed
+    }
+
+    private var defaultModelLabel: String {
+        let trimmed = defaultModelID.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "Default" : "Default (\(trimmed))"
     }
 
     private var reasoningLabel: String {

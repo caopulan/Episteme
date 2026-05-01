@@ -641,6 +641,14 @@ public struct CodexCLI: Sendable {
         return nil
     }
 
+    public static func configuredDefaultModelID(
+        configText: String? = nil,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> String? {
+        let config = configText ?? readDefaultConfig(environment: environment)
+        return config.flatMap(parseConfiguredModel(from:))
+    }
+
     public static func configuredModelIssue(configText: String?, cliVersion: String?) -> String? {
         guard let configText,
               parseConfiguredModel(from: configText) == "gpt-5.5" else {

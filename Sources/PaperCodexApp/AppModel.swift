@@ -315,6 +315,7 @@ final class AppModel: ObservableObject {
     @Published var discoverCodexModelOverride: String = UserDefaults.standard.string(forKey: discoverCodexModelOverrideDefaultsKey) ?? ""
     @Published var discoverCodexConcurrency: Int = loadDiscoverCodexConcurrencyFromDefaults()
     @Published var availableCodexModelIDs: [String] = []
+    @Published var codexDefaultModelID: String = CodexCLI.configuredDefaultModelID() ?? ""
     @Published var isRefreshingCodexModels = false
     @Published var isScanningWatchedFolders = false
     @Published var localDiscoverPreferences: LocalDiscoverPreferences = loadLocalDiscoverPreferencesFromDefaults()
@@ -2367,6 +2368,7 @@ final class AppModel: ObservableObject {
 
     func refreshCodexDiagnostic() async {
         codexDiagnostic = nil
+        codexDefaultModelID = CodexCLI.configuredDefaultModelID() ?? ""
         let modelOverride = codexModelOverride
         let diagnostic = await Task.detached(priority: .utility) {
             CodexCLI.diagnose(modelOverride: modelOverride)
@@ -2383,14 +2385,18 @@ final class AppModel: ObservableObject {
             isRefreshingCodexModels = false
         }
         do {
-            let models = try await Task.detached(priority: .utility) {
+            let result = try await Task.detached(priority: .utility) {
+                let defaultModelID = CodexCLI.configuredDefaultModelID()
                 let executable = try CodexCLI.findCodexExecutable()
-                return try CodexCLI(executablePath: executable).availableModelIDs()
+                let models = try CodexCLI(executablePath: executable).availableModelIDs()
+                return (models: models, defaultModelID: defaultModelID)
             }.value
+            codexDefaultModelID = result.defaultModelID ?? ""
             availableCodexModelIDs = uniqueCodexModelIDs(
-                models + [codexModelOverride, discoverCodexModelOverride]
+                result.models + [codexModelOverride, discoverCodexModelOverride]
             )
         } catch {
+            codexDefaultModelID = CodexCLI.configuredDefaultModelID() ?? ""
             mergeAvailableCodexModelIDs([codexModelOverride, discoverCodexModelOverride])
             errorMessage = String(describing: error)
         }

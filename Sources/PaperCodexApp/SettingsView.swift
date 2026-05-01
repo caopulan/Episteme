@@ -119,6 +119,11 @@ struct SettingsView: View {
             || draftEmbeddingAPIKey.trimmingCharacters(in: .whitespacesAndNewlines) != model.embeddingProviderAPIKey
     }
 
+    private var codexDefaultModelLabel: String {
+        let trimmed = model.codexDefaultModelID.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "Codex default" : "Codex default (\(trimmed))"
+    }
+
     var body: some View {
         SidebarSplitLayout(minContentWidth: 760) {
             sidebar
@@ -329,7 +334,7 @@ struct SettingsView: View {
     private var discoverCodexProcessingSettings: some View {
         settingsSection(title: "Discover Processing", systemImage: "cpu") {
             Picker("Model", selection: $draftDiscoverCodexModel) {
-                Text("Codex default").tag("")
+                Text(codexDefaultModelLabel).tag("")
                 ForEach(model.availableCodexModelIDs, id: \.self) { modelID in
                     Text(modelID).tag(modelID)
                 }
