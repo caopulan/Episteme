@@ -1513,6 +1513,14 @@ func runCitationChecks() throws {
     try check(rendered.contains(#"<img alt="figure" src="file:///tmp/figure.png">"#), "markdown renderer should render absolute local images")
     try check(rendered.contains(#"href="papercodex-cite://open?id=paper%3Apaper-a%3Ap5%3Ab17""#), "markdown renderer should preserve clickable citation links")
 
+    let inlineMathBeforeCitation = ChatMarkdownRenderer.renderFragment(
+        markdown: #"归一化到 $[0,1]$ 后的“好样本概率”。 [1](papercodex-cite://open?id=paper%3Apaper-a%3Ap5%3Ab17)"#
+    )
+    try check(
+        inlineMathBeforeCitation.contains(#"归一化到 $[0,1]$ 后的“好样本概率”。 <a class="citation" href="papercodex-cite://open?id=paper%3Apaper-a%3Ap5%3Ab17">1</a>"#),
+        "markdown renderer should not treat math brackets before a citation as the citation link label"
+    )
+
     let displayMath = """
     $$
     \\Delta

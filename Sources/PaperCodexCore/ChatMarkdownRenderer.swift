@@ -295,26 +295,28 @@ public enum ChatMarkdownRenderer {
         var index = text.startIndex
 
         while index < text.endIndex {
+            if let mathEnd = inlineMathEnd(in: text, openingAt: index) {
+                output.append(escapeText(String(text[index...mathEnd])))
+                index = text.index(after: mathEnd)
+                continue
+            }
+
             if text[index...].hasPrefix("!["),
-               let close = text[index...].range(of: "]("),
-               let end = text[close.upperBound...].firstIndex(of: ")") {
-                let altStart = text.index(index, offsetBy: 2)
-                let alt = String(text[altStart..<close.lowerBound])
-                let source = String(text[close.upperBound..<end])
+               let link = parseInlineLink(in: text, labelStart: text.index(index, offsetBy: 2)) {
+                let alt = String(text[text.index(index, offsetBy: 2)..<link.labelEnd])
+                let source = String(text[link.destinationStart..<link.destinationEnd])
                 output.append(#"<img alt="\#(escapeAttribute(alt))" src="\#(escapeAttribute(normalizeImageSource(source)))">"#)
-                index = text.index(after: end)
+                index = text.index(after: link.destinationEnd)
                 continue
             }
 
             if text[index] == "[",
-               let close = text[index...].range(of: "]("),
-               let end = text[close.upperBound...].firstIndex(of: ")") {
-                let labelStart = text.index(after: index)
-                let label = String(text[labelStart..<close.lowerBound])
-                let href = String(text[close.upperBound..<end])
+               let link = parseInlineLink(in: text, labelStart: text.index(after: index)) {
+                let label = String(text[text.index(after: index)..<link.labelEnd])
+                let href = String(text[link.destinationStart..<link.destinationEnd])
                 let className = href.hasPrefix("papercodex-cite://") ? #" class="citation""# : ""
                 output.append(#"<a\#(className) href="\#(escapeAttribute(href))">\#(renderInline(label))</a>"#)
-                index = text.index(after: end)
+                index = text.index(after: link.destinationEnd)
                 continue
             }
 
@@ -347,6 +349,44 @@ public enum ChatMarkdownRenderer {
         }
 
         return output.replacingOccurrences(of: "\n", with: "<br>")
+    }
+
+    private static func inlineMathEnd(in text: String, openingAt index: String.Index) -> String.Index? {
+        if text[index] == "$" {
+            let afterOpening = text.index(after: index)
+            guard afterOpening < text.endIndex, text[afterOpening] != "$" else {
+                return nil
+            }
+            return text[afterOpening...].firstIndex(of: "$")
+        }
+
+        if text[index...].hasPrefix("\\(") {
+            let afterOpening = text.index(index, offsetBy: 2)
+            guard let closingStart = text[afterOpening...].range(of: "\\)")?.lowerBound else {
+                return nil
+            }
+            return text.index(after: closingStart)
+        }
+
+        return nil
+    }
+
+    private static func parseInlineLink(
+        in text: String,
+        labelStart: String.Index
+    ) -> (labelEnd: String.Index, destinationStart: String.Index, destinationEnd: String.Index)? {
+        guard let labelEnd = text[labelStart...].firstIndex(of: "]") else {
+            return nil
+        }
+        let openParen = text.index(after: labelEnd)
+        guard openParen < text.endIndex, text[openParen] == "(" else {
+            return nil
+        }
+        let destinationStart = text.index(after: openParen)
+        guard let destinationEnd = text[destinationStart...].firstIndex(of: ")") else {
+            return nil
+        }
+        return (labelEnd, destinationStart, destinationEnd)
     }
 
     private static func parseHeading(_ line: String) -> (level: Int, text: String)? {
