@@ -596,11 +596,32 @@ func runUILayoutSourceChecks() throws {
         chatSource.contains("SessionPanelTab") && chatSource.contains("SessionNotesPanel"),
         "session conversation area should provide a tabbed paper-notes view"
     )
+    if let panelPickerRange = chatSource.range(of: "Picker(\"Session Panel\""),
+       let sessionPickerRange = chatSource.range(of: "Picker(\"Session\"") {
+        try check(
+            panelPickerRange.lowerBound < sessionPickerRange.lowerBound,
+            "session panel tabs should sit at the far left of the same row as the session picker"
+        )
+    } else {
+        throw CheckFailure(description: "session bar should include both the panel tabs and session picker")
+    }
+    try check(
+        chatSource.contains("private var sessionBar: some View {\n        HStack(spacing: 12)")
+            && chatSource.contains("Divider()\n                .frame(height: 22)"),
+        "session picker should move right within a single-row session bar"
+    )
     try check(
         chatSource.contains("model.loadPaperNotes(for: paper)")
             && chatSource.contains("model.saveNote(")
             && chatSource.contains("model.deleteNote("),
         "session paper-notes tab should load, edit, and delete persisted paper notes"
+    )
+    try check(
+        chatSource.contains("SessionNotesWorkspace")
+            && chatSource.contains("HSplitView")
+            && chatSource.contains("SessionNoteListRow")
+            && chatSource.contains("selectedNoteID"),
+        "session paper-notes panel should use a refined split workspace with selectable notes and an editor"
     )
     try check(
         chatSource.contains("WindowSafeComposerResizeHandle") && chatSource.contains("mouseDownCanMoveWindow"),
