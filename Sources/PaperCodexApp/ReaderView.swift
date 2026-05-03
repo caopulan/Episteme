@@ -4,6 +4,7 @@ import SwiftUI
 struct ReaderView: View {
     @EnvironmentObject private var model: AppModel
     @State private var isShowingSaveToLibrarySheet = false
+    @State private var isShowingAddPaperToSessionSheet = false
     @State private var isPDFSplitVisible = false
     @State private var pdfSplitTarget: PDFInternalLinkTarget?
 
@@ -43,6 +44,20 @@ struct ReaderView: View {
                 )
             }
         }
+        .sheet(isPresented: $isShowingAddPaperToSessionSheet) {
+            AddPaperToSessionSheet(
+                papers: model.papers.filter { paper in
+                    !paper.isArxivImportPlaceholder && !model.currentSessionPapers.contains(where: { $0.id == paper.id })
+                },
+                onAdd: { paper in
+                    model.addPaperToCurrentSession(paper)
+                    isShowingAddPaperToSessionSheet = false
+                },
+                onCancel: {
+                    isShowingAddPaperToSessionSheet = false
+                }
+            )
+        }
     }
 
     private var pdfPane: some View {
@@ -56,6 +71,19 @@ struct ReaderView: View {
                         onCommand: { model.sendPDFKitCommand($0) },
                         onReturn: { model.returnFromCitationJump() },
                         onToggleSplit: { togglePDFSplit() }
+                    )
+                    ReaderSessionPaperBar(
+                        papers: model.currentSessionPapers,
+                        activePaperID: model.selectedPaper?.id,
+                        onSelect: { paper in
+                            model.selectReaderPaper(paper)
+                        },
+                        onAdd: {
+                            isShowingAddPaperToSessionSheet = true
+                        },
+                        onRemove: { paperID in
+                            model.removePaperFromCurrentSession(paperID)
+                        }
                     )
                     Divider()
                     pdfContent(for: paper)
@@ -160,6 +188,168 @@ struct ReaderView: View {
 private enum ReaderPDFLayout {
     static let minimumPaneWidth: CGFloat = 360
     static let minimumSplitPaneHeight: CGFloat = 220
+}
+
+private struct ReaderSessionPaperBar: View {
+    var papers: [Paper]
+    var activePaperID: String?
+    var onSelect: (Paper) -> Void
+    var onAdd: () -> Void
+    var onRemove: (String) -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Label("\(papers.count)", systemImage: papers.count > 1 ? "square.stack.3d.up.fill" : "doc.text")
+                .font(.paperCodexSystem(size: 12.5, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 42, alignment: .leading)
+
+            ScrollView(.horizontal) {
+                HStack(spacing: 7) {
+                    ForEach(papers) { paper in
+                        ReaderSessionPaperChip(
+                            paper: paper,
+                            isActive: paper.id == activePaperID,
+                            canRemove: papers.count > 1,
+                            onSelect: {
+                                onSelect(paper)
+                            },
+                            onRemove: {
+                                onRemove(paper.id)
+                            }
+                        )
+                    }
+                }
+            }
+            .scrollIndicators(.hidden)
+
+            Button(action: onAdd) {
+                Image(systemName: "plus")
+                    .frame(width: 24, height: 22)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .help("Add Paper")
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+}
+
+private struct ReaderSessionPaperChip: View {
+    var paper: Paper
+    var isActive: Bool
+    var canRemove: Bool
+    var onSelect: () -> Void
+    var onRemove: () -> Void
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Button(action: onSelect) {
+                HStack(spacing: 5) {
+                    Image(systemName: isActive ? "doc.text.fill" : "doc.text")
+                        .foregroundStyle(isActive ? Color.accentColor : Color.secondary)
+                    Text(paper.title)
+                        .font(.paperCodexSystem(size: 12.5, weight: isActive ? .semibold : .medium))
+                        .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+            .help(paper.title)
+
+            if canRemove {
+                Button(action: onRemove) {
+                    Image(systemName: "xmark")
+                        .font(.paperCodexSystem(size: 9.5, weight: .bold))
+                        .frame(width: 16, height: 16)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help("Remove Paper")
+            }
+        }
+        .padding(.leading, 8)
+        .padding(.trailing, canRemove ? 5 : 8)
+        .frame(width: isActive ? 220 : 180, height: 28)
+        .background(isActive ? Color.accentColor.opacity(0.12) : Color(nsColor: .controlBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 7))
+        .overlay(
+            RoundedRectangle(cornerRadius: 7)
+                .stroke(isActive ? Color.accentColor.opacity(0.35) : Color.primary.opacity(0.08), lineWidth: 1)
+        )
+    }
+}
+
+private struct AddPaperToSessionSheet: View {
+    var papers: [Paper]
+    var onAdd: (Paper) -> Void
+    var onCancel: () -> Void
+
+    @State private var query = ""
+
+    private var filteredPapers: [Paper] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return papers
+        }
+        return papers.filter { paper in
+            paper.title.localizedCaseInsensitiveContains(trimmed)
+                || paper.authors.joined(separator: " ").localizedCaseInsensitiveContains(trimmed)
+                || (paper.year.map(String.init) ?? "").contains(trimmed)
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Label("Add Paper", systemImage: "plus")
+                .font(.title3.weight(.semibold))
+            TextField("Search library", text: $query)
+                .textFieldStyle(.roundedBorder)
+            if filteredPapers.isEmpty {
+                ContentUnavailableView("No Papers", systemImage: "doc.text.magnifyingglass")
+                    .frame(width: 520, height: 220)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 6) {
+                        ForEach(filteredPapers) { paper in
+                            Button {
+                                onAdd(paper)
+                            } label: {
+                                HStack(spacing: 10) {
+                                    Image(systemName: "doc.text")
+                                        .foregroundStyle(Color.accentColor)
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(paper.title)
+                                            .font(.headline)
+                                            .lineLimit(1)
+                                        Text(paper.authors.isEmpty ? "Authors not set" : paper.authors.joined(separator: ", "))
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                    }
+                                    Spacer()
+                                }
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 8)
+                                .background(Color(nsColor: .controlBackgroundColor))
+                                .clipShape(RoundedRectangle(cornerRadius: 7))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+                .frame(width: 520, height: 280)
+            }
+            HStack {
+                Spacer()
+                Button("Cancel", action: onCancel)
+            }
+        }
+        .padding(22)
+        .frame(width: 560)
+    }
 }
 
 private struct ReaderPDFToolbar: View {

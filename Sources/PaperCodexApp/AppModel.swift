@@ -296,6 +296,9 @@ final class AppModel: ObservableObject {
     @Published var readerTabState = ReaderTabState()
     @Published var selectedSession: PaperSession?
     @Published var sessions: [PaperSession] = []
+    @Published var recentSessions: [PaperSession] = []
+    @Published var recentSessionPapersByID: [String: [Paper]] = [:]
+    @Published var selectedSessionPanelTab: SessionPanelTab = .chat
     @Published var messages: [ChatMessage] = []
     @Published var currentSelection: PDFSelectionInfo?
     @Published var pdfJumpTarget: PDFJumpTarget?
@@ -468,6 +471,17 @@ final class AppModel: ObservableObject {
         return "\(session.id)|\(paper.id)"
     }
 
+    var currentSessionPapers: [Paper] {
+        guard let session = selectedSession else {
+            return selectedPaper.map { [$0] } ?? []
+        }
+        let linkedPapers = papersForSession(session)
+        if linkedPapers.isEmpty, let selectedPaper {
+            return [selectedPaper]
+        }
+        return linkedPapers
+    }
+
     init() {
         let storedLanguageMode = loadGlobalLanguageModeFromDefaults()
         globalLanguageMode = storedLanguageMode
@@ -586,9 +600,37 @@ final class AppModel: ObservableObject {
         paperTagsByID = try Dictionary(uniqueKeysWithValues: papers.map { paper in
             (paper.id, try repository.fetchTags(forPaperID: paper.id))
         })
+        try refreshRecentSessions(repository: repository)
         refreshLibraryThumbnails()
         if let selectedLibraryPaperID {
             selectedLibraryPaper = papers.first { $0.id == selectedLibraryPaperID }
+        }
+    }
+
+    func refreshRecentSessions() {
+        do {
+            guard let repository else {
+                throw AppModelError.repositoryUnavailable
+            }
+            try refreshRecentSessions(repository: repository)
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    private func refreshRecentSessions(repository: PaperRepository) throws {
+        let sessions = try repository.fetchRecentSessions(limit: 8)
+        recentSessions = sessions
+        recentSessionPapersByID = try Dictionary(uniqueKeysWithValues: sessions.map { session in
+            (session.id, try repository.fetchPapers(ids: session.paperIDs))
+        })
+    }
+
+    func papersForSession(_ session: PaperSession) -> [Paper] {
+        let visiblePapers = recentSessionPapersByID[session.id, default: []]
+        return session.paperIDs.compactMap { paperID in
+            papers.first(where: { $0.id == paperID })
+                ?? visiblePapers.first(where: { $0.id == paperID })
         }
     }
 
@@ -2134,52 +2176,92 @@ final class AppModel: ObservableObject {
     }
 
     private func focusPaperForReader(_ paper: Paper, opensReaderTab: Bool) throws {
-        selectedLibraryPaper = paper
-        selectedPaper = paper
-        currentSelection = nil
-        pdfJumpTarget = nil
-        if opensReaderTab {
-            openOrUpdateReaderTab(paper)
-        } else {
-            selectOrOpenReaderTab(paper)
-        }
-        guard let repository else {
-            throw AppModelError.repositoryUnavailable
-        }
-        sessions = try paperScopedSessions(for: paper.id, repository: repository)
-        if let first = sessions.last {
-            selectedSession = first
-            messages = try repository.fetchMessages(sessionID: first.id)
-        } else {
-            try createSession()
-        }
-        try loadReaderPositionForSelectedContext(repository: repository)
-        clearActiveCodexRunIfIdle()
-        route = .reader
+        try openPaperSet([paper.id], focusedPaperID: paper.id, opensReaderTabs: opensReaderTab, panelTab: selectedSessionPanelTab)
     }
 
-    private func paperScopedSessions(for paperID: String, repository: PaperRepository) throws -> [PaperSession] {
-        try repository.fetchSessions(paperID: paperID).filter { session in
-            session.paperIDs == [paperID]
+    private func sessionsForPaperSet(paperIDs: [String], repository: PaperRepository) throws -> [PaperSession] {
+        guard let firstPaperID = paperIDs.first else {
+            return []
         }
+        return try repository.fetchSessions(paperID: firstPaperID).filter { session in
+            session.paperIDs.count == paperIDs.count && Set(session.paperIDs) == Set(paperIDs)
+        }
+    }
+
+    private func reloadSessionsForVisibleContext(repository: PaperRepository) throws {
+        let paperIDs = currentReaderPaperIDs()
+        sessions = try sessionsForPaperSet(paperIDs: paperIDs, repository: repository)
+    }
+
+    private func currentReaderPaperIDs() -> [String] {
+        if let selectedSession, !selectedSession.paperIDs.isEmpty {
+            return uniqueIDs(selectedSession.paperIDs)
+        }
+        if let selectedPaper {
+            return [selectedPaper.id]
+        }
+        return []
     }
 
     private func focusPaperInCurrentReaderSession(_ paper: Paper) throws {
         openOrUpdateReaderTab(paper)
+        selectedLibraryPaper = paper
         selectedPaper = paper
         currentSelection = nil
         pdfJumpTarget = nil
         guard let repository else {
             throw AppModelError.repositoryUnavailable
         }
-        sessions = try paperScopedSessions(for: paper.id, repository: repository)
-        if let first = sessions.last {
-            selectedSession = first
-            messages = try repository.fetchMessages(sessionID: first.id)
+        if let selectedSession, selectedSession.paperIDs.contains(paper.id) {
+            try reloadSessionsForVisibleContext(repository: repository)
+            try loadReaderPositionForSelectedContext(repository: repository)
+            return
+        }
+        try focusPaperForReader(paper, opensReaderTab: false)
+    }
+
+    private func openPaperSet(
+        _ paperIDs: [String],
+        focusedPaperID: String? = nil,
+        opensReaderTabs: Bool,
+        panelTab: SessionPanelTab
+    ) throws {
+        guard let repository else {
+            throw AppModelError.repositoryUnavailable
+        }
+        let uniquePaperIDs = uniqueIDs(paperIDs)
+        let paperSet = try repository.fetchPapers(ids: uniquePaperIDs).filter { !$0.isArxivImportPlaceholder }
+        guard let firstPaper = paperSet.first else {
+            throw AppModelError.noSelectedPaper
+        }
+        let focusID = focusedPaperID.flatMap { id in
+            paperSet.first(where: { $0.id == id })?.id
+        } ?? firstPaper.id
+        let focusedPaper = paperSet.first(where: { $0.id == focusID }) ?? firstPaper
+
+        selectedSessionPanelTab = panelTab
+        selectedLibraryPaper = focusedPaper
+        selectedPaper = focusedPaper
+        currentSelection = nil
+        pdfJumpTarget = nil
+        citationReturnPoint = nil
+        if opensReaderTabs {
+            for paper in paperSet {
+                openOrUpdateReaderTab(paper)
+            }
+        }
+        selectOrOpenReaderTab(focusedPaper)
+
+        sessions = try sessionsForPaperSet(paperIDs: paperSet.map(\.id), repository: repository)
+        if let latestSession = sessions.last {
+            selectedSession = latestSession
+            messages = try repository.fetchMessages(sessionID: latestSession.id)
         } else {
-            try createSession()
+            try createSession(paperIDs: paperSet.map(\.id))
         }
         try loadReaderPositionForSelectedContext(repository: repository)
+        clearActiveCodexRunIfIdle()
+        route = .reader
     }
 
     func openPaper(_ paper: Paper) {
@@ -2189,7 +2271,59 @@ final class AppModel: ObservableObject {
             } else if route == .library {
                 readerReturnRoute = .library
             }
-            try focusPaperForReader(paper, opensReaderTab: true)
+            try openPaperSet([paper.id], focusedPaperID: paper.id, opensReaderTabs: true, panelTab: .chat)
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func openPapersForReading(_ paperIDs: [String]) {
+        do {
+            readerReturnRoute = .library
+            try openPaperSet(paperIDs, opensReaderTabs: true, panelTab: .chat)
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func openPapersForChat(_ paperIDs: [String]) {
+        do {
+            readerReturnRoute = .library
+            try openPaperSet(paperIDs, opensReaderTabs: true, panelTab: .chat)
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func openRecentSession(_ session: PaperSession) {
+        do {
+            guard let repository else {
+                throw AppModelError.repositoryUnavailable
+            }
+            guard let storedSession = try repository.fetchSession(id: session.id) else {
+                refreshRecentSessions()
+                return
+            }
+            let paperSet = try repository.fetchPapers(ids: storedSession.paperIDs).filter { !$0.isArxivImportPlaceholder }
+            guard let firstPaper = paperSet.first else {
+                throw AppModelError.noSelectedPaper
+            }
+            readerReturnRoute = .library
+            selectedSessionPanelTab = .chat
+            for paper in paperSet {
+                openOrUpdateReaderTab(paper)
+            }
+            selectOrOpenReaderTab(firstPaper)
+            selectedLibraryPaper = firstPaper
+            selectedPaper = firstPaper
+            selectedSession = storedSession
+            sessions = try sessionsForPaperSet(paperIDs: storedSession.paperIDs, repository: repository)
+            messages = try repository.fetchMessages(sessionID: storedSession.id)
+            currentSelection = nil
+            pdfJumpTarget = nil
+            citationReturnPoint = nil
+            try loadReaderPositionForSelectedContext(repository: repository)
+            route = .reader
         } catch {
             errorMessage = String(describing: error)
         }
@@ -2201,7 +2335,11 @@ final class AppModel: ObservableObject {
                 closeReaderTab(tab)
                 return
             }
-            try focusPaperForReader(paper, opensReaderTab: false)
+            if selectedSession?.paperIDs.contains(paper.id) == true {
+                try focusPaperInCurrentReaderSession(paper)
+            } else {
+                try focusPaperForReader(paper, opensReaderTab: false)
+            }
         } catch {
             errorMessage = String(describing: error)
         }
@@ -2231,26 +2369,34 @@ final class AppModel: ObservableObject {
                 route = .library
                 return
             }
-            try focusPaperForReader(paper, opensReaderTab: false)
+            if selectedSession?.paperIDs.contains(paper.id) == true {
+                try focusPaperInCurrentReaderSession(paper)
+            } else {
+                try focusPaperForReader(paper, opensReaderTab: false)
+            }
         } catch {
             errorMessage = String(describing: error)
         }
     }
 
-    func createSession() throws {
-        guard let paper = selectedPaper else {
+    func createSession(paperIDs requestedPaperIDs: [String]? = nil) throws {
+        guard let fallbackPaper = selectedPaper else {
             throw AppModelError.noSelectedPaper
         }
         guard let repository else {
             throw AppModelError.repositoryUnavailable
         }
+        let sessionPaperIDs = uniqueIDs(requestedPaperIDs ?? [fallbackPaper.id])
+        let sessionPapers = try repository.fetchPapers(ids: sessionPaperIDs)
+        guard !sessionPapers.isEmpty else {
+            throw AppModelError.noSelectedPaper
+        }
         let now = Date()
         let sessionID = UUID().uuidString.lowercased()
         let workspacePath = supportRoot.appendingPathComponent("sessions/\(sessionID)", isDirectory: true).path
-        let sessionPaperIDs = [paper.id]
         let session = PaperSession(
             id: sessionID,
-            title: "\(paper.title) Notes",
+            title: sessionTitle(for: sessionPapers),
             paperIDs: sessionPaperIDs,
             codexSessionID: nil,
             workspacePath: workspacePath,
@@ -2258,7 +2404,7 @@ final class AppModel: ObservableObject {
             updatedAt: now
         )
         try repository.upsertSession(session)
-        let context = try loadSessionPaperContext(session: session, fallbackPaper: paper, repository: repository)
+        let context = try loadSessionPaperContext(session: session, fallbackPaper: fallbackPaper, repository: repository)
         try workspaceManager.writeWorkspace(
             session: session,
             papers: context.papers,
@@ -2266,16 +2412,17 @@ final class AppModel: ObservableObject {
             spansByPaperID: context.spansByPaperID,
             anchorsByPaperID: context.anchorsByPaperID
         )
-        sessions = try paperScopedSessions(for: paper.id, repository: repository)
+        sessions = try sessionsForPaperSet(paperIDs: sessionPaperIDs, repository: repository)
         selectedSession = session
         messages = []
         readerPosition = nil
+        try refreshRecentSessions(repository: repository)
         clearActiveCodexRunIfIdle()
     }
 
     func newSessionButtonTapped() {
         do {
-            try createSession()
+            try createSession(paperIDs: currentReaderPaperIDs())
         } catch {
             errorMessage = String(describing: error)
         }
@@ -2297,9 +2444,8 @@ final class AppModel: ObservableObject {
             if selectedSession?.id == session.id {
                 selectedSession = updated
             }
-            if let selectedPaper {
-                sessions = try paperScopedSessions(for: selectedPaper.id, repository: repository)
-            }
+            try reloadSessionsForVisibleContext(repository: repository)
+            try refreshRecentSessions(repository: repository)
             postNotice(kind: .success, title: "Session Renamed", message: trimmed)
         } catch {
             errorMessage = String(describing: error)
@@ -2308,7 +2454,7 @@ final class AppModel: ObservableObject {
 
     func startFreshSessionFromCurrentPaperSet() {
         do {
-            try createSession()
+            try createSession(paperIDs: currentReaderPaperIDs())
         } catch {
             errorMessage = String(describing: error)
         }
@@ -2322,11 +2468,12 @@ final class AppModel: ObservableObject {
             guard let session = sessions.first(where: { $0.id == sessionID }) else {
                 return
             }
-            if let selectedPaper, session.paperIDs != [selectedPaper.id] {
-                return
-            }
             selectedSession = session
             messages = try repository.fetchMessages(sessionID: session.id)
+            if let selectedPaper, !session.paperIDs.contains(selectedPaper.id),
+               let firstPaper = try repository.fetchPapers(ids: session.paperIDs).first {
+                try focusPaperInCurrentReaderSession(firstPaper)
+            }
             try loadReaderPositionForSelectedContext(repository: repository)
         } catch {
             errorMessage = String(describing: error)
@@ -2335,7 +2482,7 @@ final class AppModel: ObservableObject {
 
     func selectReaderPaper(_ paper: Paper) {
         do {
-            try focusPaperForReader(paper, opensReaderTab: false)
+            try focusPaperInCurrentReaderSession(paper)
         } catch {
             errorMessage = String(describing: error)
         }
@@ -2347,13 +2494,119 @@ final class AppModel: ObservableObject {
                 throw AppModelError.repositoryUnavailable
             }
             if included {
-                try focusPaperForReader(paper, opensReaderTab: false)
+                try addPaperToCurrentSession(paper, repository: repository)
             } else if selectedPaper?.id == paper.id {
-                sessions = try paperScopedSessions(for: paper.id, repository: repository)
+                try removePaperFromCurrentSession(paper.id, repository: repository)
             }
         } catch {
             errorMessage = String(describing: error)
         }
+    }
+
+    func addPaperToCurrentSession(_ paper: Paper) {
+        do {
+            guard let repository else {
+                throw AppModelError.repositoryUnavailable
+            }
+            try addPaperToCurrentSession(paper, repository: repository)
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    private func addPaperToCurrentSession(_ paper: Paper, repository: PaperRepository) throws {
+        guard var session = selectedSession else {
+            try openPaperSet([paper.id], focusedPaperID: paper.id, opensReaderTabs: true, panelTab: selectedSessionPanelTab)
+            return
+        }
+        guard !paper.isArxivImportPlaceholder else {
+            return
+        }
+        var paperIDs = uniqueIDs(session.paperIDs)
+        guard !paperIDs.contains(paper.id) else {
+            try focusPaperInCurrentReaderSession(paper)
+            return
+        }
+        paperIDs.append(paper.id)
+        session.paperIDs = paperIDs
+        session.updatedAt = Date()
+        try repository.upsertSession(session)
+        let context = try loadSessionPaperContext(session: session, fallbackPaper: paper, repository: repository)
+        try workspaceManager.writeWorkspace(
+            session: session,
+            papers: context.papers,
+            pagesByPaperID: context.pagesByPaperID,
+            spansByPaperID: context.spansByPaperID,
+            anchorsByPaperID: context.anchorsByPaperID
+        )
+        openOrUpdateReaderTab(paper)
+        selectedSession = session
+        selectedPaper = paper
+        selectedLibraryPaper = paper
+        sessions = try sessionsForPaperSet(paperIDs: paperIDs, repository: repository)
+        messages = try repository.fetchMessages(sessionID: session.id)
+        try loadReaderPositionForSelectedContext(repository: repository)
+        try refreshRecentSessions(repository: repository)
+        postNotice(kind: .success, title: "Paper Added", message: paper.title)
+    }
+
+    func removePaperFromCurrentSession(_ paperID: String) {
+        do {
+            guard let repository else {
+                throw AppModelError.repositoryUnavailable
+            }
+            try removePaperFromCurrentSession(paperID, repository: repository)
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    private func removePaperFromCurrentSession(_ paperID: String, repository: PaperRepository) throws {
+        guard var session = selectedSession else {
+            return
+        }
+        let nextPaperIDs = session.paperIDs.filter { $0 != paperID }
+        guard nextPaperIDs.count != session.paperIDs.count else {
+            return
+        }
+        guard let fallbackPaper = selectedPaper else {
+            throw AppModelError.noSelectedPaper
+        }
+        if nextPaperIDs.isEmpty {
+            throw AppModelError.noSelectedPaper
+        }
+        session.paperIDs = nextPaperIDs
+        session.updatedAt = Date()
+        try repository.upsertSession(session)
+        let nextPapers = try repository.fetchPapers(ids: nextPaperIDs)
+        let nextFocusedPaper = selectedPaper?.id == paperID ? (nextPapers.first ?? fallbackPaper) : fallbackPaper
+        let context = try loadSessionPaperContext(session: session, fallbackPaper: nextFocusedPaper, repository: repository)
+        try workspaceManager.writeWorkspace(
+            session: session,
+            papers: context.papers,
+            pagesByPaperID: context.pagesByPaperID,
+            spansByPaperID: context.spansByPaperID,
+            anchorsByPaperID: context.anchorsByPaperID
+        )
+        var tabState = readerTabState
+        _ = tabState.close(paperID)
+        readerTabState = tabState
+        selectedSession = session
+        sessions = try sessionsForPaperSet(paperIDs: nextPaperIDs, repository: repository)
+        messages = try repository.fetchMessages(sessionID: session.id)
+        try focusPaperInCurrentReaderSession(nextFocusedPaper)
+        try refreshRecentSessions(repository: repository)
+        postNotice(kind: .success, title: "Paper Removed", message: nextFocusedPaper.title)
+    }
+
+    private func sessionTitle(for papers: [Paper]) -> String {
+        guard let firstPaper = papers.first else {
+            return "Paper Notes"
+        }
+        guard papers.count > 1 else {
+            return "\(firstPaper.title) Notes"
+        }
+        return "\(firstPaper.title) + \(papers.count - 1) Notes"
     }
 
     func updateSelection(_ selection: PDFSelectionInfo?) {
@@ -2540,7 +2793,7 @@ final class AppModel: ObservableObject {
             guard var session = selectedSession else {
                 throw AppModelError.noSelectedSession
             }
-            guard session.paperIDs == [paper.id] else {
+            guard session.paperIDs.contains(paper.id) else {
                 throw AppModelError.sessionPaperMismatch
             }
             let sessionID = session.id
@@ -2595,6 +2848,7 @@ final class AppModel: ObservableObject {
             session.updatedAt = Date()
             try repository.upsertSession(session)
             try refreshVisibleSessionState(session: session, paperID: paper.id, repository: repository)
+            try refreshRecentSessions(repository: repository)
 
             let updatedSession = try await runCodexTurn(
                 content: content,
@@ -2603,6 +2857,7 @@ final class AppModel: ObservableObject {
                 repository: repository
             )
             try refreshVisibleSessionState(session: updatedSession, paperID: paper.id, repository: repository)
+            try refreshRecentSessions(repository: repository)
         } catch AppModelError.anchorMatchFailed {
             errorMessage = AppModelError.anchorMatchFailed.description
         } catch {
@@ -2654,6 +2909,7 @@ final class AppModel: ObservableObject {
                 repository: repository
             )
             try refreshVisibleSessionState(session: updatedSession, paperID: fallbackPaper.id, repository: repository)
+            try refreshRecentSessions(repository: repository)
         } catch {
             if let runSessionID, cancellingCodexRunSessionIDs.contains(runSessionID) {
                 await appendCodexCancellationMessage(sessionID: runSessionID)
@@ -2710,7 +2966,7 @@ final class AppModel: ObservableObject {
         repository: PaperRepository
     ) throws {
         if selectedPaper?.id == paperID {
-            sessions = try paperScopedSessions(for: paperID, repository: repository)
+            sessions = try sessionsForPaperSet(paperIDs: session.paperIDs, repository: repository)
         }
         guard selectedSession?.id == session.id else {
             return

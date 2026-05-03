@@ -424,6 +424,7 @@ func runUILayoutSourceChecks() throws {
 
     let appModelURL = root.appendingPathComponent("Sources/PaperCodexApp/AppModel.swift")
     let appModelSource = try String(contentsOf: appModelURL)
+    let repositorySource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexCore/PaperRepository.swift"))
     let settingsViewURL = root.appendingPathComponent("Sources/PaperCodexApp/SettingsView.swift")
     let settingsViewSource = try String(contentsOf: settingsViewURL)
     let discoverViewURL = root.appendingPathComponent("Sources/PaperCodexApp/DiscoverView.swift")
@@ -870,6 +871,13 @@ func runUILayoutSourceChecks() throws {
         readerSource.contains("model.returnFromReader()"),
         "reader back navigation should return to the previous browsing surface instead of always resetting to Library"
     )
+    try check(
+        readerSource.contains("ReaderSessionPaperBar")
+            && readerSource.contains("AddPaperToSessionSheet")
+            && readerSource.contains("model.addPaperToCurrentSession")
+            && readerSource.contains("model.removePaperFromCurrentSession"),
+        "reader should expose the current session paper set and allow papers to be added or removed while reading"
+    )
 
     try check(
         chatSource.contains("ScrollViewReader"),
@@ -949,23 +957,39 @@ func runUILayoutSourceChecks() throws {
         "AppModel should not block all sessions with one global sending flag"
     )
     try check(
-        appModelSource.contains("paperScopedSessions")
-            && appModelSource.contains("session.paperIDs == [paperID]"),
-        "reader should only expose sessions that belong to the currently selected paper"
+        appModelSource.contains("sessionsForPaperSet")
+            && appModelSource.contains("Set(session.paperIDs) == Set(paperIDs)"),
+        "reader should expose sessions scoped to the selected paper set"
     )
     try check(
-        !appModelSource.contains("try createSession(paperIDs: selectedSession?.paperIDs)")
-            && appModelSource.contains("try createSession()"),
-        "new chat sessions should not inherit another paper set"
+        appModelSource.contains("try createSession(paperIDs: currentReaderPaperIDs())"),
+        "new chat sessions should keep the current reader paper set"
     )
     try check(
-        appModelSource.contains("let sessionPaperIDs = [paper.id]")
-            && !appModelSource.contains("requestedPaperIDs ?? [paper.id]"),
-        "created chat sessions should be scoped to exactly one paper"
+        appModelSource.contains("openPapersForReading")
+            && appModelSource.contains("openPapersForChat")
+            && appModelSource.contains("openRecentSession"),
+        "AppModel should open single-paper and multi-paper conversations from library and recent conversation entries"
     )
     try check(
         !appModelSource.contains("session.paperIDs + [fallbackPaper.id]"),
         "session context loading should not silently add the selected fallback paper to another paper's session"
+    )
+    try check(
+        appModelSource.contains("@Published var recentSessions")
+            && appModelSource.contains("refreshRecentSessions"),
+        "AppModel should publish recent conversations for the library surface"
+    )
+    try check(
+        librarySource.contains("RecentConversationsSection")
+            && librarySource.contains("openSelectedPapersForReading")
+            && librarySource.contains("openSelectedPapersForChat")
+            && librarySource.contains("selectedCategoryPaperIDsInOrder"),
+        "library should place recent conversations above the paper list and open multi-paper sessions from selections or folders"
+    )
+    try check(
+        repositorySource.contains("fetchRecentSessions(limit:"),
+        "repository should expose recent sessions for the library conversation list"
     )
 
     try check(
@@ -1172,6 +1196,21 @@ func runRepositoryChecks() throws {
     let fetchedSessionsForPaperB = try repository.fetchSessions(paperID: "paper-b")
     try check(fetchedSessionByID == multiPaperSession, "session should be fetchable by ID with ordered paper IDs")
     try check(fetchedSessionsForPaperB == [multiPaperSession], "sessions should be visible from every linked paper")
+
+    let laterSession = PaperSession(
+        id: "session-b",
+        title: "Later Single Paper Notes",
+        paperIDs: ["paper-a"],
+        codexSessionID: nil,
+        workspacePath: tempRoot.appendingPathComponent("session-b").path,
+        createdAt: now,
+        updatedAt: Date(timeIntervalSince1970: 1_777_220_200)
+    )
+    try repository.upsertSession(laterSession)
+    let recentSessions = try repository.fetchRecentSessions(limit: 2)
+    try check(recentSessions == [laterSession, multiPaperSession], "recent sessions should return newest sessions first with ordered paper IDs")
+    let limitedRecentSessions = try repository.fetchRecentSessions(limit: 1)
+    try check(limitedRecentSessions == [laterSession], "recent sessions should honor the requested limit")
 
     try repository.removePaper("paper-a", fromCategory: "cat-vae")
     try repository.removePaper("paper-a", fromTag: "tag-control")

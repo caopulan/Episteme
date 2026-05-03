@@ -91,6 +91,30 @@ struct LibraryView: View {
         return sortedPapers.map(\.id).filter { selected.contains($0) }
     }
 
+    private var selectedReadablePaperIDsInOrder: [String] {
+        selectedPaperIDsInOrder.filter { paperID in
+            sortedPapers.first(where: { $0.id == paperID })?.isArxivImportPlaceholder == false
+        }
+    }
+
+    private var selectedCategory: PaperCodexCore.Category? {
+        selectedCategoryID.flatMap { categoryID in
+            model.categories.first { $0.id == categoryID }
+        }
+    }
+
+    private var selectedCategoryPaperIDsInOrder: [String] {
+        guard let selectedCategoryID else {
+            return []
+        }
+        let option = LibrarySortOption(rawValue: librarySortRawValue) ?? .addedNewest
+        let categoryPapers = model.papers.filter { paper in
+            !paper.isArxivImportPlaceholder
+                && model.paperCategoryIDsByID[paper.id, default: []].contains(selectedCategoryID)
+        }
+        return option.sorted(categoryPapers, ascending: librarySortAscending).map(\.id)
+    }
+
     var body: some View {
         SidebarSplitLayout(minContentWidth: 840) {
             sidebar
@@ -398,6 +422,18 @@ struct LibraryView: View {
                 .buttonStyle(.borderedProminent)
             }
 
+            RecentConversationsSection(
+                sessions: model.recentSessions,
+                papersBySessionID: model.recentSessionPapersByID,
+                onOpen: { session in
+                    model.openRecentSession(session)
+                }
+            )
+
+            if let selectedCategory {
+                folderConversationActions(for: selectedCategory)
+            }
+
             HStack(spacing: 8) {
                 TextField("Search title, author, tag, category, year, or source", text: searchTextBinding)
                     .textFieldStyle(.roundedBorder)
@@ -478,6 +514,9 @@ struct LibraryView: View {
                     selectedCount: selectedPaperIDs.count,
                     canMove: true,
                     canTag: !model.tags.isEmpty,
+                    canOpenConversation: !selectedReadablePaperIDsInOrder.isEmpty,
+                    onRead: openSelectedPapersForReading,
+                    onChat: openSelectedPapersForChat,
                     onMove: {
                         isShowingBulkMove = true
                     },
@@ -500,6 +539,43 @@ struct LibraryView: View {
             }
         }
         .animation(.easeOut(duration: 0.16), value: selectedPaperIDs.count > 1)
+    }
+
+    private func folderConversationActions(for category: PaperCodexCore.Category) -> some View {
+        HStack(spacing: 10) {
+            Label(category.name, systemImage: "folder.fill")
+                .font(.paperCodexSystem(size: 13, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            Text("\(selectedCategoryPaperIDsInOrder.count) papers")
+                .font(.paperCodexSystem(size: 12.5))
+                .foregroundStyle(.tertiary)
+            Spacer()
+            Button {
+                model.openPapersForReading(selectedCategoryPaperIDsInOrder)
+            } label: {
+                Label("Read", systemImage: "book")
+            }
+            .disabled(selectedCategoryPaperIDsInOrder.isEmpty)
+            Button {
+                model.openPapersForChat(selectedCategoryPaperIDsInOrder)
+            } label: {
+                Label("Chat", systemImage: "text.bubble")
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(selectedCategoryPaperIDsInOrder.isEmpty)
+        }
+        .buttonStyle(.bordered)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color(nsColor: .controlBackgroundColor))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+        )
     }
 
     private var sortDirectionButton: some View {
@@ -870,6 +946,22 @@ struct LibraryView: View {
         model.deletePapers(paperIDs)
         selectedPaperIDs.removeAll()
         lastSelectedPaperID = nil
+    }
+
+    private func openSelectedPapersForReading() {
+        let paperIDs = selectedReadablePaperIDsInOrder
+        guard !paperIDs.isEmpty else {
+            return
+        }
+        model.openPapersForReading(paperIDs)
+    }
+
+    private func openSelectedPapersForChat() {
+        let paperIDs = selectedReadablePaperIDsInOrder
+        guard !paperIDs.isEmpty else {
+            return
+        }
+        model.openPapersForChat(paperIDs)
     }
 
     private func clearNoteDraft() {
@@ -1399,10 +1491,101 @@ private struct SidebarEmptyText: View {
     }
 }
 
+private struct RecentConversationsSection: View {
+    var sessions: [PaperSession]
+    var papersBySessionID: [String: [Paper]]
+    var onOpen: (PaperSession) -> Void
+
+    var body: some View {
+        Group {
+            if !sessions.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Label("Recent Conversations", systemImage: "clock")
+                            .font(.paperCodexSystem(size: 14, weight: .semibold))
+                        Spacer()
+                    }
+                    ScrollView(.horizontal) {
+                        HStack(spacing: 8) {
+                            ForEach(sessions) { session in
+                                RecentConversationRow(
+                                    session: session,
+                                    papers: papersBySessionID[session.id, default: []],
+                                    onOpen: {
+                                        onOpen(session)
+                                    }
+                                )
+                            }
+                        }
+                        .padding(.vertical, 1)
+                    }
+                    .scrollIndicators(.hidden)
+                }
+            }
+        }
+    }
+}
+
+private struct RecentConversationRow: View {
+    var session: PaperSession
+    var papers: [Paper]
+    var onOpen: () -> Void
+
+    var body: some View {
+        Button(action: onOpen) {
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 6) {
+                    Image(systemName: session.paperIDs.count > 1 ? "square.stack.3d.up.fill" : "doc.text")
+                        .foregroundStyle(Color.accentColor)
+                    Text(session.title)
+                        .font(.paperCodexSystem(size: 13, weight: .semibold))
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                }
+                Text(detailText)
+                    .font(.paperCodexSystem(size: 12.5))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Text(Self.relativeFormatter.localizedString(for: session.updatedAt, relativeTo: Date()))
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.tertiary)
+            }
+            .frame(width: 230, alignment: .leading)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 9)
+            .background(Color(nsColor: .controlBackgroundColor))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .help(session.title)
+    }
+
+    private var detailText: String {
+        guard session.paperIDs.count > 1 else {
+            return papers.first?.title ?? "Single paper"
+        }
+        let firstTitle = papers.first?.title ?? "Multiple papers"
+        return "\(session.paperIDs.count) papers · \(firstTitle)"
+    }
+
+    private static let relativeFormatter: RelativeDateTimeFormatter = {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .short
+        return formatter
+    }()
+}
+
 private struct BulkLibraryActionBar: View {
     var selectedCount: Int
     var canMove: Bool
     var canTag: Bool
+    var canOpenConversation: Bool
+    var onRead: () -> Void
+    var onChat: () -> Void
     var onMove: () -> Void
     var onTag: () -> Void
     var onDelete: () -> Void
@@ -1414,6 +1597,16 @@ private struct BulkLibraryActionBar: View {
                 .font(.paperCodexSystem(size: 13, weight: .semibold))
                 .foregroundStyle(Color.accentColor)
             Spacer()
+            Button(action: onRead) {
+                Label("Read", systemImage: "book")
+            }
+            .disabled(!canOpenConversation)
+            .help("Read selected papers together")
+            Button(action: onChat) {
+                Label("Chat", systemImage: "text.bubble")
+            }
+            .disabled(!canOpenConversation)
+            .help("Chat with selected papers together")
             Button(action: onMove) {
                 Label("Move", systemImage: "folder")
             }

@@ -5,11 +5,15 @@ import WebKit
 
 private let chatComposerTextHeightDefaultsKey = "PaperCodexChatComposerTextHeight"
 
+enum SessionPanelTab: Hashable {
+    case chat
+    case notes
+}
+
 struct ChatView: View {
     @EnvironmentObject private var model: AppModel
     @State private var draftsByComposerKey: [String: String] = [:]
     @State private var isSendButtonHovered = false
-    @State private var selectedPanelTab: SessionPanelTab = .chat
     @State private var composerTextHeight = ChatComposerLayout.loadTextHeight()
     @State private var composerResizeStartHeight: CGFloat?
     @State private var sessionPendingRename: PaperSession?
@@ -28,14 +32,14 @@ struct ChatView: View {
         .task {
             await model.refreshAvailableCodexModels()
         }
-        .onChange(of: selectedPanelTab) { _, tab in
+        .onChange(of: model.selectedSessionPanelTab) { _, tab in
             guard tab == .notes, let paper = model.selectedPaper else {
                 return
             }
             model.loadPaperNotes(for: paper)
         }
         .onChange(of: model.selectedPaper?.id) { _, _ in
-            guard selectedPanelTab == .notes, let paper = model.selectedPaper else {
+            guard model.selectedSessionPanelTab == .notes, let paper = model.selectedPaper else {
                 return
             }
             model.loadPaperNotes(for: paper)
@@ -44,7 +48,7 @@ struct ChatView: View {
 
     @ViewBuilder
     private var selectedPanelContent: some View {
-        switch selectedPanelTab {
+        switch model.selectedSessionPanelTab {
         case .chat:
             chatPanel
         case .notes:
@@ -100,6 +104,9 @@ struct ChatView: View {
                 .onChange(of: visibleActiveCodexRun?.events.count ?? 0) { _, _ in
                     scrollToBottom(proxy)
                 }
+                .onAppear {
+                    scrollToBottom(proxy)
+                }
             }
             composer
         }
@@ -126,8 +133,11 @@ struct ChatView: View {
     }
 
     private var composerDraftKey: String {
-        let paperID = model.selectedPaper?.id ?? "no-paper"
         let sessionID = model.selectedSession?.id ?? "no-session"
+        if let session = model.selectedSession, session.paperIDs.count > 1 {
+            return "multi|\(sessionID)"
+        }
+        let paperID = model.selectedPaper?.id ?? "no-paper"
         return "\(paperID)|\(sessionID)"
     }
 
@@ -151,7 +161,7 @@ struct ChatView: View {
 
     private var sessionBar: some View {
         HStack(spacing: 12) {
-            Picker("Session Panel", selection: $selectedPanelTab) {
+            Picker("Session Panel", selection: $model.selectedSessionPanelTab) {
                 Label("Chat", systemImage: "text.bubble").tag(SessionPanelTab.chat)
                 Label("Notes", systemImage: "note.text").tag(SessionPanelTab.notes)
             }
@@ -168,7 +178,7 @@ struct ChatView: View {
                 set: { model.selectSession($0) }
             )) {
                 ForEach(model.sessions) { session in
-                    Text(session.title).tag(session.id)
+                    Text(sessionMenuTitle(session)).tag(session.id)
                 }
             }
             .labelsHidden()
@@ -195,6 +205,13 @@ struct ChatView: View {
         }
         .padding(14)
         .controlSize(.small)
+    }
+
+    private func sessionMenuTitle(_ session: PaperSession) -> String {
+        guard session.paperIDs.count > 1 else {
+            return session.title
+        }
+        return "\(session.title) · \(session.paperIDs.count) papers"
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy) {
@@ -341,11 +358,6 @@ struct ChatView: View {
             await model.sendMessage(message)
         }
     }
-}
-
-private enum SessionPanelTab: Hashable {
-    case chat
-    case notes
 }
 
 private struct SessionNotesPanel: View {

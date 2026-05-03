@@ -604,6 +604,23 @@ public final class PaperRepository {
         }
     }
 
+    public func fetchRecentSessions(limit: Int) throws -> [PaperSession] {
+        let safeLimit = max(1, limit)
+        let sessions = try database.query("""
+        SELECT id, title, codex_session_id, workspace_path, created_at, updated_at
+        FROM sessions
+        ORDER BY updated_at DESC, id DESC
+        LIMIT ?;
+        """, bindings: [.int(safeLimit)]) { row in
+            try session(from: row)
+        }
+        return try sessions.map { session in
+            var updated = session
+            updated.paperIDs = try fetchPaperIDs(sessionID: session.id)
+            return updated
+        }
+    }
+
     public func fetchSession(id: String) throws -> PaperSession? {
         let sessions = try database.query("""
         SELECT id, title, codex_session_id, workspace_path, created_at, updated_at
