@@ -985,8 +985,21 @@ func runUILayoutSourceChecks() throws {
             && librarySource.contains("openSelectedPapersForReading")
             && librarySource.contains("openSelectedPapersForChat")
             && librarySource.contains("selectedCategoryPaperIDsInOrder"),
-        "library should place recent conversations above the paper list and open multi-paper sessions from selections or folders"
+        "library should expose recent conversations and open multi-paper sessions from selections or folders"
     )
+    if let sidebarRange = librarySource.range(of: "private var sidebar: some View"),
+       let paperListRange = librarySource.range(of: "private var paperList: some View"),
+       let recentRange = librarySource.range(of: "RecentConversationsSection("),
+       let libraryButtonRange = librarySource.range(of: "title: \"Library\"") {
+        try check(
+            sidebarRange.lowerBound < recentRange.lowerBound
+                && recentRange.lowerBound < libraryButtonRange.lowerBound
+                && recentRange.lowerBound < paperListRange.lowerBound,
+            "recent conversations should live in the left sidebar above the Library navigation item"
+        )
+    } else {
+        throw CheckFailure(description: "library sidebar should include recent conversations above Library navigation")
+    }
     try check(
         repositorySource.contains("fetchRecentSessions(limit:"),
         "repository should expose recent sessions for the library conversation list"

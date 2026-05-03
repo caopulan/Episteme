@@ -280,6 +280,14 @@ struct LibraryView: View {
             Text("Paper Codex")
                 .font(.paperCodexSystem(size: 24, weight: .semibold))
 
+            RecentConversationsSection(
+                sessions: model.recentSessions,
+                papersBySessionID: model.recentSessionPapersByID,
+                onOpen: { session in
+                    model.openRecentSession(session)
+                }
+            )
+
             VStack(alignment: .leading, spacing: 8) {
                 filterButton(
                     title: "Library",
@@ -421,14 +429,6 @@ struct LibraryView: View {
                 }
                 .buttonStyle(.borderedProminent)
             }
-
-            RecentConversationsSection(
-                sessions: model.recentSessions,
-                papersBySessionID: model.recentSessionPapersByID,
-                onOpen: { session in
-                    model.openRecentSession(session)
-                }
-            )
 
             if let selectedCategory {
                 folderConversationActions(for: selectedCategory)
@@ -1499,27 +1499,24 @@ private struct RecentConversationsSection: View {
     var body: some View {
         Group {
             if !sessions.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 7) {
                     HStack {
                         Label("Recent Conversations", systemImage: "clock")
-                            .font(.paperCodexSystem(size: 14, weight: .semibold))
+                            .font(.paperCodexSystem(size: 12.5, weight: .semibold))
+                            .foregroundStyle(.secondary)
                         Spacer()
                     }
-                    ScrollView(.horizontal) {
-                        HStack(spacing: 8) {
-                            ForEach(sessions) { session in
-                                RecentConversationRow(
-                                    session: session,
-                                    papers: papersBySessionID[session.id, default: []],
-                                    onOpen: {
-                                        onOpen(session)
-                                    }
-                                )
-                            }
+                    VStack(spacing: 5) {
+                        ForEach(Array(sessions.prefix(4))) { session in
+                            RecentConversationRow(
+                                session: session,
+                                papers: papersBySessionID[session.id, default: []],
+                                onOpen: {
+                                    onOpen(session)
+                                }
+                            )
                         }
-                        .padding(.vertical, 1)
                     }
-                    .scrollIndicators(.hidden)
                 }
             }
         }
@@ -1550,10 +1547,10 @@ private struct RecentConversationRow: View {
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.tertiary)
             }
-            .frame(width: 230, alignment: .leading)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 9)
-            .background(Color(nsColor: .controlBackgroundColor))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 7)
+            .background(Color(nsColor: .windowBackgroundColor).opacity(0.72))
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .overlay(
                 RoundedRectangle(cornerRadius: 8)
