@@ -880,6 +880,17 @@ func runUILayoutSourceChecks() throws {
         "chat should distinguish the active session run from other sessions"
     )
     try check(
+        chatSource.contains("@State private var draftsByComposerKey")
+            && chatSource.contains("composerDraftKey")
+            && chatSource.contains("composerDraftBinding"),
+        "chat composer drafts should be keyed by the selected paper and session"
+    )
+    try check(
+        !chatSource.contains("@State private var draft =")
+            && !chatSource.contains("text: $draft"),
+        "chat composer should not keep one global draft shared across papers"
+    )
+    try check(
         chatSource.contains("canEditComposer"),
         "other session composers should remain editable while Codex runs elsewhere"
     )
@@ -910,6 +921,25 @@ func runUILayoutSourceChecks() throws {
     try check(
         appModelSource.contains("appendCodexCancellationMessage"),
         "cancelling Codex should leave a visible trace in the session"
+    )
+    try check(
+        appModelSource.contains("paperScopedSessions")
+            && appModelSource.contains("session.paperIDs == [paperID]"),
+        "reader should only expose sessions that belong to the currently selected paper"
+    )
+    try check(
+        !appModelSource.contains("try createSession(paperIDs: selectedSession?.paperIDs)")
+            && appModelSource.contains("try createSession()"),
+        "new chat sessions should not inherit another paper set"
+    )
+    try check(
+        appModelSource.contains("let sessionPaperIDs = [paper.id]")
+            && !appModelSource.contains("requestedPaperIDs ?? [paper.id]"),
+        "created chat sessions should be scoped to exactly one paper"
+    )
+    try check(
+        !appModelSource.contains("session.paperIDs + [fallbackPaper.id]"),
+        "session context loading should not silently add the selected fallback paper to another paper's session"
     )
 
     try check(

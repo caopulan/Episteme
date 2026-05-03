@@ -7,7 +7,7 @@ private let chatComposerTextHeightDefaultsKey = "PaperCodexChatComposerTextHeigh
 
 struct ChatView: View {
     @EnvironmentObject private var model: AppModel
-    @State private var draft = ""
+    @State private var draftsByComposerKey: [String: String] = [:]
     @State private var isSendButtonHovered = false
     @State private var selectedPanelTab: SessionPanelTab = .chat
     @State private var composerTextHeight = ChatComposerLayout.loadTextHeight()
@@ -126,7 +126,28 @@ struct ChatView: View {
     }
 
     private var trimmedDraft: String {
-        draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        currentDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var currentDraft: String {
+        draftsByComposerKey[composerDraftKey, default: ""]
+    }
+
+    private var composerDraftKey: String {
+        let paperID = model.selectedPaper?.id ?? "no-paper"
+        let sessionID = model.selectedSession?.id ?? "no-session"
+        return "\(paperID)|\(sessionID)"
+    }
+
+    private var composerDraftBinding: Binding<String> {
+        Binding(
+            get: {
+                draftsByComposerKey[composerDraftKey, default: ""]
+            },
+            set: { value in
+                draftsByComposerKey[composerDraftKey] = value
+            }
+        )
     }
 
     private var canUseSendButton: Bool {
@@ -247,7 +268,7 @@ struct ChatView: View {
 
                 HStack(alignment: .bottom, spacing: 8) {
                     ComposerTextView(
-                        text: $draft,
+                        text: composerDraftBinding,
                         isEnabled: canEditComposer,
                         onSubmit: sendDraft
                     )
@@ -332,7 +353,7 @@ struct ChatView: View {
         guard !model.isSending, !message.isEmpty else {
             return
         }
-        draft = ""
+        draftsByComposerKey[composerDraftKey] = ""
         Task {
             await model.sendMessage(message)
         }

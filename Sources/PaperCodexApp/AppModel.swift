@@ -2121,7 +2121,7 @@ final class AppModel: ObservableObject {
         guard let repository else {
             throw AppModelError.repositoryUnavailable
         }
-        sessions = try repository.fetchSessions(paperID: paper.id)
+        sessions = try paperScopedSessions(for: paper.id, repository: repository)
         if let first = sessions.last {
             selectedSession = first
             messages = try repository.fetchMessages(sessionID: first.id)
@@ -2133,6 +2133,12 @@ final class AppModel: ObservableObject {
         route = .reader
     }
 
+    private func paperScopedSessions(for paperID: String, repository: PaperRepository) throws -> [PaperSession] {
+        try repository.fetchSessions(paperID: paperID).filter { session in
+            session.paperIDs == [paperID]
+        }
+    }
+
     private func focusPaperInCurrentReaderSession(_ paper: Paper) throws {
         openOrUpdateReaderTab(paper)
         selectedPaper = paper
@@ -2140,6 +2146,13 @@ final class AppModel: ObservableObject {
         pdfJumpTarget = nil
         guard let repository else {
             throw AppModelError.repositoryUnavailable
+        }
+        sessions = try paperScopedSessions(for: paper.id, repository: repository)
+        if let first = sessions.last {
+            selectedSession = first
+            messages = try repository.fetchMessages(sessionID: first.id)
+        } else {
+            try createSession()
         }
         try loadReaderPositionForSelectedContext(repository: repository)
     }
@@ -2199,7 +2212,7 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func createSession(paperIDs requestedPaperIDs: [String]? = nil) throws {
+    func createSession() throws {
         guard let paper = selectedPaper else {
             throw AppModelError.noSelectedPaper
         }
@@ -2209,7 +2222,7 @@ final class AppModel: ObservableObject {
         let now = Date()
         let sessionID = UUID().uuidString.lowercased()
         let workspacePath = supportRoot.appendingPathComponent("sessions/\(sessionID)", isDirectory: true).path
-        let sessionPaperIDs = uniqueIDs((requestedPaperIDs ?? [paper.id]) + [paper.id])
+        let sessionPaperIDs = [paper.id]
         let session = PaperSession(
             id: sessionID,
             title: "\(paper.title) Notes",
@@ -2228,7 +2241,7 @@ final class AppModel: ObservableObject {
             spansByPaperID: context.spansByPaperID,
             anchorsByPaperID: context.anchorsByPaperID
         )
-        sessions = try repository.fetchSessions(paperID: paper.id)
+        sessions = try paperScopedSessions(for: paper.id, repository: repository)
         selectedSession = session
         messages = []
         readerPosition = nil
@@ -2237,7 +2250,7 @@ final class AppModel: ObservableObject {
 
     func newSessionButtonTapped() {
         do {
-            try createSession(paperIDs: selectedSession?.paperIDs)
+            try createSession()
         } catch {
             errorMessage = String(describing: error)
         }
@@ -2260,7 +2273,7 @@ final class AppModel: ObservableObject {
                 selectedSession = updated
             }
             if let selectedPaper {
-                sessions = try repository.fetchSessions(paperID: selectedPaper.id)
+                sessions = try paperScopedSessions(for: selectedPaper.id, repository: repository)
             }
             postNotice(kind: .success, title: "Session Renamed", message: trimmed)
         } catch {
@@ -2270,7 +2283,7 @@ final class AppModel: ObservableObject {
 
     func startFreshSessionFromCurrentPaperSet() {
         do {
-            try createSession(paperIDs: selectedSession?.paperIDs)
+            try createSession()
         } catch {
             errorMessage = String(describing: error)
         }
@@ -2284,6 +2297,9 @@ final class AppModel: ObservableObject {
             guard let session = sessions.first(where: { $0.id == sessionID }) else {
                 return
             }
+            if let selectedPaper, session.paperIDs != [selectedPaper.id] {
+                return
+            }
             selectedSession = session
             messages = try repository.fetchMessages(sessionID: session.id)
             try loadReaderPositionForSelectedContext(repository: repository)
@@ -2294,10 +2310,7 @@ final class AppModel: ObservableObject {
 
     func selectReaderPaper(_ paper: Paper) {
         do {
-            guard selectedSession?.paperIDs.contains(paper.id) == true else {
-                return
-            }
-            try focusPaperInCurrentReaderSession(paper)
+            try focusPaperForReader(paper, opensReaderTab: false)
         } catch {
             errorMessage = String(describing: error)
         }
@@ -2308,51 +2321,11 @@ final class AppModel: ObservableObject {
             guard let repository else {
                 throw AppModelError.repositoryUnavailable
             }
-            guard var session = selectedSession else {
-                throw AppModelError.noSelectedSession
-            }
-
-            var paperIDs = session.paperIDs
             if included {
-                if !paperIDs.contains(paper.id) {
-                    paperIDs.append(paper.id)
-                }
-            } else {
-                guard paperIDs.count > 1 else {
-                    return
-                }
-                paperIDs.removeAll { $0 == paper.id }
+                try focusPaperForReader(paper, opensReaderTab: false)
+            } else if selectedPaper?.id == paper.id {
+                sessions = try paperScopedSessions(for: paper.id, repository: repository)
             }
-
-            session.paperIDs = paperIDs
-            session.updatedAt = Date()
-            try repository.upsertSession(session)
-
-            if selectedPaper.map({ !paperIDs.contains($0.id) }) == true,
-               let firstPaperID = paperIDs.first,
-               let replacement = try repository.fetchPapers(ids: [firstPaperID]).first {
-                selectedPaper = replacement
-                currentSelection = nil
-                pdfJumpTarget = nil
-                try loadReaderPositionForSelectedContext(repository: repository)
-            }
-
-            let storedSession = try repository.fetchSession(id: session.id) ?? session
-            let fallback = selectedPaper ?? paper
-            let context = try loadSessionPaperContext(session: storedSession, fallbackPaper: fallback, repository: repository)
-            try workspaceManager.writeWorkspace(
-                session: storedSession,
-                papers: context.papers,
-                pagesByPaperID: context.pagesByPaperID,
-                spansByPaperID: context.spansByPaperID,
-                anchorsByPaperID: context.anchorsByPaperID
-            )
-
-            selectedSession = storedSession
-            if let selectedPaper {
-                sessions = try repository.fetchSessions(paperID: selectedPaper.id)
-            }
-            messages = try repository.fetchMessages(sessionID: storedSession.id)
         } catch {
             errorMessage = String(describing: error)
         }
@@ -2545,6 +2518,9 @@ final class AppModel: ObservableObject {
             guard var session = selectedSession else {
                 throw AppModelError.noSelectedSession
             }
+            guard session.paperIDs == [paper.id] else {
+                throw AppModelError.sessionPaperMismatch
+            }
             runSessionID = session.id
 
             let context = try loadSessionPaperContext(session: session, fallbackPaper: paper, repository: repository)
@@ -2711,7 +2687,7 @@ final class AppModel: ObservableObject {
         repository: PaperRepository
     ) throws {
         if selectedPaper?.id == paperID {
-            sessions = try repository.fetchSessions(paperID: paperID)
+            sessions = try paperScopedSessions(for: paperID, repository: repository)
         }
         guard selectedSession?.id == session.id else {
             return
@@ -2725,7 +2701,7 @@ final class AppModel: ObservableObject {
         fallbackPaper: Paper,
         repository: PaperRepository
     ) throws -> SessionPaperContext {
-        let paperIDs = uniqueIDs(session.paperIDs + [fallbackPaper.id])
+        let paperIDs = session.paperIDs.isEmpty ? [fallbackPaper.id] : uniqueIDs(session.paperIDs)
         let fetchedPapers = try repository.fetchPapers(ids: paperIDs)
         let papers = fetchedPapers.isEmpty ? [fallbackPaper] : fetchedPapers
         var pagesByPaperID: [String: [PageIndex]] = [:]
@@ -3957,6 +3933,7 @@ enum AppModelError: Error, CustomStringConvertible {
     case noSelectedPaper
     case noSelectedSession
     case emptyName
+    case sessionPaperMismatch
     case sourceNotFound(String)
     case anchorMatchFailed
     case noRecoverableCodexTurn
@@ -3976,6 +3953,8 @@ enum AppModelError: Error, CustomStringConvertible {
             "No Codex session is selected."
         case .emptyName:
             "Name cannot be empty."
+        case .sessionPaperMismatch:
+            "This chat session belongs to a different paper. Open a session for the current paper before sending."
         case let .sourceNotFound(id):
             "No source was found for citation \(id)."
         case .anchorMatchFailed:
