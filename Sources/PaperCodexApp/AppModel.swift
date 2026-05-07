@@ -967,7 +967,7 @@ final class AppModel: ObservableObject {
         postNotice(kind: .info, title: "Stopping Codex", message: run.title)
     }
 
-    func sendCollectionMessage(_ text: String, collectionID: String) async {
+    func sendCollectionMessage(_ text: String, collectionID: String, selectionContext: String? = nil) async {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             return
@@ -1044,7 +1044,8 @@ final class AppModel: ObservableObject {
                 userMessage: trimmed,
                 collection: collection,
                 papers: collectionPapers,
-                workspacePath: workspaceURL.path
+                workspacePath: workspaceURL.path,
+                selectionContext: selectionContext
             )
             let codexReply = try await runCodex(
                 prompt: prompt,
@@ -1123,7 +1124,8 @@ final class AppModel: ObservableObject {
         userMessage: String,
         collection: PaperCollectionDocument,
         papers: [Paper],
-        workspacePath: String
+        workspacePath: String,
+        selectionContext: String?
     ) -> String {
         let collectionJSONPath = collectionStore.collectionJSONURL(id: collection.id).path
         let paperPrompt = PromptBuilder().buildPrompt(
@@ -1140,6 +1142,7 @@ final class AppModel: ObservableObject {
         let columns = collection.columns.map(collectionColumnPromptLine).joined(separator: "\n")
         let validationIssues = validationIssues(for: collection)
         let validationSummary = collectionValidationPromptSummary(for: collection, issues: validationIssues)
+        let selectionSummary = collectionSelectionPromptSummary(selectionContext)
         return """
         \(paperPrompt)
 
@@ -1152,6 +1155,7 @@ final class AppModel: ObservableObject {
         [Collection Columns]
         \(columns)
         \(validationSummary)
+        \(selectionSummary)
 
         \(PaperCollectionDocument.codexEditingContract(collectionJSONPath: collectionJSONPath))
 
@@ -1159,6 +1163,18 @@ final class AppModel: ObservableObject {
         \(userMessage)
 
         Update collection.json when the user asks for analysis, summaries, labels, grouping, classification, scores, or new comparison columns. After editing, answer briefly with what changed.
+        """
+    }
+
+    private func collectionSelectionPromptSummary(_ selectionContext: String?) -> String {
+        guard let selectionContext,
+              !selectionContext.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return ""
+        }
+        return """
+
+        [Collection Selection Context]
+        \(selectionContext)
         """
     }
 

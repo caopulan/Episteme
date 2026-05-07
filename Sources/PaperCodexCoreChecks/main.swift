@@ -645,9 +645,41 @@ func runUILayoutSourceChecks() throws {
             && collectionSource.contains("CollectionWorkbenchHeader")
             && collectionSource.contains("CollectionViewTabs")
             && collectionSource.contains("CollectionFormulaBar")
-            && collectionSource.contains("CollectionFieldInspector")
+            && collectionSource.contains("CollectionAIDock")
+            && collectionSource.contains("CollectionFieldPanel")
             && collectionSource.contains("CollectionStatusBar"),
         "CollectionView should render the collection table through a complete workbench shell"
+    )
+    try check(
+        collectionSource.contains("CollectionAIDock")
+            && collectionSource.contains("enum CollectionAIDockTab")
+            && collectionSource.contains("CollectionSelectionPanel")
+            && collectionSource.contains("CollectionFieldPanel")
+            && collectionSource.contains("CollectionRunsPanel"),
+        "CollectionView should use a docked selection-first AI panel"
+    )
+    try check(
+        collectionSource.contains("CollectionChatPanel(")
+            && collectionSource.contains("case .chat")
+            && !collectionSource.contains("CollectionChatPanel(collection: collection)\n                    .frame(width: 380)"),
+        "Collection chat should live inside the integrated dock instead of a separate right panel"
+    )
+    try check(
+        collectionSource.contains("CollectionFieldPanel")
+            && !collectionSource.contains("CollectionFieldInspector("),
+        "Collection field settings should move into the dock Field tab"
+    )
+    try check(
+        appModelSource.contains("selectionContext:")
+            && appModelSource.contains("[Collection Selection Context]"),
+        "Collection chat prompts should support bounded selection context"
+    )
+    try check(
+        collectionSource.contains("selectionPromptContext(")
+            && collectionSource.contains("selected_cell:")
+            && collectionSource.contains("selected_row_ids:")
+            && collectionSource.contains("displayed_rows:"),
+        "CollectionView should derive bounded table selection context for AI prompts"
     )
     try check(
         collectionSource.contains("enum CollectionTableViewMode")

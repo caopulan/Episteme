@@ -20,6 +20,41 @@ fileprivate enum CollectionTableViewMode: String, CaseIterable, Identifiable {
     }
 }
 
+fileprivate enum CollectionAIDockTab: String, CaseIterable, Identifiable {
+    case selection
+    case field
+    case chat
+    case runs
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .selection:
+            "Selection"
+        case .field:
+            "Field"
+        case .chat:
+            "Chat"
+        case .runs:
+            "Runs"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .selection:
+            "scope"
+        case .field:
+            "slider.horizontal.3"
+        case .chat:
+            "text.bubble"
+        case .runs:
+            "bolt.horizontal"
+        }
+    }
+}
+
 fileprivate struct CollectionCellCoordinate: Equatable {
     var rowID: String
     var columnID: String
@@ -27,6 +62,30 @@ fileprivate struct CollectionCellCoordinate: Equatable {
 
 fileprivate func validationCellKey(rowID: String, columnID: String) -> String {
     "\(rowID)::\(columnID)"
+}
+
+fileprivate func cellCoordinateLabel(
+    rowID: String,
+    columnID: String,
+    rows: [PaperCollectionRow],
+    columns: [PaperCollectionColumn]
+) -> String {
+    guard let rowIndex = rows.firstIndex(where: { $0.id == rowID }),
+          let columnIndex = columns.firstIndex(where: { $0.id == columnID }) else {
+        return "--"
+    }
+    return "\(spreadsheetColumnName(columnIndex))\(rowIndex + 1)"
+}
+
+fileprivate func spreadsheetColumnName(_ index: Int) -> String {
+    var value = index + 1
+    var name = ""
+    while value > 0 {
+        let remainder = (value - 1) % 26
+        name = String(UnicodeScalar(65 + remainder)!) + name
+        value = (value - 1) / 26
+    }
+    return name
 }
 
 struct CollectionView: View {
@@ -45,6 +104,8 @@ struct CollectionView: View {
     @State private var cancelledEditingCell: CollectionCellCoordinate?
     @State private var formulaDraft = ""
     @State private var formulaDraftCell: CollectionCellCoordinate?
+    @State private var activeDockTab: CollectionAIDockTab = .selection
+    @State private var isAIDockCollapsed = false
 
     var body: some View {
         SidebarSplitLayout(minContentWidth: 940) {
@@ -69,6 +130,8 @@ struct CollectionView: View {
             cancelledEditingCell = nil
             formulaDraft = ""
             formulaDraftCell = nil
+            activeDockTab = .selection
+            isAIDockCollapsed = false
         }
         .sheet(isPresented: $isCreatingCollection) {
             CollectionCreateSheet(
@@ -186,12 +249,7 @@ struct CollectionView: View {
     @ViewBuilder
     private var contentPane: some View {
         if let collection = model.selectedCollection {
-            HStack(spacing: 0) {
-                tablePane(collection)
-                Divider()
-                CollectionChatPanel(collection: collection)
-                    .frame(width: 380)
-            }
+            tablePane(collection)
         } else {
             ContentUnavailableView {
                 Label("No Collections", systemImage: "tablecells")
@@ -218,6 +276,12 @@ struct CollectionView: View {
         let displayRows = displayedRows(for: collection, issues: validationIssues)
         let displayedRowIDs = Set(displayRows.map(\.id))
         let visibleColumnIDs = Set(visibleColumns.map(\.id))
+        let selectionContext = selectionPromptContext(
+            collection: collection,
+            displayRows: displayRows,
+            visibleColumns: visibleColumns,
+            validationIssues: validationIssues
+        )
 
         return CollectionWorkbench(
             collection: collection,
@@ -235,9 +299,14 @@ struct CollectionView: View {
             cancelledEditingCell: $cancelledEditingCell,
             formulaDraft: $formulaDraft,
             formulaDraftCell: $formulaDraftCell,
+            activeDockTab: $activeDockTab,
+            isAIDockCollapsed: $isAIDockCollapsed,
             filterText: $filterText,
             sortColumnID: sortColumnID,
             sortAscending: sortAscending,
+            activeRun: model.activeCodexRun(forCollectionID: collection.id),
+            isSending: model.isCollectionSending(collection.id),
+            selectionContext: selectionContext,
             onAddColumn: {
                 isAddingColumn = true
             },
@@ -281,6 +350,18 @@ struct CollectionView: View {
             onChatSelection: {
                 let selectedPapers = model.papers(in: collection, rowIDs: selectedRowIDs.isEmpty ? nil : selectedRowIDs)
                 model.openPapersForChat(selectedPapers.map(\.id))
+            },
+            onCancelRun: {
+                model.cancelCollectionCodexRun(collection.id)
+            },
+            onSendChatMessage: { message, selectionContext in
+                Task {
+                    await model.sendCollectionMessage(
+                        message,
+                        collectionID: collection.id,
+                        selectionContext: selectionContext
+                    )
+                }
             },
             onRevealJSON: {
                 model.revealCollectionSource(collection.id)
@@ -476,6 +557,65 @@ struct CollectionView: View {
             }
     }
 
+    private func selectionPromptContext(
+        collection: PaperCollectionDocument,
+        displayRows: [PaperCollectionRow],
+        visibleColumns: [PaperCollectionColumn],
+        validationIssues: [PaperCollectionValidationIssue]
+    ) -> String? {
+        var lines: [String] = []
+        let selectedRowIDsList = selectedRowIDs.sorted()
+        let visibleColumnIDs = visibleColumns.map(\.id).joined(separator: ", ")
+        lines.append("active_view: \(activeViewMode.rawValue)")
+        lines.append("visible_column_ids: [\(visibleColumnIDs)]")
+        if let sortColumnID {
+            lines.append("sort: \(sortColumnID) \(sortAscending ? "ascending" : "descending")")
+        }
+        if !normalizedFilterText.isEmpty {
+            lines.append("filter: \(normalizedFilterText)")
+        }
+        if !selectedRowIDsList.isEmpty {
+            lines.append("selected_row_ids: [\(selectedRowIDsList.prefix(20).joined(separator: ", "))]")
+        }
+        if let selectedCell,
+           let row = collection.rows.first(where: { $0.id == selectedCell.rowID }),
+           let column = collection.columns.first(where: { $0.id == selectedCell.columnID }) {
+            let coordinate = cellCoordinateLabel(
+                rowID: selectedCell.rowID,
+                columnID: selectedCell.columnID,
+                rows: collection.rows,
+                columns: collection.columns
+            )
+            let value = row.values[selectedCell.columnID, default: ""]
+            lines.append("selected_cell: \(coordinate)")
+            lines.append("selected_row_id: \(row.id)")
+            lines.append("selected_paper_id: \(row.paperID)")
+            lines.append("selected_field_id: \(column.id)")
+            lines.append("selected_field_title: \(column.title)")
+            lines.append("selected_field_type: \(column.valueKind.rawValue)")
+            lines.append("selected_value: \(value)")
+            let cellIssues = validationIssues.filter { $0.rowID == selectedCell.rowID && $0.columnID == selectedCell.columnID }
+            if !cellIssues.isEmpty {
+                lines.append("selected_cell_validation_issues: \(cellIssues.prefix(5).map(\.message).joined(separator: " | "))")
+            }
+        } else if !selectedRowIDsList.isEmpty {
+            let rowsByID = Dictionary(uniqueKeysWithValues: collection.rows.map { ($0.id, $0) })
+            let selectedPapers = selectedRowIDsList.prefix(10).compactMap { rowID -> String? in
+                guard let row = rowsByID[rowID] else {
+                    return nil
+                }
+                let title = row.values["paper_title", default: row.paperID]
+                return "\(rowID): \(title)"
+            }
+            lines.append("selected_rows_preview: \(selectedPapers.joined(separator: " | "))")
+        }
+        if lines.count <= 2 && selectedRowIDsList.isEmpty && selectedCell == nil && normalizedFilterText.isEmpty && activeViewMode == .all && sortColumnID == nil {
+            return nil
+        }
+        lines.append("displayed_rows: \(displayRows.count)/\(collection.rows.count)")
+        return lines.joined(separator: "\n")
+    }
+
     private func compareCollectionValues(_ left: String, _ right: String, kind: PaperCollectionColumnValueKind) -> ComparisonResult {
         let leftValue = left.trimmingCharacters(in: .whitespacesAndNewlines)
         let rightValue = right.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -532,9 +672,14 @@ private struct CollectionWorkbench: View {
     @Binding var cancelledEditingCell: CollectionCellCoordinate?
     @Binding var formulaDraft: String
     @Binding var formulaDraftCell: CollectionCellCoordinate?
+    @Binding var activeDockTab: CollectionAIDockTab
+    @Binding var isAIDockCollapsed: Bool
     @Binding var filterText: String
     var sortColumnID: String?
     var sortAscending: Bool
+    var activeRun: ActiveCodexRun?
+    var isSending: Bool
+    var selectionContext: String?
     var onAddColumn: () -> Void
     var onAddAllPapers: () -> Void
     var onAddCategory: (PaperCodexCore.Category) -> Void
@@ -548,6 +693,8 @@ private struct CollectionWorkbench: View {
     var onSetColumnAllowedValues: (String, [String]) -> Void
     var onSetColumnDescription: (String, String) -> Void
     var onChatSelection: () -> Void
+    var onCancelRun: () -> Void
+    var onSendChatMessage: (String, String?) -> Void
     var onRevealJSON: () -> Void
     var onRename: () -> Void
     var onDelete: () -> Void
@@ -558,35 +705,35 @@ private struct CollectionWorkbench: View {
     var onOpenPaper: (String) -> Void
 
     var body: some View {
-        VStack(spacing: 0) {
-            CollectionWorkbenchHeader(
-                collection: collection,
-                displayRowCount: displayRows.count,
-                visibleColumnCount: visibleColumns.count,
-                jsonPath: jsonPath,
-                onRename: onRename,
-                onRevealJSON: onRevealJSON,
-                onDelete: onDelete
-            )
-            Divider()
-            toolbar
-            CollectionViewTabs(
-                activeViewMode: $activeViewMode,
-                allCount: collection.rows.count,
-                invalidCount: invalidRowIDs.count,
-                missingRequiredCount: missingRequiredRowIDs.count
-            )
-            Divider()
-            CollectionFormulaBar(
-                collection: collection,
-                selectedCell: selectedCell,
-                columns: allColumns,
-                formulaDraft: $formulaDraft,
-                formulaDraftCell: $formulaDraftCell,
-                commitFormulaDraft: commitFormulaDraft
-            )
-            Divider()
-            HStack(spacing: 0) {
+        HStack(spacing: 0) {
+            VStack(spacing: 0) {
+                CollectionWorkbenchHeader(
+                    collection: collection,
+                    displayRowCount: displayRows.count,
+                    visibleColumnCount: visibleColumns.count,
+                    jsonPath: jsonPath,
+                    onRename: onRename,
+                    onRevealJSON: onRevealJSON,
+                    onDelete: onDelete
+                )
+                Divider()
+                toolbar
+                CollectionViewTabs(
+                    activeViewMode: $activeViewMode,
+                    allCount: collection.rows.count,
+                    invalidCount: invalidRowIDs.count,
+                    missingRequiredCount: missingRequiredRowIDs.count
+                )
+                Divider()
+                CollectionFormulaBar(
+                    collection: collection,
+                    selectedCell: selectedCell,
+                    columns: allColumns,
+                    formulaDraft: $formulaDraft,
+                    formulaDraftCell: $formulaDraftCell,
+                    commitFormulaDraft: commitFormulaDraft
+                )
+                Divider()
                 CollectionSpreadsheet(
                     rows: displayRows,
                     columns: visibleColumns,
@@ -608,12 +755,42 @@ private struct CollectionWorkbench: View {
                     onOpenPaper: onOpenPaper
                 )
                 Divider()
-                CollectionFieldInspector(
+                CollectionStatusBar(
+                    displayRowCount: displayRows.count,
+                    totalRowCount: collection.rows.count,
+                    selectedRowCount: selectedRowIDs.count,
+                    visibleColumnCount: visibleColumns.count,
+                    totalColumnCount: allColumns.count,
+                    issueCount: validationIssues.count,
+                    editingCell: editingCell
+                )
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            Divider()
+
+            if isAIDockCollapsed {
+                CollectionAIDockRail(
+                    activeDockTab: $activeDockTab,
+                    isCollapsed: $isAIDockCollapsed
+                )
+                .frame(width: 44)
+            } else {
+                CollectionAIDock(
                     collection: collection,
                     selectedCell: selectedCell,
+                    selectedRowIDs: selectedRowIDs,
+                    rows: displayRows,
                     columns: allColumns,
                     visibleColumnCount: visibleColumns.count,
                     validationIssues: validationIssues,
+                    activeDockTab: $activeDockTab,
+                    isCollapsed: $isAIDockCollapsed,
+                    activeRun: activeRun,
+                    isSending: isSending,
+                    selectionContext: selectionContext,
+                    onCancelRun: onCancelRun,
+                    onSendChatMessage: onSendChatMessage,
                     onUpdateColumnTitle: onUpdateColumnTitle,
                     onSetColumnHidden: onSetColumnHidden,
                     onUpdateColumnWidth: onUpdateColumnWidth,
@@ -621,18 +798,8 @@ private struct CollectionWorkbench: View {
                     onSetColumnAllowedValues: onSetColumnAllowedValues,
                     onSetColumnDescription: onSetColumnDescription
                 )
-                .frame(width: 260)
+                .frame(width: 350)
             }
-            Divider()
-            CollectionStatusBar(
-                displayRowCount: displayRows.count,
-                totalRowCount: collection.rows.count,
-                selectedRowCount: selectedRowIDs.count,
-                visibleColumnCount: visibleColumns.count,
-                totalColumnCount: allColumns.count,
-                issueCount: validationIssues.count,
-                editingCell: editingCell
-            )
         }
         .background(Color(nsColor: .windowBackgroundColor))
     }
@@ -695,6 +862,16 @@ private struct CollectionWorkbench: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(collection.rows.isEmpty)
+
+                Button {
+                    withAnimation(.easeOut(duration: 0.16)) {
+                        isAIDockCollapsed.toggle()
+                    }
+                } label: {
+                    Image(systemName: isAIDockCollapsed ? "sidebar.right" : "sidebar.trailing")
+                }
+                .buttonStyle(.bordered)
+                .help(isAIDockCollapsed ? "Show AI Panel" : "Hide AI Panel")
 
                 if !selectedRowIDs.isEmpty {
                     Button {
@@ -955,7 +1132,351 @@ private struct CollectionFormulaBar: View {
     }
 }
 
-private struct CollectionFieldInspector: View {
+private struct CollectionAIDock: View {
+    var collection: PaperCollectionDocument
+    var selectedCell: CollectionCellCoordinate?
+    var selectedRowIDs: Set<String>
+    var rows: [PaperCollectionRow]
+    var columns: [PaperCollectionColumn]
+    var visibleColumnCount: Int
+    var validationIssues: [PaperCollectionValidationIssue]
+    @Binding var activeDockTab: CollectionAIDockTab
+    @Binding var isCollapsed: Bool
+    var activeRun: ActiveCodexRun?
+    var isSending: Bool
+    var selectionContext: String?
+    var onCancelRun: () -> Void
+    var onSendChatMessage: (String, String?) -> Void
+    var onUpdateColumnTitle: (String, String) -> Void
+    var onSetColumnHidden: (String, Bool) -> Void
+    var onUpdateColumnWidth: (String, Double) -> Void
+    var onSetColumnRequired: (String, Bool) -> Void
+    var onSetColumnAllowedValues: (String, [String]) -> Void
+    var onSetColumnDescription: (String, String) -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Label("AI Panel", systemImage: "sparkles")
+                    .font(.paperCodexSystem(size: 14, weight: .semibold))
+                Spacer()
+                Button {
+                    withAnimation(.easeOut(duration: 0.16)) {
+                        isCollapsed = true
+                    }
+                } label: {
+                    Image(systemName: "sidebar.trailing")
+                }
+                .buttonStyle(.borderless)
+                .help("Collapse AI Panel")
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+
+            Picker("Panel", selection: $activeDockTab) {
+                ForEach(CollectionAIDockTab.allCases) { tab in
+                    Label(tab.title, systemImage: tab.systemImage).tag(tab)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .controlSize(.small)
+            .padding(.horizontal, 12)
+            .padding(.bottom, 12)
+
+            Divider()
+
+            switch activeDockTab {
+            case .selection:
+                CollectionSelectionPanel(
+                    collection: collection,
+                    selectedCell: selectedCell,
+                    selectedRowIDs: selectedRowIDs,
+                    rows: rows,
+                    columns: columns,
+                    validationIssues: validationIssues,
+                    selectionContext: selectionContext,
+                    onSendChatMessage: onSendChatMessage
+                )
+            case .field:
+                CollectionFieldPanel(
+                    collection: collection,
+                    selectedCell: selectedCell,
+                    columns: columns,
+                    visibleColumnCount: visibleColumnCount,
+                    validationIssues: validationIssues,
+                    onUpdateColumnTitle: onUpdateColumnTitle,
+                    onSetColumnHidden: onSetColumnHidden,
+                    onUpdateColumnWidth: onUpdateColumnWidth,
+                    onSetColumnRequired: onSetColumnRequired,
+                    onSetColumnAllowedValues: onSetColumnAllowedValues,
+                    onSetColumnDescription: onSetColumnDescription
+                )
+            case .chat:
+                CollectionChatPanel(
+                    collection: collection,
+                    selectionContext: selectionContext,
+                    activeRun: activeRun,
+                    isSending: isSending,
+                    onCancelRun: onCancelRun,
+                    onSendMessage: onSendChatMessage
+                )
+            case .runs:
+                CollectionRunsPanel(
+                    activeRun: activeRun,
+                    isSending: isSending,
+                    onCancelRun: onCancelRun
+                )
+            }
+        }
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.78))
+    }
+}
+
+private struct CollectionAIDockRail: View {
+    @Binding var activeDockTab: CollectionAIDockTab
+    @Binding var isCollapsed: Bool
+
+    var body: some View {
+        VStack(spacing: 8) {
+            Button {
+                withAnimation(.easeOut(duration: 0.16)) {
+                    isCollapsed = false
+                }
+            } label: {
+                Image(systemName: "sidebar.trailing")
+            }
+            .buttonStyle(.borderless)
+            .help("Show AI Panel")
+
+            Divider()
+                .padding(.vertical, 4)
+
+            ForEach(CollectionAIDockTab.allCases) { tab in
+                Button {
+                    activeDockTab = tab
+                    withAnimation(.easeOut(duration: 0.16)) {
+                        isCollapsed = false
+                    }
+                } label: {
+                    Image(systemName: tab.systemImage)
+                        .frame(width: 28, height: 28)
+                        .background(activeDockTab == tab ? Color.accentColor.opacity(0.14) : Color.clear, in: RoundedRectangle(cornerRadius: 6))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(activeDockTab == tab ? Color.accentColor : Color.secondary)
+                .help(tab.title)
+            }
+            Spacer()
+        }
+        .padding(.vertical, 10)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.86))
+    }
+}
+
+private struct CollectionSelectionPanel: View {
+    var collection: PaperCollectionDocument
+    var selectedCell: CollectionCellCoordinate?
+    var selectedRowIDs: Set<String>
+    var rows: [PaperCollectionRow]
+    var columns: [PaperCollectionColumn]
+    var validationIssues: [PaperCollectionValidationIssue]
+    var selectionContext: String?
+    var onSendChatMessage: (String, String?) -> Void
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                CollectionDockSection(title: "Selection", systemImage: "scope") {
+                    if selectedCell != nil, let row, let column {
+                        VStack(alignment: .leading, spacing: 8) {
+                            CollectionDetailRow("Cell", coordinateLabel)
+                            CollectionDetailRow("Paper", row.values["paper_title", default: row.paperID])
+                            CollectionDetailRow("Field", column.title)
+                            CollectionDetailRow("Type", column.valueKind.displayTitle)
+                            CollectionDetailRow("Value", selectedValue.isEmpty ? "--" : selectedValue)
+                        }
+                        if !cellIssues.isEmpty {
+                            Divider()
+                            VStack(alignment: .leading, spacing: 6) {
+                                ForEach(cellIssues) { issue in
+                                    Label(issue.message, systemImage: "exclamationmark.triangle.fill")
+                                        .font(.caption)
+                                        .foregroundStyle(.red)
+                                }
+                            }
+                        }
+                    } else if !selectedRowIDs.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            CollectionDetailRow("Rows", "\(selectedRowIDs.count)")
+                            ForEach(selectedRowsPreview, id: \.id) { row in
+                                Text(row.values["paper_title", default: row.paperID])
+                                    .font(.caption)
+                                    .lineLimit(2)
+                            }
+                        }
+                    } else {
+                        VStack(alignment: .leading, spacing: 8) {
+                            CollectionDetailRow("Collection", collection.title)
+                            CollectionDetailRow("Rows", "\(collection.rows.count)")
+                            CollectionDetailRow("Columns", "\(collection.columns.count)")
+                            CollectionDetailRow("Issues", "\(validationIssues.count)")
+                        }
+                    }
+                }
+
+                CollectionDockSection(title: "Actions", systemImage: "wand.and.stars") {
+                    VStack(spacing: 8) {
+                        if selectedCell != nil {
+                            CollectionDockActionButton(title: "Explain Cell", systemImage: "text.magnifyingglass") {
+                                send("Explain the selected cell. If the value needs evidence, cite the relevant paper context.")
+                            }
+                            CollectionDockActionButton(title: "Find Evidence", systemImage: "quote.bubble") {
+                                send("Find supporting evidence for the selected cell and update the cell if it is unsupported or incomplete.")
+                            }
+                            CollectionDockActionButton(title: "Validate Cell", systemImage: "checkmark.seal") {
+                                send("Validate the selected cell against the field definition and fix it if needed.")
+                            }
+                        } else if !selectedRowIDs.isEmpty {
+                            CollectionDockActionButton(title: "Summarize Rows", systemImage: "doc.text.magnifyingglass") {
+                                send("Summarize the selected rows into concise comparison fields. Add columns if useful.")
+                            }
+                            CollectionDockActionButton(title: "Fill Missing", systemImage: "square.and.pencil") {
+                                send("Fill missing values for the selected rows using the paper workspace evidence.")
+                            }
+                        } else {
+                            CollectionDockActionButton(title: "Validate Table", systemImage: "checklist") {
+                                send("Validate the table and fix invalid or missing values where the paper evidence is available.")
+                            }
+                            CollectionDockActionButton(title: "Suggest Fields", systemImage: "rectangle.badge.plus") {
+                                send("Suggest useful comparison fields for this collection and add the best few columns.")
+                            }
+                        }
+                    }
+                }
+
+                if let selectionContext {
+                    CollectionDockSection(title: "Prompt Scope", systemImage: "curlybraces.square") {
+                        Text(selectionContext)
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    }
+                }
+            }
+            .padding(14)
+        }
+    }
+
+    private var row: PaperCollectionRow? {
+        guard let selectedCell else {
+            return nil
+        }
+        return collection.rows.first { $0.id == selectedCell.rowID }
+    }
+
+    private var column: PaperCollectionColumn? {
+        guard let selectedCell else {
+            return nil
+        }
+        return columns.first { $0.id == selectedCell.columnID }
+    }
+
+    private var selectedValue: String {
+        guard let selectedCell, let row else {
+            return ""
+        }
+        return row.values[selectedCell.columnID, default: ""]
+    }
+
+    private var cellIssues: [PaperCollectionValidationIssue] {
+        guard let selectedCell else {
+            return []
+        }
+        return validationIssues.filter { $0.rowID == selectedCell.rowID && $0.columnID == selectedCell.columnID }
+    }
+
+    private var coordinateLabel: String {
+        guard let selectedCell else {
+            return "--"
+        }
+        return cellCoordinateLabel(
+            rowID: selectedCell.rowID,
+            columnID: selectedCell.columnID,
+            rows: collection.rows,
+            columns: columns
+        )
+    }
+
+    private var selectedRowsPreview: [PaperCollectionRow] {
+        let selected = selectedRowIDs
+        return collection.rows.filter { selected.contains($0.id) }.prefix(4).map { $0 }
+    }
+
+    private func send(_ prompt: String) {
+        onSendChatMessage(prompt, selectionContext)
+    }
+}
+
+private struct CollectionDockSection<Content: View>: View {
+    var title: String
+    var systemImage: String
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label(title, systemImage: systemImage)
+                .font(.paperCodexSystem(size: 13, weight: .semibold))
+            content()
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(nsColor: .textBackgroundColor).opacity(0.72), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.black.opacity(0.08), lineWidth: 1)
+        )
+    }
+}
+
+private struct CollectionDetailRow: View {
+    var title: String
+    var value: String
+
+    init(_ title: String, _ value: String) {
+        self.title = title
+        self.value = value
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.caption)
+                .lineLimit(3)
+                .textSelection(.enabled)
+        }
+    }
+}
+
+private struct CollectionDockActionButton: View {
+    var title: String
+    var systemImage: String
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Label(title, systemImage: systemImage)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+    }
+}
+
+private struct CollectionFieldPanel: View {
     var collection: PaperCollectionDocument
     var selectedCell: CollectionCellCoordinate?
     var columns: [PaperCollectionColumn]
@@ -975,84 +1496,86 @@ private struct CollectionFieldInspector: View {
     @FocusState private var focusedField: InspectorFocusedField?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label("Field Inspector", systemImage: "sidebar.right")
-                .font(.paperCodexSystem(size: 14, weight: .semibold))
-            if let column {
-                Group {
-                    editableTextField(
-                        "Field title",
-                        text: $titleDraft,
-                        focus: .title,
-                        onCommit: { commitTitleIfChanged(column) }
-                    )
-                    inspectorRow("Field ID", column.id)
-                    inspectorRow("Type", column.valueKind.displayTitle)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                Label("Field", systemImage: "slider.horizontal.3")
+                    .font(.paperCodexSystem(size: 14, weight: .semibold))
+                if let column {
+                    Group {
+                        editableTextField(
+                            "Field title",
+                            text: $titleDraft,
+                            focus: .title,
+                            onCommit: { commitTitleIfChanged(column) }
+                        )
+                        inspectorRow("Field ID", column.id)
+                        inspectorRow("Type", column.valueKind.displayTitle)
 
-                    Stepper(
-                        "Width: \(Int(column.width))",
-                        value: Binding(
-                            get: { column.width },
-                            set: { onUpdateColumnWidth(column.id, $0) }
-                        ),
-                        in: 72...420,
-                        step: 8
-                    )
-                    .font(.caption)
+                        Stepper(
+                            "Width: \(Int(column.width))",
+                            value: Binding(
+                                get: { column.width },
+                                set: { onUpdateColumnWidth(column.id, $0) }
+                            ),
+                            in: 72...420,
+                            step: 8
+                        )
+                        .font(.caption)
 
-                    Toggle("Visible", isOn: Binding(
-                        get: { !column.isHidden },
-                        set: { isVisible in
-                            guard isVisible || column.isHidden || visibleColumnCount > 1 else {
-                                return
+                        Toggle("Visible", isOn: Binding(
+                            get: { !column.isHidden },
+                            set: { isVisible in
+                                guard isVisible || column.isHidden || visibleColumnCount > 1 else {
+                                    return
+                                }
+                                onSetColumnHidden(column.id, !isVisible)
                             }
-                            onSetColumnHidden(column.id, !isVisible)
-                        }
-                    ))
-                    .font(.caption)
-                    .disabled(!column.isHidden && visibleColumnCount <= 1)
+                        ))
+                        .font(.caption)
+                        .disabled(!column.isHidden && visibleColumnCount <= 1)
 
-                    Toggle("Required", isOn: Binding(
-                        get: { column.isRequired },
-                        set: { onSetColumnRequired(column.id, $0) }
-                    ))
-                    .font(.caption)
+                        Toggle("Required", isOn: Binding(
+                            get: { column.isRequired },
+                            set: { onSetColumnRequired(column.id, $0) }
+                        ))
+                        .font(.caption)
 
-                    editableTextField(
-                        "Allowed values",
-                        text: $allowedValuesDraft,
-                        focus: .allowedValues,
-                        onCommit: {
-                            commitAllowedValuesIfChanged(column)
-                        }
-                    )
+                        editableTextField(
+                            "Allowed values",
+                            text: $allowedValuesDraft,
+                            focus: .allowedValues,
+                            onCommit: {
+                                commitAllowedValuesIfChanged(column)
+                            }
+                        )
 
-                    editableTextField(
-                        "Description",
-                        text: $descriptionDraft,
-                        focus: .description,
-                        onCommit: { commitDescriptionIfChanged(column) }
-                    )
-                }
-                if let selectedCell {
-                    let issues = validationIssues.filter { $0.rowID == selectedCell.rowID && $0.columnID == selectedCell.columnID }
-                    if !issues.isEmpty {
-                        Divider()
-                        ForEach(issues) { issue in
-                            Label(issue.message, systemImage: "exclamationmark.triangle.fill")
-                                .font(.caption)
-                                .foregroundStyle(.red)
+                        editableTextField(
+                            "Description",
+                            text: $descriptionDraft,
+                            focus: .description,
+                            onCommit: { commitDescriptionIfChanged(column) }
+                        )
+                    }
+                    if let selectedCell {
+                        let issues = validationIssues.filter { $0.rowID == selectedCell.rowID && $0.columnID == selectedCell.columnID }
+                        if !issues.isEmpty {
+                            Divider()
+                            ForEach(issues) { issue in
+                                Label(issue.message, systemImage: "exclamationmark.triangle.fill")
+                                    .font(.caption)
+                                    .foregroundStyle(.red)
+                            }
                         }
                     }
+                } else {
+                    Text("Select a cell to inspect its field settings and validation state.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
-            } else {
-                Text("Select a cell to inspect its field settings and validation state.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
-            Spacer()
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(14)
         .background(Color(nsColor: .controlBackgroundColor).opacity(0.75))
         .onAppear(perform: syncDrafts)
         .onChange(of: column?.id) { _, _ in
@@ -1632,32 +2155,75 @@ private extension String {
     }
 }
 
+private struct CollectionRunsPanel: View {
+    var activeRun: ActiveCodexRun?
+    var isSending: Bool
+    var onCancelRun: () -> Void
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                CollectionDockSection(title: "Runs", systemImage: "bolt.horizontal") {
+                    if let activeRun {
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack(spacing: 8) {
+                                ProgressView()
+                                    .controlSize(.small)
+                                Text(activeRun.title)
+                                    .font(.caption.weight(.semibold))
+                                    .lineLimit(1)
+                                Spacer()
+                                Button {
+                                    onCancelRun()
+                                } label: {
+                                    Image(systemName: "stop.circle.fill")
+                                }
+                                .buttonStyle(.borderless)
+                                .foregroundStyle(.red)
+                                .help("Stop Codex")
+                            }
+                            CollectionRunBubble(run: activeRun)
+                        }
+                    } else {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Label(isSending ? "Preparing run" : "No active run", systemImage: isSending ? "hourglass" : "checkmark.circle")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text("Recent collection activity will appear here while Codex is editing the table.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+            .padding(14)
+        }
+    }
+}
+
 private struct CollectionChatPanel: View {
     @EnvironmentObject private var model: AppModel
     var collection: PaperCollectionDocument
+    var selectionContext: String?
+    var activeRun: ActiveCodexRun?
+    var isSending: Bool
+    var onCancelRun: () -> Void
+    var onSendMessage: (String, String?) -> Void
     @State private var draft = ""
 
     private var messages: [ChatMessage] {
         model.collectionMessages(for: collection.id)
     }
 
-    private var activeRun: ActiveCodexRun? {
-        model.activeCodexRun(forCollectionID: collection.id)
-    }
-
-    private var isSending: Bool {
-        activeRun != nil
-    }
-
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Label("Collection Chat", systemImage: "wand.and.stars")
+                Label("Chat", systemImage: "text.bubble")
                     .font(.paperCodexSystem(size: 15, weight: .semibold))
                 Spacer()
                 if isSending {
                     Button {
-                        model.cancelCollectionCodexRun(collection.id)
+                        onCancelRun()
                     } label: {
                         Image(systemName: "xmark.circle.fill")
                     }
@@ -1668,6 +2234,15 @@ private struct CollectionChatPanel: View {
             }
             .padding(14)
             Divider()
+            if selectionContext != nil {
+                Label("Selection scope", systemImage: "scope")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                Divider()
+            }
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 10) {
@@ -1751,9 +2326,7 @@ private struct CollectionChatPanel: View {
             return
         }
         draft = ""
-        Task {
-            await model.sendCollectionMessage(message, collectionID: collection.id)
-        }
+        onSendMessage(message, selectionContext)
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy) {
