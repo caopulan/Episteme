@@ -302,6 +302,12 @@ func runUILayoutSourceChecks() throws {
         "library category rows should have a dedicated hoverable row component"
     )
     try check(
+        librarySource.contains("private var sidebarLists: some View") &&
+            librarySource.contains("ScrollView(.vertical") &&
+            librarySource.contains("sidebarLists"),
+        "library sidebar category and tag lists should live inside a vertical scroll view"
+    )
+    try check(
         librarySource.contains("onCreateChild"),
         "library category rows should expose a direct child-category creation action"
     )

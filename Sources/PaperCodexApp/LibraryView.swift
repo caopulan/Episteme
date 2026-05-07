@@ -320,86 +320,101 @@ struct LibraryView: View {
 
             Divider()
 
-            VStack(alignment: .leading, spacing: 8) {
-                sidebarHeader("Categories", systemImage: "folder") {
-                    startCreatingCategory(parentID: selectedCategoryID)
-                }
-                filterButton(
-                    title: "All Papers",
-                    systemImage: selectedCategoryID == nil && selectedTagID == nil ? "tray.full.fill" : "tray.full",
-                    isSelected: selectedLibrarySurface == .papers && selectedCategoryID == nil && selectedTagID == nil
-                ) {
-                    selectedLibrarySurface = .papers
-                    selectedCategoryID = nil
-                    selectedTagID = nil
-                }
-                if model.categories.isEmpty {
-                    SidebarEmptyText("No categories")
-                } else {
-                    ForEach(visibleCategoryItems()) { item in
-                        CategorySidebarRow(
-                            title: item.category.name,
-                            countText: "\(paperCount(inCategory: item.category.id))",
-                            systemImage: selectedCategoryID == item.category.id ? "folder.fill" : "folder",
-                            isSelected: selectedLibrarySurface == .papers && selectedCategoryID == item.category.id,
-                            depth: item.depth,
-                            hasChildren: hasChildCategories(item.category.id),
-                            isExpanded: !collapsedCategoryIDs.contains(item.category.id),
-                            onToggle: {
-                                toggleCategoryCollapsed(item.category.id)
-                            },
-                            onSelect: {
-                                selectedLibrarySurface = .papers
-                                selectedCategoryID = item.category.id
-                                selectedTagID = nil
-                            },
-                            onCreateChild: {
-                                newCategoryParentID = item.category.id
-                                startCreatingCategory(parentID: item.category.id)
-                            },
-                            onManage: {
-                                categoryPendingManagement = item.category
-                            },
-                            onDropPapers: { paperIDs in
-                                model.movePapers(paperIDs, toCategory: item.category.id)
-                                selectedLibrarySurface = .papers
-                                selectedCategoryID = item.category.id
-                                selectedTagID = nil
-                            }
-                        )
-                    }
-                }
+            ScrollView(.vertical) {
+                sidebarLists
             }
-
-            Divider()
-
-            VStack(alignment: .leading, spacing: 8) {
-                sidebarHeader("Tags", systemImage: "tag") {
-                    isCreatingTag = true
-                }
-                if model.tags.isEmpty {
-                    SidebarEmptyText("No tags")
-                } else {
-                    ForEach(model.tags) { tag in
-                        TagSidebarRow(
-                            title: tag.name,
-                            countText: "\(paperCount(forTag: tag.id))",
-                            isSelected: selectedLibrarySurface == .papers && selectedTagID == tag.id
-                        ) {
-                            selectedLibrarySurface = .papers
-                            selectedTagID = tag.id
-                            selectedCategoryID = nil
-                        } onManage: {
-                            tagPendingManagement = tag
-                        }
-                    }
-                }
-            }
-
-            Spacer()
+            .frame(maxHeight: .infinity, alignment: .top)
         }
         .paperCodexSidebarChromePadding()
         .background(Color(nsColor: .controlBackgroundColor))
+    }
+
+    private var sidebarLists: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            categorySidebarSection
+            Divider()
+            tagSidebarSection
+        }
+        .padding(.trailing, 2)
+        .padding(.bottom, 8)
+    }
+
+    private var categorySidebarSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sidebarHeader("Categories", systemImage: "folder") {
+                startCreatingCategory(parentID: selectedCategoryID)
+            }
+            filterButton(
+                title: "All Papers",
+                systemImage: selectedCategoryID == nil && selectedTagID == nil ? "tray.full.fill" : "tray.full",
+                isSelected: selectedLibrarySurface == .papers && selectedCategoryID == nil && selectedTagID == nil
+            ) {
+                selectedLibrarySurface = .papers
+                selectedCategoryID = nil
+                selectedTagID = nil
+            }
+            if model.categories.isEmpty {
+                SidebarEmptyText("No categories")
+            } else {
+                ForEach(visibleCategoryItems()) { item in
+                    CategorySidebarRow(
+                        title: item.category.name,
+                        countText: "\(paperCount(inCategory: item.category.id))",
+                        systemImage: selectedCategoryID == item.category.id ? "folder.fill" : "folder",
+                        isSelected: selectedLibrarySurface == .papers && selectedCategoryID == item.category.id,
+                        depth: item.depth,
+                        hasChildren: hasChildCategories(item.category.id),
+                        isExpanded: !collapsedCategoryIDs.contains(item.category.id),
+                        onToggle: {
+                            toggleCategoryCollapsed(item.category.id)
+                        },
+                        onSelect: {
+                            selectedLibrarySurface = .papers
+                            selectedCategoryID = item.category.id
+                            selectedTagID = nil
+                        },
+                        onCreateChild: {
+                            newCategoryParentID = item.category.id
+                            startCreatingCategory(parentID: item.category.id)
+                        },
+                        onManage: {
+                            categoryPendingManagement = item.category
+                        },
+                        onDropPapers: { paperIDs in
+                            model.movePapers(paperIDs, toCategory: item.category.id)
+                            selectedLibrarySurface = .papers
+                            selectedCategoryID = item.category.id
+                            selectedTagID = nil
+                        }
+                    )
+                }
+            }
+        }
+    }
+
+    private var tagSidebarSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sidebarHeader("Tags", systemImage: "tag") {
+                isCreatingTag = true
+            }
+            if model.tags.isEmpty {
+                SidebarEmptyText("No tags")
+            } else {
+                ForEach(model.tags) { tag in
+                    TagSidebarRow(
+                        title: tag.name,
+                        countText: "\(paperCount(forTag: tag.id))",
+                        isSelected: selectedLibrarySurface == .papers && selectedTagID == tag.id
+                    ) {
+                        selectedLibrarySurface = .papers
+                        selectedTagID = tag.id
+                        selectedCategoryID = nil
+                    } onManage: {
+                        tagPendingManagement = tag
+                    }
+                }
+            }
+        }
     }
 
     private var contentPane: some View {
