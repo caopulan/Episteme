@@ -669,6 +669,27 @@ func runUILayoutSourceChecks() throws {
         "CollectionView should clear selected cells that leave visible rows or columns"
     )
     try check(
+        collectionSource.contains("onMoveSelection")
+            && collectionSource.contains("commitFormulaDraft()")
+            && collectionSource.contains("cancelCellEdit()")
+            && collectionSource.contains(".onKeyPress"),
+        "Collection spreadsheet should provide keyboard selection movement, formula commit/cancel, and SwiftUI onKeyPress handling"
+    )
+    try check(
+        collectionSource.contains("model.updateCollectionColumnTitle(collectionID:")
+            && collectionSource.contains("model.setCollectionColumnRequired(collectionID:")
+            && collectionSource.contains("model.setCollectionColumnAllowedValues(collectionID:")
+            && collectionSource.contains("model.setCollectionColumnDescription(collectionID:")
+            && collectionSource.contains("model.updateCollectionColumnWidth(collectionID:"),
+        "Collection field inspector should save field settings through AppModel column setting APIs"
+    )
+    try check(
+        collectionSource.contains("validationIssuesByCell")
+            && collectionSource.contains("Invalid Values")
+            && collectionSource.contains("Missing Required"),
+        "Collection validation UI should group issues by cell and expose invalid-value and missing-required views"
+    )
+    try check(
         collectionSource.contains("issue.reason == .required")
             && !collectionSource.contains("message.localizedCaseInsensitiveContains(\"required\")"),
         "Collection validation tabs should use typed validation reasons instead of message text"

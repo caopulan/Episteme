@@ -25,6 +25,10 @@ fileprivate struct CollectionCellCoordinate: Equatable {
     var columnID: String
 }
 
+fileprivate func validationCellKey(rowID: String, columnID: String) -> String {
+    "\(rowID)::\(columnID)"
+}
+
 struct CollectionView: View {
     @EnvironmentObject private var model: AppModel
     @State private var selectedRowIDs: Set<String> = []
@@ -38,6 +42,7 @@ struct CollectionView: View {
     @State private var activeViewMode: CollectionTableViewMode = .all
     @State private var selectedCell: CollectionCellCoordinate?
     @State private var editingCell: CollectionCellCoordinate?
+    @State private var formulaDraft = ""
 
     var body: some View {
         SidebarSplitLayout(minContentWidth: 940) {
@@ -59,6 +64,7 @@ struct CollectionView: View {
             activeViewMode = .all
             selectedCell = nil
             editingCell = nil
+            formulaDraft = ""
         }
         .sheet(isPresented: $isCreatingCollection) {
             CollectionCreateSheet(
@@ -202,6 +208,9 @@ struct CollectionView: View {
     private func tablePane(_ collection: PaperCollectionDocument) -> some View {
         let visibleColumns = visibleColumns(for: collection)
         let validationIssues = model.validationIssues(for: collection)
+        let validationIssuesByCell = Dictionary(grouping: validationIssues) { issue in
+            validationCellKey(rowID: issue.rowID, columnID: issue.columnID)
+        }
         let displayRows = displayedRows(for: collection, issues: validationIssues)
         let displayedRowIDs = Set(displayRows.map(\.id))
         let visibleColumnIDs = Set(visibleColumns.map(\.id))
@@ -214,10 +223,12 @@ struct CollectionView: View {
             categories: model.categories,
             jsonPath: model.collectionJSONPath(for: collection.id),
             validationIssues: validationIssues,
+            validationIssuesByCell: validationIssuesByCell,
             selectedRowIDs: $selectedRowIDs,
             activeViewMode: $activeViewMode,
             selectedCell: $selectedCell,
             editingCell: $editingCell,
+            formulaDraft: $formulaDraft,
             filterText: $filterText,
             sortColumnID: sortColumnID,
             sortAscending: sortAscending,
@@ -246,6 +257,21 @@ struct CollectionView: View {
             onSetColumnHidden: { columnID, hidden in
                 model.setCollectionColumnHidden(collectionID: collection.id, columnID: columnID, hidden: hidden)
             },
+            onUpdateColumnTitle: { columnID, title in
+                model.updateCollectionColumnTitle(collectionID: collection.id, columnID: columnID, title: title)
+            },
+            onUpdateColumnWidth: { columnID, width in
+                model.updateCollectionColumnWidth(collectionID: collection.id, columnID: columnID, width: width)
+            },
+            onSetColumnRequired: { columnID, required in
+                model.setCollectionColumnRequired(collectionID: collection.id, columnID: columnID, required: required)
+            },
+            onSetColumnAllowedValues: { columnID, allowedValues in
+                model.setCollectionColumnAllowedValues(collectionID: collection.id, columnID: columnID, allowedValues: allowedValues)
+            },
+            onSetColumnDescription: { columnID, description in
+                model.setCollectionColumnDescription(collectionID: collection.id, columnID: columnID, description: description)
+            },
             onChatSelection: {
                 let selectedPapers = model.papers(in: collection, rowIDs: selectedRowIDs.isEmpty ? nil : selectedRowIDs)
                 model.openPapersForChat(selectedPapers.map(\.id))
@@ -266,6 +292,20 @@ struct CollectionView: View {
                     columnID: columnID,
                     value: value
                 )
+            },
+            onMoveSelection: { columnOffset, rowOffset in
+                moveSelection(
+                    columnOffset: columnOffset,
+                    rowOffset: rowOffset,
+                    displayedRows: displayRows,
+                    visibleColumns: visibleColumns
+                )
+            },
+            commitFormulaDraft: {
+                commitFormulaDraft(collection: collection)
+            },
+            cancelCellEdit: {
+                cancelCellEdit(collection: collection)
             },
             onOpenPaper: { paperID in
                 if let paper = model.papers.first(where: { $0.id == paperID }) {
@@ -294,7 +334,60 @@ struct CollectionView: View {
             if editingCell == selectedCell {
                 editingCell = nil
             }
+            formulaDraft = ""
         }
+    }
+
+    private func moveSelection(
+        columnOffset: Int,
+        rowOffset: Int,
+        displayedRows: [PaperCollectionRow],
+        visibleColumns: [PaperCollectionColumn]
+    ) {
+        guard !displayedRows.isEmpty, !visibleColumns.isEmpty else {
+            selectedCell = nil
+            editingCell = nil
+            return
+        }
+        let currentRowIndex = selectedCell.flatMap { cell in
+            displayedRows.firstIndex { $0.id == cell.rowID }
+        } ?? 0
+        let currentColumnIndex = selectedCell.flatMap { cell in
+            visibleColumns.firstIndex { $0.id == cell.columnID }
+        } ?? 0
+        let nextRowIndex = min(max(currentRowIndex + rowOffset, 0), displayedRows.count - 1)
+        let nextColumnIndex = min(max(currentColumnIndex + columnOffset, 0), visibleColumns.count - 1)
+        selectedCell = CollectionCellCoordinate(
+            rowID: displayedRows[nextRowIndex].id,
+            columnID: visibleColumns[nextColumnIndex].id
+        )
+        editingCell = nil
+    }
+
+    private func commitFormulaDraft(collection: PaperCollectionDocument) {
+        guard let selectedCell else {
+            return
+        }
+        let currentValue = collection.rows.first { $0.id == selectedCell.rowID }?.values[selectedCell.columnID, default: ""] ?? ""
+        guard formulaDraft != currentValue else {
+            return
+        }
+        model.updateCollectionCell(
+            collectionID: collection.id,
+            rowID: selectedCell.rowID,
+            columnID: selectedCell.columnID,
+            value: formulaDraft
+        )
+    }
+
+    private func cancelCellEdit(collection: PaperCollectionDocument) {
+        editingCell = nil
+        guard let selectedCell,
+              let row = collection.rows.first(where: { $0.id == selectedCell.rowID }) else {
+            formulaDraft = ""
+            return
+        }
+        formulaDraft = row.values[selectedCell.columnID, default: ""]
     }
 
     private func navButton(title: String, systemImage: String, selected: Bool = false, action: @escaping () -> Void) -> some View {
@@ -413,10 +506,12 @@ private struct CollectionWorkbench: View {
     var categories: [PaperCodexCore.Category]
     var jsonPath: String
     var validationIssues: [PaperCollectionValidationIssue]
+    var validationIssuesByCell: [String: [PaperCollectionValidationIssue]]
     @Binding var selectedRowIDs: Set<String>
     @Binding var activeViewMode: CollectionTableViewMode
     @Binding var selectedCell: CollectionCellCoordinate?
     @Binding var editingCell: CollectionCellCoordinate?
+    @Binding var formulaDraft: String
     @Binding var filterText: String
     var sortColumnID: String?
     var sortAscending: Bool
@@ -427,11 +522,19 @@ private struct CollectionWorkbench: View {
     var onClearSort: () -> Void
     var onToggleSortDirection: () -> Void
     var onSetColumnHidden: (String, Bool) -> Void
+    var onUpdateColumnTitle: (String, String) -> Void
+    var onUpdateColumnWidth: (String, Double) -> Void
+    var onSetColumnRequired: (String, Bool) -> Void
+    var onSetColumnAllowedValues: (String, [String]) -> Void
+    var onSetColumnDescription: (String, String) -> Void
     var onChatSelection: () -> Void
     var onRevealJSON: () -> Void
     var onRename: () -> Void
     var onDelete: () -> Void
     var onCellCommit: (String, String, String) -> Void
+    var onMoveSelection: (Int, Int) -> Void
+    var commitFormulaDraft: () -> Void
+    var cancelCellEdit: () -> Void
     var onOpenPaper: (String) -> Void
 
     var body: some View {
@@ -458,7 +561,8 @@ private struct CollectionWorkbench: View {
                 collection: collection,
                 selectedCell: selectedCell,
                 columns: allColumns,
-                onCellCommit: onCellCommit
+                formulaDraft: $formulaDraft,
+                commitFormulaDraft: commitFormulaDraft
             )
             Divider()
             HStack(spacing: 0) {
@@ -468,6 +572,7 @@ private struct CollectionWorkbench: View {
                     selectedRowIDs: $selectedRowIDs,
                     selectedCell: $selectedCell,
                     editingCell: $editingCell,
+                    validationIssuesByCell: validationIssuesByCell,
                     sortColumnID: sortColumnID,
                     sortAscending: sortAscending,
                     onSortColumn: onSortColumn,
@@ -475,6 +580,9 @@ private struct CollectionWorkbench: View {
                         onSetColumnHidden(columnID, true)
                     },
                     onCellCommit: onCellCommit,
+                    onMoveSelection: onMoveSelection,
+                    commitFormulaDraft: commitFormulaDraft,
+                    cancelCellEdit: cancelCellEdit,
                     onOpenPaper: onOpenPaper
                 )
                 Divider()
@@ -482,7 +590,13 @@ private struct CollectionWorkbench: View {
                     collection: collection,
                     selectedCell: selectedCell,
                     columns: allColumns,
-                    validationIssues: validationIssues
+                    validationIssues: validationIssues,
+                    onUpdateColumnTitle: onUpdateColumnTitle,
+                    onSetColumnHidden: onSetColumnHidden,
+                    onUpdateColumnWidth: onUpdateColumnWidth,
+                    onSetColumnRequired: onSetColumnRequired,
+                    onSetColumnAllowedValues: onSetColumnAllowedValues,
+                    onSetColumnDescription: onSetColumnDescription
                 )
                 .frame(width: 260)
             }
@@ -718,16 +832,24 @@ private struct CollectionFormulaBar: View {
     var collection: PaperCollectionDocument
     var selectedCell: CollectionCellCoordinate?
     var columns: [PaperCollectionColumn]
-    var onCellCommit: (String, String, String) -> Void
-    @State private var formulaDraft = ""
+    @Binding var formulaDraft: String
+    var commitFormulaDraft: () -> Void
     @FocusState private var isFormulaFocused: Bool
 
     var body: some View {
-        HStack(spacing: 8) {
-            Text(cellLabel)
+        HStack(spacing: 10) {
+            Text(coordinateLabel)
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
-                .frame(width: 96, alignment: .leading)
+                .frame(width: 42, alignment: .leading)
+            Text(fieldLabel)
+                .font(.caption.weight(.semibold))
+                .lineLimit(1)
+                .frame(width: 170, alignment: .leading)
+            Text(typeLabel)
+                .font(.caption2.monospaced())
+                .foregroundStyle(.secondary)
+                .frame(width: 72, alignment: .leading)
             TextField("Select a table cell", text: $formulaDraft)
                 .textFieldStyle(.plain)
                 .focused($isFormulaFocused)
@@ -759,13 +881,6 @@ private struct CollectionFormulaBar: View {
         .background(Color(nsColor: .controlBackgroundColor).opacity(0.70))
     }
 
-    private func commitFormulaDraft() {
-        guard let selectedCell, formulaDraft != selectedValue else {
-            return
-        }
-        onCellCommit(selectedCell.rowID, selectedCell.columnID, formulaDraft)
-    }
-
     private var selectedValue: String {
         guard let selectedCell,
               let row = collection.rows.first(where: { $0.id == selectedCell.rowID }) else {
@@ -774,13 +889,39 @@ private struct CollectionFormulaBar: View {
         return row.values[selectedCell.columnID, default: ""]
     }
 
-    private var cellLabel: String {
+    private var coordinateLabel: String {
         guard let selectedCell,
               let rowIndex = collection.rows.firstIndex(where: { $0.id == selectedCell.rowID }),
-              let column = columns.first(where: { $0.id == selectedCell.columnID }) else {
-            return "No cell"
+              let columnIndex = columns.firstIndex(where: { $0.id == selectedCell.columnID }) else {
+            return "--"
         }
-        return "R\(rowIndex + 1) \(column.title)"
+        return "\(spreadsheetColumnName(columnIndex))\(rowIndex + 1)"
+    }
+
+    private var fieldLabel: String {
+        selectedColumn?.title ?? "No cell selected"
+    }
+
+    private var typeLabel: String {
+        selectedColumn?.valueKind.displayTitle ?? "--"
+    }
+
+    private var selectedColumn: PaperCollectionColumn? {
+        guard let selectedCell else {
+            return nil
+        }
+        return columns.first { $0.id == selectedCell.columnID }
+    }
+
+    private func spreadsheetColumnName(_ index: Int) -> String {
+        var value = index + 1
+        var name = ""
+        while value > 0 {
+            let remainder = (value - 1) % 26
+            name = String(UnicodeScalar(65 + remainder)!) + name
+            value = (value - 1) / 26
+        }
+        return name
     }
 }
 
@@ -789,18 +930,71 @@ private struct CollectionFieldInspector: View {
     var selectedCell: CollectionCellCoordinate?
     var columns: [PaperCollectionColumn]
     var validationIssues: [PaperCollectionValidationIssue]
+    var onUpdateColumnTitle: (String, String) -> Void
+    var onSetColumnHidden: (String, Bool) -> Void
+    var onUpdateColumnWidth: (String, Double) -> Void
+    var onSetColumnRequired: (String, Bool) -> Void
+    var onSetColumnAllowedValues: (String, [String]) -> Void
+    var onSetColumnDescription: (String, String) -> Void
+
+    @State private var titleDraft = ""
+    @State private var allowedValuesDraft = ""
+    @State private var descriptionDraft = ""
+    @FocusState private var focusedField: InspectorFocusedField?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Label("Field Inspector", systemImage: "sidebar.right")
                 .font(.paperCodexSystem(size: 14, weight: .semibold))
             if let column {
-                inspectorRow("Column", column.title)
-                inspectorRow("Type", column.valueKind.displayTitle)
-                inspectorRow("Required", column.isRequired ? "Yes" : "No")
-                inspectorRow("Allowed", column.allowedValues.isEmpty ? "Any value" : column.allowedValues.joined(separator: ", "))
-                if !column.description.isEmpty {
-                    inspectorRow("Description", column.description)
+                Group {
+                    editableTextField(
+                        "Field title",
+                        text: $titleDraft,
+                        focus: .title,
+                        onCommit: { commitTitleIfChanged(column) }
+                    )
+                    inspectorRow("Field ID", column.id)
+                    inspectorRow("Type", column.valueKind.displayTitle)
+
+                    Stepper(
+                        "Width: \(Int(column.width))",
+                        value: Binding(
+                            get: { column.width },
+                            set: { onUpdateColumnWidth(column.id, $0) }
+                        ),
+                        in: 72...420,
+                        step: 8
+                    )
+                    .font(.caption)
+
+                    Toggle("Visible", isOn: Binding(
+                        get: { !column.isHidden },
+                        set: { onSetColumnHidden(column.id, !$0) }
+                    ))
+                    .font(.caption)
+
+                    Toggle("Required", isOn: Binding(
+                        get: { column.isRequired },
+                        set: { onSetColumnRequired(column.id, $0) }
+                    ))
+                    .font(.caption)
+
+                    editableTextField(
+                        "Allowed values",
+                        text: $allowedValuesDraft,
+                        focus: .allowedValues,
+                        onCommit: {
+                            commitAllowedValuesIfChanged(column)
+                        }
+                    )
+
+                    editableTextField(
+                        "Description",
+                        text: $descriptionDraft,
+                        focus: .description,
+                        onCommit: { commitDescriptionIfChanged(column) }
+                    )
                 }
                 if let selectedCell {
                     let issues = validationIssues.filter { $0.rowID == selectedCell.rowID && $0.columnID == selectedCell.columnID }
@@ -822,6 +1016,30 @@ private struct CollectionFieldInspector: View {
         }
         .padding(14)
         .background(Color(nsColor: .controlBackgroundColor).opacity(0.75))
+        .onAppear(perform: syncDrafts)
+        .onChange(of: column?.id) { _, _ in
+            syncDrafts()
+        }
+        .onChange(of: column?.title) { _, _ in
+            if focusedField != .title {
+                syncDrafts()
+            }
+        }
+        .onChange(of: column?.allowedValues) { _, _ in
+            if focusedField != .allowedValues {
+                syncDrafts()
+            }
+        }
+        .onChange(of: column?.description) { _, _ in
+            if focusedField != .description {
+                syncDrafts()
+            }
+        }
+        .onChange(of: focusedField) { previous, current in
+            if current == nil {
+                commitFocusedField(previous)
+            }
+        }
     }
 
     private var column: PaperCollectionColumn? {
@@ -841,6 +1059,75 @@ private struct CollectionFieldInspector: View {
                 .textSelection(.enabled)
         }
     }
+
+    private func editableTextField(
+        _ title: String,
+        text: Binding<String>,
+        focus: InspectorFocusedField,
+        onCommit: @escaping () -> Void
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+            TextField(title, text: text)
+                .textFieldStyle(.roundedBorder)
+                .controlSize(.small)
+                .focused($focusedField, equals: focus)
+                .onSubmit(onCommit)
+        }
+    }
+
+    private func syncDrafts() {
+        titleDraft = column?.title ?? ""
+        allowedValuesDraft = column?.allowedValues.joined(separator: ", ") ?? ""
+        descriptionDraft = column?.description ?? ""
+    }
+
+    private func commitFocusedField(_ field: InspectorFocusedField?) {
+        guard let column else {
+            return
+        }
+        switch field {
+        case .title:
+            commitTitleIfChanged(column)
+        case .allowedValues:
+            commitAllowedValuesIfChanged(column)
+        case .description:
+            commitDescriptionIfChanged(column)
+        case nil:
+            break
+        }
+    }
+
+    private func commitTitleIfChanged(_ column: PaperCollectionColumn) {
+        let normalizedTitle = titleDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedTitle.isEmpty, normalizedTitle != column.title else {
+            return
+        }
+        onUpdateColumnTitle(column.id, normalizedTitle)
+    }
+
+    private func commitAllowedValuesIfChanged(_ column: PaperCollectionColumn) {
+        let values = allowedValuesDraft.collectionCommaSeparatedValues
+        guard values != column.allowedValues else {
+            return
+        }
+        onSetColumnAllowedValues(column.id, values)
+    }
+
+    private func commitDescriptionIfChanged(_ column: PaperCollectionColumn) {
+        guard descriptionDraft != column.description else {
+            return
+        }
+        onSetColumnDescription(column.id, descriptionDraft)
+    }
+}
+
+private enum InspectorFocusedField: Hashable {
+    case title
+    case allowedValues
+    case description
 }
 
 private struct CollectionStatusBar: View {
@@ -877,12 +1164,17 @@ private struct CollectionSpreadsheet: View {
     @Binding var selectedRowIDs: Set<String>
     @Binding var selectedCell: CollectionCellCoordinate?
     @Binding var editingCell: CollectionCellCoordinate?
+    var validationIssuesByCell: [String: [PaperCollectionValidationIssue]]
     var sortColumnID: String?
     var sortAscending: Bool
     var onSortColumn: (String, Bool) -> Void
     var onHideColumn: (String) -> Void
     var onCellCommit: (String, String, String) -> Void
+    var onMoveSelection: (Int, Int) -> Void
+    var commitFormulaDraft: () -> Void
+    var cancelCellEdit: () -> Void
     var onOpenPaper: (String) -> Void
+    @FocusState private var isGridFocused: Bool
 
     private var totalWidth: CGFloat {
         72 + columns.reduce(CGFloat(0)) { $0 + CGFloat($1.width) }
@@ -900,6 +1192,7 @@ private struct CollectionSpreadsheet: View {
                         isSelected: selectedRowIDs.contains(row.id),
                         selectedCell: $selectedCell,
                         editingCell: $editingCell,
+                        validationIssuesByCell: validationIssuesByCell,
                         onToggleSelection: {
                             toggle(row.id)
                         },
@@ -908,7 +1201,9 @@ private struct CollectionSpreadsheet: View {
                         },
                         onCellCommit: { columnID, value in
                             onCellCommit(row.id, columnID, value)
-                        }
+                        },
+                        onMoveSelection: onMoveSelection,
+                        cancelCellEdit: cancelCellEdit
                     )
                 }
             }
@@ -916,6 +1211,46 @@ private struct CollectionSpreadsheet: View {
             .padding(20)
         }
         .background(Color(nsColor: .windowBackgroundColor))
+        .focusable()
+        .focused($isGridFocused)
+        .onChange(of: selectedCell) { _, _ in
+            if editingCell == nil {
+                isGridFocused = true
+            }
+        }
+        .onKeyPress(.escape) {
+            cancelCellEdit()
+            return .handled
+        }
+        .onKeyPress(.leftArrow) {
+            guard editingCell == nil else { return .ignored }
+            onMoveSelection(-1, 0)
+            return .handled
+        }
+        .onKeyPress(.rightArrow) {
+            guard editingCell == nil else { return .ignored }
+            onMoveSelection(1, 0)
+            return .handled
+        }
+        .onKeyPress(.upArrow) {
+            guard editingCell == nil else { return .ignored }
+            onMoveSelection(0, -1)
+            return .handled
+        }
+        .onKeyPress(.downArrow) {
+            guard editingCell == nil else { return .ignored }
+            onMoveSelection(0, 1)
+            return .handled
+        }
+        .onKeyPress(.tab) {
+            commitFormulaDraft()
+            onMoveSelection(1, 0)
+            return .handled
+        }
+        .onKeyPress(.return) {
+            commitFormulaDraft()
+            return .handled
+        }
     }
 
     private var selectedDisplayedCount: Int {
@@ -1024,9 +1359,12 @@ private struct CollectionTableRow: View {
     var isSelected: Bool
     @Binding var selectedCell: CollectionCellCoordinate?
     @Binding var editingCell: CollectionCellCoordinate?
+    var validationIssuesByCell: [String: [PaperCollectionValidationIssue]]
     var onToggleSelection: () -> Void
     var onOpenPaper: () -> Void
     var onCellCommit: (String, String) -> Void
+    var onMoveSelection: (Int, Int) -> Void
+    var cancelCellEdit: () -> Void
 
     var body: some View {
         HStack(spacing: 0) {
@@ -1048,17 +1386,21 @@ private struct CollectionTableRow: View {
 
             ForEach(columns) { column in
                 let coordinate = CollectionCellCoordinate(rowID: row.id, columnID: column.id)
+                let issues = validationIssuesByCell[validationCellKey(rowID: row.id, columnID: column.id), default: []]
                 CollectionTableCell(
                     value: row.values[column.id, default: ""],
                     column: column,
                     coordinate: coordinate,
+                    validationIssues: issues,
                     isSelected: selectedCell == coordinate,
                     selectedCell: $selectedCell,
                     editingCell: $editingCell,
                     onOpenPaper: column.id == "paper_title" ? onOpenPaper : nil,
                     onCommit: { value in
                         onCellCommit(column.id, value)
-                    }
+                    },
+                    onMoveSelection: onMoveSelection,
+                    cancelCellEdit: cancelCellEdit
                 )
                 .frame(width: CGFloat(column.width), height: 42, alignment: .leading)
                 .padding(.horizontal, 10)
@@ -1081,11 +1423,14 @@ private struct CollectionTableCell: View {
     var value: String
     var column: PaperCollectionColumn
     var coordinate: CollectionCellCoordinate
+    var validationIssues: [PaperCollectionValidationIssue]
     var isSelected: Bool
     @Binding var selectedCell: CollectionCellCoordinate?
     @Binding var editingCell: CollectionCellCoordinate?
     var onOpenPaper: (() -> Void)?
     var onCommit: (String) -> Void
+    var onMoveSelection: (Int, Int) -> Void
+    var cancelCellEdit: () -> Void
 
     @State private var draft: String = ""
     @FocusState private var isFocused: Bool
@@ -1100,46 +1445,104 @@ private struct CollectionTableCell: View {
                 .foregroundStyle(Color.accentColor)
                 .help("Open Paper")
             }
-            TextField(column.title, text: $draft)
-                .textFieldStyle(.plain)
-                .font(.paperCodexSystem(size: 13, weight: column.id == "paper_title" ? .medium : .regular))
-                .focused($isFocused)
-                .onTapGesture {
-                    selectedCell = coordinate
-                }
-                .onAppear {
-                    draft = value
-                }
-                .onChange(of: value) { _, newValue in
-                    if !isFocused {
-                        draft = newValue
+            if editingCell == coordinate {
+                TextField(column.title, text: $draft)
+                    .textFieldStyle(.plain)
+                    .font(cellFont)
+                    .focused($isFocused)
+                    .onAppear {
+                        draft = value
+                        isFocused = true
                     }
-                }
-                .onChange(of: isFocused) { _, focused in
-                    if focused {
-                        selectedCell = coordinate
-                        editingCell = coordinate
-                    } else {
-                        commitDraft()
-                        if editingCell == coordinate {
-                            editingCell = nil
+                    .onChange(of: value) { _, newValue in
+                        if !isFocused {
+                            draft = newValue
                         }
                     }
-                }
-                .onSubmit {
-                    commitDraft()
-                }
+                    .onChange(of: isFocused) { _, focused in
+                        if focused {
+                            selectedCell = coordinate
+                            editingCell = coordinate
+                        } else {
+                            commitDraft()
+                            if editingCell == coordinate {
+                                editingCell = nil
+                            }
+                        }
+                    }
+                    .onSubmit {
+                        commitDraft()
+                        editingCell = nil
+                    }
+                    .onKeyPress(.escape) {
+                        draft = value
+                        cancelCellEdit()
+                        return .handled
+                    }
+                    .onKeyPress(.tab) {
+                        commitDraft()
+                        editingCell = nil
+                        onMoveSelection(1, 0)
+                        return .handled
+                    }
+            } else {
+                Text(value.isEmpty ? " " : value)
+                    .font(cellFont)
+                    .lineLimit(1)
+                    .foregroundStyle(value.isEmpty ? .secondary : .primary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if !validationIssues.isEmpty {
+                Image(systemName: "exclamationmark.circle.fill")
+                    .font(.caption2)
+                    .foregroundStyle(.red)
+                    .help(issueMessages)
+            }
         }
+        .contentShape(Rectangle())
         .background(
             RoundedRectangle(cornerRadius: 4)
                 .fill(isSelected ? Color.accentColor.opacity(0.12) : Color.clear)
         )
+        .overlay(
+            RoundedRectangle(cornerRadius: 4)
+                .stroke(borderColor, lineWidth: validationIssues.isEmpty ? (isSelected ? 1 : 0) : 2)
+        )
+        .help(issueMessages)
+        .onTapGesture(count: 2) {
+            selectedCell = coordinate
+            editingCell = coordinate
+            draft = value
+        }
+        .onTapGesture {
+            selectedCell = coordinate
+        }
+        .onAppear {
+            draft = value
+        }
+        .onChange(of: editingCell) { _, newValue in
+            if newValue != coordinate {
+                draft = value
+            }
+        }
     }
 
     private func commitDraft() {
         if draft != value {
             onCommit(draft)
         }
+    }
+
+    private var cellFont: Font {
+        .paperCodexSystem(size: 13, weight: column.id == "paper_title" ? .medium : .regular)
+    }
+
+    private var borderColor: Color {
+        validationIssues.isEmpty ? Color.accentColor.opacity(0.45) : Color.red
+    }
+
+    private var issueMessages: String {
+        validationIssues.map(\.message).joined(separator: "\n")
     }
 }
 
@@ -1152,6 +1555,14 @@ private struct CollectionGridLine: View {
         Rectangle()
             .fill(Color.black.opacity(0.08))
             .frame(width: 1, height: 1)
+    }
+}
+
+private extension String {
+    var collectionCommaSeparatedValues: [String] {
+        split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
     }
 }
 
