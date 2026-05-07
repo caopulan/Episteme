@@ -673,10 +673,18 @@ func runUILayoutSourceChecks() throws {
         "AppModel should expose collection column setting and validation APIs"
     )
     try check(
-        appModelSource.contains("required: \\(column.isRequired)")
-            && appModelSource.contains("allowedValues: \\(allowedValues)")
-            && appModelSource.contains("description: \\(column.description)"),
-        "collection prompt context should include required, allowed values, and description field settings"
+        appModelSource.contains("collectionColumnPromptLine")
+            && appModelSource.contains("\\\"required\\\": \\(column.isRequired)")
+            && appModelSource.contains("\\\"allowedValues\\\": \\(allowedValues)")
+            && appModelSource.contains("promptJSONString(column.description)"),
+        "collection prompt context should include structured required, allowed values, and description field settings"
+    )
+    try check(
+        appModelSource.contains("collectionValidationPromptColumnLimit")
+            && appModelSource.contains("collectionValidationPromptSampleLimit")
+            && appModelSource.contains("Dictionary(grouping: issues")
+            && appModelSource.contains("omittedIssueCount"),
+        "collection prompt validation issue summary should be bounded and grouped"
     )
     try check(
         appModelSource.contains("movePapers(_ paperIDs: [String], toCategory categoryID: String?)"),

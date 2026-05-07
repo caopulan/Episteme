@@ -413,6 +413,8 @@ final class AppModel: ObservableObject {
     private var collectionCodexSessionIDsByID: [String: String] = [:]
     private var isCancellingDiscoverProcessing = false
     private var isCancellingDiscoverPDFCache = false
+    private let collectionValidationPromptColumnLimit = 8
+    private let collectionValidationPromptSampleLimit = 3
 
     var activeCodexRun: ActiveCodexRun? {
         activeCodexRun(for: selectedSession?.id)
@@ -1135,16 +1137,9 @@ final class AppModel: ObservableObject {
                 languageMode: globalLanguageMode
             )
         )
-        let columns = collection.columns.map { column in
-            let allowedValues = column.allowedValues.isEmpty ? "[]" : "[\(column.allowedValues.joined(separator: ", "))]"
-            return "- \(column.id): \(column.title) (type: \(column.valueKind.rawValue), locked: \(column.isLocked), hidden: \(column.isHidden), required: \(column.isRequired), allowedValues: \(allowedValues), description: \(column.description))"
-        }.joined(separator: "\n")
+        let columns = collection.columns.map(collectionColumnPromptLine).joined(separator: "\n")
         let validationIssues = validationIssues(for: collection)
-        let validationSummary = validationIssues.isEmpty ? "" : """
-
-        [Collection Validation Issues]
-        \(validationIssues.map { "- row \($0.rowID), column \($0.columnID): \($0.message)" }.joined(separator: "\n"))
-        """
+        let validationSummary = collectionValidationPromptSummary(for: collection, issues: validationIssues)
         return """
         \(paperPrompt)
 
@@ -1165,6 +1160,62 @@ final class AppModel: ObservableObject {
 
         Update collection.json when the user asks for analysis, summaries, labels, grouping, classification, scores, or new comparison columns. After editing, answer briefly with what changed.
         """
+    }
+
+    private func collectionColumnPromptLine(_ column: PaperCollectionColumn) -> String {
+        let allowedValues = "[\(column.allowedValues.map { "\"\(promptJSONString($0))\"" }.joined(separator: ", "))]"
+        return "- {\"id\": \"\(promptJSONString(column.id))\", \"title\": \"\(promptJSONString(column.title))\", \"type\": \"\(column.valueKind.rawValue)\", \"locked\": \(column.isLocked), \"hidden\": \(column.isHidden), \"required\": \(column.isRequired), \"allowedValues\": \(allowedValues), \"description\": \"\(promptJSONString(column.description))\"}"
+    }
+
+    private func collectionValidationPromptSummary(
+        for collection: PaperCollectionDocument,
+        issues: [PaperCollectionValidationIssue]
+    ) -> String {
+        guard !issues.isEmpty else {
+            return ""
+        }
+        let columnsByID = Dictionary(uniqueKeysWithValues: collection.columns.map { ($0.id, $0) })
+        let rowsByID = Dictionary(uniqueKeysWithValues: collection.rows.map { ($0.id, $0) })
+        let groupedByColumn = Dictionary(grouping: issues, by: \.columnID)
+        let visibleGroups = groupedByColumn
+            .sorted {
+                if $0.value.count == $1.value.count {
+                    return $0.key < $1.key
+                }
+                return $0.value.count > $1.value.count
+            }
+            .prefix(collectionValidationPromptColumnLimit)
+        let issueLines = visibleGroups.map { columnID, columnIssues in
+            let columnTitle = columnsByID[columnID]?.title ?? columnID
+            let samples = columnIssues.prefix(collectionValidationPromptSampleLimit).map { issue in
+                let row = rowsByID[issue.rowID]
+                let paperID = row?.paperID ?? "unknown"
+                let paperTitle = row?.values["paper_title"] ?? paperID
+                return "{rowID: \"\(promptJSONString(issue.rowID))\", paperID: \"\(promptJSONString(paperID))\", paperTitle: \"\(promptJSONString(paperTitle))\", message: \"\(promptJSONString(issue.message))\"}"
+            }.joined(separator: ", ")
+            return "- column \(columnID) \"\(promptJSONString(columnTitle))\": \(columnIssues.count) issue(s), samples: [\(samples)]"
+        }
+        let shownIssueCount = visibleGroups.reduce(0) { $0 + $1.value.count }
+        let omittedColumnCount = max(0, groupedByColumn.count - visibleGroups.count)
+        let omittedIssueCount = max(0, issues.count - shownIssueCount)
+        let omittedLine = omittedIssueCount > 0
+            ? "\n- omitted: \(omittedIssueCount) issue(s) across \(omittedColumnCount) additional column(s)"
+            : ""
+        return """
+
+        [Collection Validation Issues]
+        total: \(issues.count)
+        \(issueLines.joined(separator: "\n"))\(omittedLine)
+        """
+    }
+
+    private func promptJSONString(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+            .replacingOccurrences(of: "\n", with: "\\n")
+            .replacingOccurrences(of: "\r", with: "\\r")
+            .replacingOccurrences(of: "\t", with: "\\t")
     }
 
     private func collectionRunKey(_ collectionID: String) -> String {
