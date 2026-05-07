@@ -245,7 +245,7 @@ func runCollectionChecks() throws {
     edited.setColumnRequired(customColumn.id, required: true, updatedAt: now.addingTimeInterval(100))
     try check(edited.columns.first { $0.id == customColumn.id }?.isRequired == true, "collection columns should support required fields")
 
-    edited.setColumnAllowedValues(customColumn.id, allowedValues: ["latent", "baseline"], updatedAt: now.addingTimeInterval(110))
+    edited.setColumnAllowedValues(customColumn.id, allowedValues: [" latent ", "baseline", " "], updatedAt: now.addingTimeInterval(110))
     try check(edited.columns.first { $0.id == customColumn.id }?.allowedValues == ["latent", "baseline"], "collection columns should support allowed values")
 
     edited.setColumnDescription(customColumn.id, description: "Decision label for paper triage.", updatedAt: now.addingTimeInterval(120))
@@ -265,6 +265,26 @@ func runCollectionChecks() throws {
     let requiredIssues = invalid.validationIssues()
     try check(requiredIssues.contains { $0.columnID == "priority" && $0.message.contains("required") }, "collection validation should report empty required values")
     try check(requiredIssues.contains { $0.columnID == "priority" && $0.message.contains("number") }, "collection validation should report invalid number values")
+
+    var typedValidation = edited
+    typedValidation.columns.append(PaperCollectionColumn(id: "score", title: "Score", valueKind: .number, width: 100))
+    typedValidation.columns.append(PaperCollectionColumn(id: "bad_score", title: "Bad Score", valueKind: .number, width: 100))
+    typedValidation.columns.append(PaperCollectionColumn(id: "nan_score", title: "NaN Score", valueKind: .number, width: 100))
+    typedValidation.columns.append(PaperCollectionColumn(id: "pub_year", title: "Publication Year", valueKind: .year, width: 100))
+    typedValidation.columns.append(PaperCollectionColumn(id: "decision_date", title: "Decision Date", valueKind: .date, width: 120))
+    for index in typedValidation.rows.indices {
+        typedValidation.rows[index].values["score"] = index == 0 ? "1,234.56" : "-42"
+        typedValidation.rows[index].values["bad_score"] = index == 0 ? "1,2,3" : "123"
+        typedValidation.rows[index].values["nan_score"] = index == 0 ? "nan" : "inf"
+        typedValidation.rows[index].values["pub_year"] = index == 0 ? "2026" : "26"
+        typedValidation.rows[index].values["decision_date"] = index == 0 ? "2026-05-07" : "2026-13-40"
+    }
+    let typedIssues = typedValidation.validationIssues()
+    try check(!typedIssues.contains { $0.columnID == "score" }, "collection validation should accept finite numbers with valid comma grouping")
+    try check(typedIssues.contains { $0.columnID == "bad_score" && $0.message.contains("number") }, "collection validation should reject malformed number comma grouping")
+    try check(typedIssues.contains { $0.columnID == "nan_score" && $0.message.contains("number") }, "collection validation should reject non-finite number values")
+    try check(typedIssues.contains { $0.columnID == "pub_year" && $0.message.contains("year") }, "collection validation should report invalid year values")
+    try check(typedIssues.contains { $0.columnID == "decision_date" && $0.message.contains("date") }, "collection validation should report invalid date values")
 
     let tempRoot = FileManager.default.temporaryDirectory
         .appendingPathComponent("paper-codex-collections-\(UUID().uuidString)", isDirectory: true)

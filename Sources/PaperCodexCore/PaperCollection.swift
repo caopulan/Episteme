@@ -334,7 +334,7 @@ public struct PaperCollectionDocument: Codable, Equatable, Identifiable, Sendabl
         guard let columnIndex = columns.firstIndex(where: { $0.id == columnID }) else {
             return
         }
-        columns[columnIndex].allowedValues = allowedValues
+        columns[columnIndex].allowedValues = Self.normalizedAllowedValues(allowedValues)
         self.updatedAt = updatedAt
     }
 
@@ -355,7 +355,7 @@ public struct PaperCollectionDocument: Codable, Equatable, Identifiable, Sendabl
                 if column.isRequired && trimmed.isEmpty {
                     issues.append(PaperCollectionValidationIssue(rowID: row.id, columnID: column.id, message: "\(column.title) is required."))
                 }
-                if !trimmed.isEmpty && column.valueKind == .number && Double(trimmed.replacingOccurrences(of: ",", with: "")) == nil {
+                if !trimmed.isEmpty && column.valueKind == .number && !Self.isValidNumber(trimmed) {
                     issues.append(PaperCollectionValidationIssue(rowID: row.id, columnID: column.id, message: "\(column.title) must be a number."))
                 }
                 if !trimmed.isEmpty && column.valueKind == .year && !Self.isValidYear(trimmed) {
@@ -364,7 +364,8 @@ public struct PaperCollectionDocument: Codable, Equatable, Identifiable, Sendabl
                 if !trimmed.isEmpty && column.valueKind == .date && !Self.isValidDate(trimmed) {
                     issues.append(PaperCollectionValidationIssue(rowID: row.id, columnID: column.id, message: "\(column.title) must be a valid date."))
                 }
-                if !trimmed.isEmpty && !column.allowedValues.isEmpty && !column.allowedValues.contains(trimmed) {
+                let allowedValues = Self.normalizedAllowedValues(column.allowedValues)
+                if !trimmed.isEmpty && !allowedValues.isEmpty && !allowedValues.contains(trimmed) {
                     issues.append(PaperCollectionValidationIssue(rowID: row.id, columnID: column.id, message: "\(column.title) must use an allowed value."))
                 }
             }
@@ -454,6 +455,26 @@ public struct PaperCollectionDocument: Codable, Equatable, Identifiable, Sendabl
         return (1000...9999).contains(year)
     }
 
+    private static func isValidNumber(_ value: String) -> Bool {
+        let numberText: String
+        if value.contains(",") {
+            let validGroupedNumber = value.range(
+                of: #"^[+-]?\d{1,3}(,\d{3})+(\.\d+)?$"#,
+                options: .regularExpression
+            ) != nil
+            guard validGroupedNumber else {
+                return false
+            }
+            numberText = value.replacingOccurrences(of: ",", with: "")
+        } else {
+            numberText = value
+        }
+        guard let number = Double(numberText) else {
+            return false
+        }
+        return number.isFinite
+    }
+
     private static func isValidDate(_ value: String) -> Bool {
         if ISO8601DateFormatter().date(from: value) != nil {
             return true
@@ -469,6 +490,12 @@ public struct PaperCollectionDocument: Codable, Equatable, Identifiable, Sendabl
             }
             return formatter.string(from: date) == value
         }
+    }
+
+    private static func normalizedAllowedValues(_ allowedValues: [String]) -> [String] {
+        allowedValues
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
     }
 }
 
