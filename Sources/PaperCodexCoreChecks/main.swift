@@ -264,7 +264,9 @@ func runCollectionChecks() throws {
     }
     let requiredIssues = invalid.validationIssues()
     try check(requiredIssues.contains { $0.columnID == "priority" && $0.message.contains("required") }, "collection validation should report empty required values")
+    try check(requiredIssues.contains { $0.columnID == "priority" && $0.reason == .required }, "collection validation should type required-value issues")
     try check(requiredIssues.contains { $0.columnID == "priority" && $0.message.contains("number") }, "collection validation should report invalid number values")
+    try check(requiredIssues.contains { $0.columnID == "priority" && $0.reason == .number }, "collection validation should type invalid number issues")
 
     var typedValidation = edited
     typedValidation.columns.append(PaperCollectionColumn(id: "score", title: "Score", valueKind: .number, width: 100))
@@ -284,7 +286,9 @@ func runCollectionChecks() throws {
     try check(typedIssues.contains { $0.columnID == "bad_score" && $0.message.contains("number") }, "collection validation should reject malformed number comma grouping")
     try check(typedIssues.contains { $0.columnID == "nan_score" && $0.message.contains("number") }, "collection validation should reject non-finite number values")
     try check(typedIssues.contains { $0.columnID == "pub_year" && $0.message.contains("year") }, "collection validation should report invalid year values")
+    try check(typedIssues.contains { $0.columnID == "pub_year" && $0.reason == .year }, "collection validation should type invalid year issues")
     try check(typedIssues.contains { $0.columnID == "decision_date" && $0.message.contains("date") }, "collection validation should report invalid date values")
+    try check(typedIssues.contains { $0.columnID == "decision_date" && $0.reason == .date }, "collection validation should type invalid date issues")
 
     let tempRoot = FileManager.default.temporaryDirectory
         .appendingPathComponent("paper-codex-collections-\(UUID().uuidString)", isDirectory: true)
@@ -650,6 +654,24 @@ func runUILayoutSourceChecks() throws {
             && collectionSource.contains("struct CollectionCellCoordinate")
             && collectionSource.contains("@State private var selectedCell"),
         "CollectionView should model table view modes and selected cell coordinates"
+    )
+    try check(
+        collectionSource.contains("@State private var formulaDraft")
+            && collectionSource.contains("commitFormulaDraft()")
+            && collectionSource.contains("onSubmit")
+            && collectionSource.contains("onChange(of: isFormulaFocused)"),
+        "Collection formula bar should stage edits and commit on submit or blur"
+    )
+    try check(
+        collectionSource.contains("pruneSelectedCell")
+            && collectionSource.contains("onChange(of: displayedRowIDs)")
+            && collectionSource.contains("onChange(of: visibleColumnIDs)"),
+        "CollectionView should clear selected cells that leave visible rows or columns"
+    )
+    try check(
+        collectionSource.contains("issue.reason == .required")
+            && !collectionSource.contains("message.localizedCaseInsensitiveContains(\"required\")"),
+        "Collection validation tabs should use typed validation reasons instead of message text"
     )
     try check(
         collectionSource.contains("model.addColumn(toCollectionID:")

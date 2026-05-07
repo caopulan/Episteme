@@ -203,6 +203,8 @@ struct CollectionView: View {
         let visibleColumns = visibleColumns(for: collection)
         let validationIssues = model.validationIssues(for: collection)
         let displayRows = displayedRows(for: collection, issues: validationIssues)
+        let displayedRowIDs = Set(displayRows.map(\.id))
+        let visibleColumnIDs = Set(visibleColumns.map(\.id))
 
         return CollectionWorkbench(
             collection: collection,
@@ -271,7 +273,28 @@ struct CollectionView: View {
                 }
             }
         )
+        .onAppear {
+            pruneSelectedCell(displayedRowIDs: displayedRowIDs, visibleColumnIDs: visibleColumnIDs)
+        }
+        .onChange(of: displayedRowIDs) { _, newRowIDs in
+            pruneSelectedCell(displayedRowIDs: newRowIDs, visibleColumnIDs: visibleColumnIDs)
+        }
+        .onChange(of: visibleColumnIDs) { _, newColumnIDs in
+            pruneSelectedCell(displayedRowIDs: displayedRowIDs, visibleColumnIDs: newColumnIDs)
+        }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private func pruneSelectedCell(displayedRowIDs: Set<String>, visibleColumnIDs: Set<String>) {
+        guard let selectedCell else {
+            return
+        }
+        if !displayedRowIDs.contains(selectedCell.rowID) || !visibleColumnIDs.contains(selectedCell.columnID) {
+            self.selectedCell = nil
+            if editingCell == selectedCell {
+                editingCell = nil
+            }
+        }
     }
 
     private func navButton(title: String, systemImage: String, selected: Bool = false, action: @escaping () -> Void) -> some View {
@@ -326,11 +349,11 @@ struct CollectionView: View {
             return true
         case .invalid:
             return issues.contains { issue in
-                issue.rowID == row.id && !issue.message.localizedCaseInsensitiveContains("required")
+                issue.rowID == row.id && issue.reason != .required
             }
         case .missingRequired:
             return issues.contains { issue in
-                issue.rowID == row.id && issue.message.localizedCaseInsensitiveContains("required")
+                issue.rowID == row.id && issue.reason == .required
             }
         }
     }
@@ -605,11 +628,11 @@ private struct CollectionWorkbench: View {
     }
 
     private var invalidRowIDs: Set<String> {
-        Set(validationIssues.filter { !$0.message.localizedCaseInsensitiveContains("required") }.map(\.rowID))
+        Set(validationIssues.filter { $0.reason != .required }.map(\.rowID))
     }
 
     private var missingRequiredRowIDs: Set<String> {
-        Set(validationIssues.filter { $0.message.localizedCaseInsensitiveContains("required") }.map(\.rowID))
+        Set(validationIssues.filter { $0.reason == .required }.map(\.rowID))
     }
 }
 
@@ -696,6 +719,8 @@ private struct CollectionFormulaBar: View {
     var selectedCell: CollectionCellCoordinate?
     var columns: [PaperCollectionColumn]
     var onCellCommit: (String, String, String) -> Void
+    @State private var formulaDraft = ""
+    @FocusState private var isFormulaFocused: Bool
 
     var body: some View {
         HStack(spacing: 8) {
@@ -703,9 +728,29 @@ private struct CollectionFormulaBar: View {
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
                 .frame(width: 96, alignment: .leading)
-            TextField("Select a table cell", text: formulaBinding)
+            TextField("Select a table cell", text: $formulaDraft)
                 .textFieldStyle(.plain)
+                .focused($isFormulaFocused)
                 .disabled(selectedCell == nil)
+                .onAppear {
+                    formulaDraft = selectedValue
+                }
+                .onChange(of: selectedCell) { _, _ in
+                    formulaDraft = selectedValue
+                }
+                .onChange(of: selectedValue) { _, newValue in
+                    if !isFormulaFocused {
+                        formulaDraft = newValue
+                    }
+                }
+                .onChange(of: isFormulaFocused) { _, focused in
+                    if !focused {
+                        commitFormulaDraft()
+                    }
+                }
+                .onSubmit {
+                    commitFormulaDraft()
+                }
             Spacer(minLength: 0)
         }
         .font(.paperCodexSystem(size: 13))
@@ -714,16 +759,11 @@ private struct CollectionFormulaBar: View {
         .background(Color(nsColor: .controlBackgroundColor).opacity(0.70))
     }
 
-    private var formulaBinding: Binding<String> {
-        Binding(
-            get: { selectedValue },
-            set: { newValue in
-                guard let selectedCell else {
-                    return
-                }
-                onCellCommit(selectedCell.rowID, selectedCell.columnID, newValue)
-            }
-        )
+    private func commitFormulaDraft() {
+        guard let selectedCell, formulaDraft != selectedValue else {
+            return
+        }
+        onCellCommit(selectedCell.rowID, selectedCell.columnID, formulaDraft)
     }
 
     private var selectedValue: String {

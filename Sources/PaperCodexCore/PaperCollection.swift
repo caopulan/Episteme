@@ -86,18 +86,60 @@ public struct PaperCollectionColumn: Codable, Equatable, Identifiable, Sendable 
     }
 }
 
+public enum PaperCollectionValidationIssueReason: String, Codable, Sendable {
+    case required
+    case number
+    case year
+    case date
+    case allowedValue = "allowed_value"
+}
+
 public struct PaperCollectionValidationIssue: Codable, Equatable, Identifiable, Sendable {
-    public var id: String { "\(rowID):\(columnID):\(message)" }
+    public var id: String { "\(rowID):\(columnID):\(reason.rawValue):\(message)" }
     public var rowID: String
     public var columnID: String
+    public var reason: PaperCollectionValidationIssueReason
     public var severity: String
     public var message: String
 
-    public init(rowID: String, columnID: String, severity: String = "error", message: String) {
+    public init(
+        rowID: String,
+        columnID: String,
+        reason: PaperCollectionValidationIssueReason = .allowedValue,
+        severity: String = "error",
+        message: String
+    ) {
         self.rowID = rowID
         self.columnID = columnID
+        self.reason = reason
         self.severity = severity
         self.message = message
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case rowID
+        case columnID
+        case reason
+        case severity
+        case message
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        rowID = try container.decode(String.self, forKey: .rowID)
+        columnID = try container.decode(String.self, forKey: .columnID)
+        reason = try container.decodeIfPresent(PaperCollectionValidationIssueReason.self, forKey: .reason) ?? .allowedValue
+        severity = try container.decodeIfPresent(String.self, forKey: .severity) ?? "error"
+        message = try container.decode(String.self, forKey: .message)
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(rowID, forKey: .rowID)
+        try container.encode(columnID, forKey: .columnID)
+        try container.encode(reason, forKey: .reason)
+        try container.encode(severity, forKey: .severity)
+        try container.encode(message, forKey: .message)
     }
 }
 
@@ -353,20 +395,20 @@ public struct PaperCollectionDocument: Codable, Equatable, Identifiable, Sendabl
                 let value = row.values[column.id, default: ""]
                 let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
                 if column.isRequired && trimmed.isEmpty {
-                    issues.append(PaperCollectionValidationIssue(rowID: row.id, columnID: column.id, message: "\(column.title) is required."))
+                    issues.append(PaperCollectionValidationIssue(rowID: row.id, columnID: column.id, reason: .required, message: "\(column.title) is required."))
                 }
                 if !trimmed.isEmpty && column.valueKind == .number && !Self.isValidNumber(trimmed) {
-                    issues.append(PaperCollectionValidationIssue(rowID: row.id, columnID: column.id, message: "\(column.title) must be a number."))
+                    issues.append(PaperCollectionValidationIssue(rowID: row.id, columnID: column.id, reason: .number, message: "\(column.title) must be a number."))
                 }
                 if !trimmed.isEmpty && column.valueKind == .year && !Self.isValidYear(trimmed) {
-                    issues.append(PaperCollectionValidationIssue(rowID: row.id, columnID: column.id, message: "\(column.title) must be a 4-digit year."))
+                    issues.append(PaperCollectionValidationIssue(rowID: row.id, columnID: column.id, reason: .year, message: "\(column.title) must be a 4-digit year."))
                 }
                 if !trimmed.isEmpty && column.valueKind == .date && !Self.isValidDate(trimmed) {
-                    issues.append(PaperCollectionValidationIssue(rowID: row.id, columnID: column.id, message: "\(column.title) must be a valid date."))
+                    issues.append(PaperCollectionValidationIssue(rowID: row.id, columnID: column.id, reason: .date, message: "\(column.title) must be a valid date."))
                 }
                 let allowedValues = Self.normalizedAllowedValues(column.allowedValues)
                 if !trimmed.isEmpty && !allowedValues.isEmpty && !allowedValues.contains(trimmed) {
-                    issues.append(PaperCollectionValidationIssue(rowID: row.id, columnID: column.id, message: "\(column.title) must use an allowed value."))
+                    issues.append(PaperCollectionValidationIssue(rowID: row.id, columnID: column.id, reason: .allowedValue, message: "\(column.title) must use an allowed value."))
                 }
             }
         }
