@@ -1,6 +1,30 @@
 import PaperCodexCore
 import SwiftUI
 
+fileprivate enum CollectionTableViewMode: String, CaseIterable, Identifiable {
+    case all
+    case invalid
+    case missingRequired
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .all:
+            "All Papers"
+        case .invalid:
+            "Invalid Values"
+        case .missingRequired:
+            "Missing Required"
+        }
+    }
+}
+
+fileprivate struct CollectionCellCoordinate: Equatable {
+    var rowID: String
+    var columnID: String
+}
+
 struct CollectionView: View {
     @EnvironmentObject private var model: AppModel
     @State private var selectedRowIDs: Set<String> = []
@@ -11,6 +35,9 @@ struct CollectionView: View {
     @State private var filterText = ""
     @State private var sortColumnID: String?
     @State private var sortAscending = true
+    @State private var activeViewMode: CollectionTableViewMode = .all
+    @State private var selectedCell: CollectionCellCoordinate?
+    @State private var editingCell: CollectionCellCoordinate?
 
     var body: some View {
         SidebarSplitLayout(minContentWidth: 940) {
@@ -29,6 +56,9 @@ struct CollectionView: View {
             filterText = ""
             sortColumnID = nil
             sortAscending = true
+            activeViewMode = .all
+            selectedCell = nil
+            editingCell = nil
         }
         .sheet(isPresented: $isCreatingCollection) {
             CollectionCreateSheet(
@@ -171,218 +201,77 @@ struct CollectionView: View {
 
     private func tablePane(_ collection: PaperCollectionDocument) -> some View {
         let visibleColumns = visibleColumns(for: collection)
-        let displayRows = displayedRows(for: collection)
+        let validationIssues = model.validationIssues(for: collection)
+        let displayRows = displayedRows(for: collection, issues: validationIssues)
 
-        return VStack(alignment: .leading, spacing: 0) {
-            collectionToolbar(collection)
-            Divider()
-            CollectionSpreadsheet(
-                rows: displayRows,
-                columns: visibleColumns,
-                selectedRowIDs: $selectedRowIDs,
-                sortColumnID: sortColumnID,
-                sortAscending: sortAscending,
-                onSortColumn: { columnID, ascending in
-                    sortColumnID = columnID
-                    sortAscending = ascending
-                },
-                onHideColumn: { columnID in
-                    model.setCollectionColumnHidden(collectionID: collection.id, columnID: columnID, hidden: true)
-                },
-                onCellCommit: { rowID, columnID, value in
-                    model.updateCollectionCell(
-                        collectionID: collection.id,
-                        rowID: rowID,
-                        columnID: columnID,
-                        value: value
-                    )
-                },
-                onOpenPaper: { paperID in
-                    if let paper = model.papers.first(where: { $0.id == paperID }) {
-                        model.openPaper(paper)
-                    }
+        return CollectionWorkbench(
+            collection: collection,
+            displayRows: displayRows,
+            visibleColumns: visibleColumns,
+            allColumns: collection.columns,
+            categories: model.categories,
+            jsonPath: model.collectionJSONPath(for: collection.id),
+            validationIssues: validationIssues,
+            selectedRowIDs: $selectedRowIDs,
+            activeViewMode: $activeViewMode,
+            selectedCell: $selectedCell,
+            editingCell: $editingCell,
+            filterText: $filterText,
+            sortColumnID: sortColumnID,
+            sortAscending: sortAscending,
+            onAddColumn: {
+                isAddingColumn = true
+            },
+            onAddAllPapers: {
+                model.addPapers(
+                    model.papers.filter { !$0.isArxivImportPlaceholder }.map(\.id),
+                    toCollectionID: collection.id
+                )
+            },
+            onAddCategory: { category in
+                model.addCategory(category.id, toCollectionID: collection.id)
+            },
+            onSortColumn: { columnID, ascending in
+                sortColumnID = columnID
+                sortAscending = ascending
+            },
+            onClearSort: {
+                sortColumnID = nil
+            },
+            onToggleSortDirection: {
+                sortAscending.toggle()
+            },
+            onSetColumnHidden: { columnID, hidden in
+                model.setCollectionColumnHidden(collectionID: collection.id, columnID: columnID, hidden: hidden)
+            },
+            onChatSelection: {
+                let selectedPapers = model.papers(in: collection, rowIDs: selectedRowIDs.isEmpty ? nil : selectedRowIDs)
+                model.openPapersForChat(selectedPapers.map(\.id))
+            },
+            onRevealJSON: {
+                model.revealCollectionSource(collection.id)
+            },
+            onRename: {
+                collectionPendingRename = collection
+            },
+            onDelete: {
+                collectionPendingDelete = collection
+            },
+            onCellCommit: { rowID, columnID, value in
+                model.updateCollectionCell(
+                    collectionID: collection.id,
+                    rowID: rowID,
+                    columnID: columnID,
+                    value: value
+                )
+            },
+            onOpenPaper: { paperID in
+                if let paper = model.papers.first(where: { $0.id == paperID }) {
+                    model.openPaper(paper)
                 }
-            )
-        }
+            }
+        )
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-    }
-
-    private func collectionToolbar(_ collection: PaperCollectionDocument) -> some View {
-        let displayRows = displayedRows(for: collection)
-        let visibleColumnCount = collection.columns.filter { !$0.isHidden }.count
-
-        return VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .firstTextBaseline, spacing: 12) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(collection.title)
-                        .font(.paperCodexSystem(size: 26, weight: .semibold))
-                        .lineLimit(1)
-                    HStack(spacing: 10) {
-                        Label(rowCountTitle(displayRows: displayRows.count, totalRows: collection.rows.count), systemImage: "doc.text")
-                        Label("\(visibleColumnCount)/\(collection.columns.count) visible columns", systemImage: "rectangle.grid.3x2")
-                        Text(model.collectionJSONPath(for: collection.id))
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                    }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Button {
-                    collectionPendingRename = collection
-                } label: {
-                    Image(systemName: "pencil")
-                }
-                .buttonStyle(.borderless)
-                .help("Rename Collection")
-                Button {
-                    model.revealCollectionSource(collection.id)
-                } label: {
-                    Image(systemName: "curlybraces.square")
-                }
-                .buttonStyle(.borderless)
-                .help("Reveal collection.json")
-                Button(role: .destructive) {
-                    collectionPendingDelete = collection
-                } label: {
-                    Image(systemName: "trash")
-                }
-                .buttonStyle(.borderless)
-                .help("Delete Collection")
-            }
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 10) {
-                    Button {
-                        isAddingColumn = true
-                    } label: {
-                        Label("Column", systemImage: "rectangle.badge.plus")
-                    }
-                    .buttonStyle(.bordered)
-
-                    Menu {
-                        Button {
-                            model.addPapers(
-                                model.papers.filter { !$0.isArxivImportPlaceholder }.map(\.id),
-                                toCollectionID: collection.id
-                            )
-                        } label: {
-                            Label("All Library Papers", systemImage: "books.vertical")
-                        }
-                        Divider()
-                        ForEach(model.categories) { category in
-                            Button {
-                                model.addCategory(category.id, toCollectionID: collection.id)
-                            } label: {
-                                Label(category.name, systemImage: "folder")
-                            }
-                        }
-                    } label: {
-                        Label("Add Papers", systemImage: "plus")
-                    }
-                    .menuStyle(.button)
-
-                    HStack(spacing: 6) {
-                        Image(systemName: "magnifyingglass")
-                            .foregroundStyle(.secondary)
-                        TextField("Filter rows", text: $filterText)
-                            .textFieldStyle(.plain)
-                            .frame(width: 220)
-                        if !normalizedFilterText.isEmpty {
-                            Button {
-                                filterText = ""
-                            } label: {
-                                Image(systemName: "xmark.circle.fill")
-                            }
-                            .buttonStyle(.plain)
-                            .foregroundStyle(.secondary)
-                            .help("Clear Filter")
-                        }
-                    }
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 5)
-                    .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 7))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 7)
-                            .stroke(Color.black.opacity(0.10), lineWidth: 1)
-                    )
-                    .help("Filter table rows")
-
-                    Menu {
-                        Button {
-                            sortColumnID = nil
-                        } label: {
-                            Label("No Sort", systemImage: sortColumnID == nil ? "checkmark" : "circle")
-                        }
-                        Divider()
-                        ForEach(collection.columns) { column in
-                            Button {
-                                sortColumnID = column.id
-                                sortAscending = true
-                            } label: {
-                                Label(column.title, systemImage: sortColumnID == column.id ? "checkmark" : column.valueKind.systemImage)
-                            }
-                        }
-                    } label: {
-                        Label(sortLabel(for: collection), systemImage: "arrow.up.arrow.down")
-                    }
-                    .menuStyle(.button)
-
-                    Button {
-                        sortAscending.toggle()
-                    } label: {
-                        Image(systemName: sortAscending ? "arrow.up" : "arrow.down")
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(sortColumnID == nil)
-                    .help(sortAscending ? "Ascending" : "Descending")
-
-                    Menu {
-                        ForEach(collection.columns) { column in
-                            let isVisible = !column.isHidden
-                            let isLastVisibleColumn = isVisible && visibleColumnCount <= 1
-                            Button {
-                                model.setCollectionColumnHidden(
-                                    collectionID: collection.id,
-                                    columnID: column.id,
-                                    hidden: isVisible
-                                )
-                            } label: {
-                                Label(column.title, systemImage: isVisible ? "checkmark.circle.fill" : "circle")
-                            }
-                            .disabled(isLastVisibleColumn)
-                        }
-                    } label: {
-                        Label("Columns", systemImage: "rectangle.3.group")
-                    }
-                    .menuStyle(.button)
-
-                    Button {
-                        let selectedPapers = model.papers(in: collection, rowIDs: selectedRowIDs.isEmpty ? nil : selectedRowIDs)
-                        model.openPapersForChat(selectedPapers.map(\.id))
-                    } label: {
-                        Label(selectedRowIDs.isEmpty ? "Chat All" : "Chat \(selectedRowIDs.count)", systemImage: "text.bubble")
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(collection.rows.isEmpty)
-
-                    if !selectedRowIDs.isEmpty {
-                        Button {
-                            selectedRowIDs.removeAll()
-                        } label: {
-                            Label("Clear", systemImage: "xmark.circle")
-                        }
-                        .buttonStyle(.bordered)
-                    }
-
-                    Label("Codex can edit the JSON source directly", systemImage: "checkmark.seal")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .controlSize(.small)
-        }
-        .padding(20)
     }
 
     private func navButton(title: String, systemImage: String, selected: Bool = false, action: @escaping () -> Void) -> some View {
@@ -398,10 +287,13 @@ struct CollectionView: View {
         return visibleColumns.isEmpty ? Array(collection.columns.prefix(1)) : visibleColumns
     }
 
-    private func displayedRows(for collection: PaperCollectionDocument) -> [PaperCollectionRow] {
+    private func displayedRows(for collection: PaperCollectionDocument, issues: [PaperCollectionValidationIssue]) -> [PaperCollectionRow] {
         let query = normalizedFilterText
         var rows = query.isEmpty ? collection.rows : collection.rows.filter { row in
             rowMatchesFilter(row, query: query)
+        }
+        rows = rows.filter { row in
+            rowMatchesViewMode(row, issues: issues)
         }
         if let sortColumnID,
            let sortColumn = collection.columns.first(where: { $0.id == sortColumnID }) {
@@ -426,6 +318,21 @@ struct CollectionView: View {
             }
         }
         return rows
+    }
+
+    private func rowMatchesViewMode(_ row: PaperCollectionRow, issues: [PaperCollectionValidationIssue]) -> Bool {
+        switch activeViewMode {
+        case .all:
+            return true
+        case .invalid:
+            return issues.contains { issue in
+                issue.rowID == row.id && !issue.message.localizedCaseInsensitiveContains("required")
+            }
+        case .missingRequired:
+            return issues.contains { issue in
+                issue.rowID == row.id && issue.message.localizedCaseInsensitiveContains("required")
+            }
+        }
     }
 
     private func rowMatchesFilter(_ row: PaperCollectionRow, query: String) -> Bool {
@@ -475,10 +382,461 @@ struct CollectionView: View {
     }
 }
 
+private struct CollectionWorkbench: View {
+    var collection: PaperCollectionDocument
+    var displayRows: [PaperCollectionRow]
+    var visibleColumns: [PaperCollectionColumn]
+    var allColumns: [PaperCollectionColumn]
+    var categories: [PaperCodexCore.Category]
+    var jsonPath: String
+    var validationIssues: [PaperCollectionValidationIssue]
+    @Binding var selectedRowIDs: Set<String>
+    @Binding var activeViewMode: CollectionTableViewMode
+    @Binding var selectedCell: CollectionCellCoordinate?
+    @Binding var editingCell: CollectionCellCoordinate?
+    @Binding var filterText: String
+    var sortColumnID: String?
+    var sortAscending: Bool
+    var onAddColumn: () -> Void
+    var onAddAllPapers: () -> Void
+    var onAddCategory: (PaperCodexCore.Category) -> Void
+    var onSortColumn: (String, Bool) -> Void
+    var onClearSort: () -> Void
+    var onToggleSortDirection: () -> Void
+    var onSetColumnHidden: (String, Bool) -> Void
+    var onChatSelection: () -> Void
+    var onRevealJSON: () -> Void
+    var onRename: () -> Void
+    var onDelete: () -> Void
+    var onCellCommit: (String, String, String) -> Void
+    var onOpenPaper: (String) -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            CollectionWorkbenchHeader(
+                collection: collection,
+                displayRowCount: displayRows.count,
+                visibleColumnCount: visibleColumns.count,
+                jsonPath: jsonPath,
+                onRename: onRename,
+                onRevealJSON: onRevealJSON,
+                onDelete: onDelete
+            )
+            Divider()
+            toolbar
+            CollectionViewTabs(
+                activeViewMode: $activeViewMode,
+                allCount: collection.rows.count,
+                invalidCount: invalidRowIDs.count,
+                missingRequiredCount: missingRequiredRowIDs.count
+            )
+            Divider()
+            CollectionFormulaBar(
+                collection: collection,
+                selectedCell: selectedCell,
+                columns: allColumns,
+                onCellCommit: onCellCommit
+            )
+            Divider()
+            HStack(spacing: 0) {
+                CollectionSpreadsheet(
+                    rows: displayRows,
+                    columns: visibleColumns,
+                    selectedRowIDs: $selectedRowIDs,
+                    selectedCell: $selectedCell,
+                    editingCell: $editingCell,
+                    sortColumnID: sortColumnID,
+                    sortAscending: sortAscending,
+                    onSortColumn: onSortColumn,
+                    onHideColumn: { columnID in
+                        onSetColumnHidden(columnID, true)
+                    },
+                    onCellCommit: onCellCommit,
+                    onOpenPaper: onOpenPaper
+                )
+                Divider()
+                CollectionFieldInspector(
+                    collection: collection,
+                    selectedCell: selectedCell,
+                    columns: allColumns,
+                    validationIssues: validationIssues
+                )
+                .frame(width: 260)
+            }
+            Divider()
+            CollectionStatusBar(
+                displayRowCount: displayRows.count,
+                totalRowCount: collection.rows.count,
+                selectedRowCount: selectedRowIDs.count,
+                visibleColumnCount: visibleColumns.count,
+                totalColumnCount: allColumns.count,
+                issueCount: validationIssues.count,
+                editingCell: editingCell
+            )
+        }
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private var toolbar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 9) {
+                Button(action: onAddColumn) {
+                    Label("Column", systemImage: "rectangle.badge.plus")
+                }
+                .buttonStyle(.bordered)
+
+                Menu {
+                    Button(action: onAddAllPapers) {
+                        Label("All Library Papers", systemImage: "books.vertical")
+                    }
+                    Divider()
+                    ForEach(categories) { category in
+                        Button {
+                            onAddCategory(category)
+                        } label: {
+                            Label(category.name, systemImage: "folder")
+                        }
+                    }
+                } label: {
+                    Label("Add Papers", systemImage: "plus")
+                }
+                .menuStyle(.button)
+
+                filterField
+
+                Menu {
+                    Button(action: onClearSort) {
+                        Label("No Sort", systemImage: sortColumnID == nil ? "checkmark" : "circle")
+                    }
+                    Divider()
+                    ForEach(allColumns) { column in
+                        Button {
+                            onSortColumn(column.id, true)
+                        } label: {
+                            Label(column.title, systemImage: sortColumnID == column.id ? "checkmark" : column.valueKind.systemImage)
+                        }
+                    }
+                } label: {
+                    Label(sortLabel, systemImage: "arrow.up.arrow.down")
+                }
+                .menuStyle(.button)
+
+                Button(action: onToggleSortDirection) {
+                    Image(systemName: sortAscending ? "arrow.up" : "arrow.down")
+                }
+                .buttonStyle(.bordered)
+                .disabled(sortColumnID == nil)
+                .help(sortAscending ? "Ascending" : "Descending")
+
+                columnsMenu
+
+                Button(action: onChatSelection) {
+                    Label(selectedRowIDs.isEmpty ? "Chat All" : "Chat \(selectedRowIDs.count)", systemImage: "text.bubble")
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(collection.rows.isEmpty)
+
+                if !selectedRowIDs.isEmpty {
+                    Button {
+                        selectedRowIDs.removeAll()
+                    } label: {
+                        Label("Clear", systemImage: "xmark.circle")
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+            .controlSize(.small)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+        }
+    }
+
+    private var filterField: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+            TextField("Filter rows", text: $filterText)
+                .textFieldStyle(.plain)
+                .frame(width: 200)
+            if !filterText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Button {
+                    filterText = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help("Clear Filter")
+            }
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 5)
+        .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 7))
+        .overlay(
+            RoundedRectangle(cornerRadius: 7)
+                .stroke(Color.black.opacity(0.10), lineWidth: 1)
+        )
+    }
+
+    private var columnsMenu: some View {
+        Menu {
+            ForEach(allColumns) { column in
+                let isVisible = !column.isHidden
+                let isLastVisibleColumn = isVisible && visibleColumns.count <= 1
+                Button {
+                    onSetColumnHidden(column.id, isVisible)
+                } label: {
+                    Label(column.title, systemImage: isVisible ? "checkmark.circle.fill" : "circle")
+                }
+                .disabled(isLastVisibleColumn)
+            }
+        } label: {
+            Label("Columns", systemImage: "rectangle.3.group")
+        }
+        .menuStyle(.button)
+    }
+
+    private var sortLabel: String {
+        guard let sortColumnID,
+              let column = allColumns.first(where: { $0.id == sortColumnID }) else {
+            return "Sort"
+        }
+        return column.title
+    }
+
+    private var invalidRowIDs: Set<String> {
+        Set(validationIssues.filter { !$0.message.localizedCaseInsensitiveContains("required") }.map(\.rowID))
+    }
+
+    private var missingRequiredRowIDs: Set<String> {
+        Set(validationIssues.filter { $0.message.localizedCaseInsensitiveContains("required") }.map(\.rowID))
+    }
+}
+
+private struct CollectionWorkbenchHeader: View {
+    var collection: PaperCollectionDocument
+    var displayRowCount: Int
+    var visibleColumnCount: Int
+    var jsonPath: String
+    var onRename: () -> Void
+    var onRevealJSON: () -> Void
+    var onDelete: () -> Void
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(collection.title)
+                    .font(.paperCodexSystem(size: 22, weight: .semibold))
+                    .lineLimit(1)
+                HStack(spacing: 10) {
+                    Label("\(displayRowCount)/\(collection.rows.count) papers", systemImage: "doc.text")
+                    Label("\(visibleColumnCount)/\(collection.columns.count) columns", systemImage: "rectangle.grid.3x2")
+                    Text(jsonPath)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button(action: onRename) {
+                Image(systemName: "pencil")
+            }
+            .buttonStyle(.borderless)
+            .help("Rename Collection")
+            Button(action: onRevealJSON) {
+                Image(systemName: "curlybraces.square")
+            }
+            .buttonStyle(.borderless)
+            .help("Reveal collection.json")
+            Button(role: .destructive, action: onDelete) {
+                Image(systemName: "trash")
+            }
+            .buttonStyle(.borderless)
+            .help("Delete Collection")
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 14)
+    }
+}
+
+private struct CollectionViewTabs: View {
+    @Binding var activeViewMode: CollectionTableViewMode
+    var allCount: Int
+    var invalidCount: Int
+    var missingRequiredCount: Int
+
+    var body: some View {
+        Picker("View", selection: $activeViewMode) {
+            ForEach(CollectionTableViewMode.allCases) { mode in
+                Text("\(mode.title) \(count(for: mode))").tag(mode)
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .controlSize(.small)
+        .padding(.horizontal, 14)
+        .padding(.bottom, 10)
+    }
+
+    private func count(for mode: CollectionTableViewMode) -> Int {
+        switch mode {
+        case .all:
+            return allCount
+        case .invalid:
+            return invalidCount
+        case .missingRequired:
+            return missingRequiredCount
+        }
+    }
+}
+
+private struct CollectionFormulaBar: View {
+    var collection: PaperCollectionDocument
+    var selectedCell: CollectionCellCoordinate?
+    var columns: [PaperCollectionColumn]
+    var onCellCommit: (String, String, String) -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(cellLabel)
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .frame(width: 96, alignment: .leading)
+            TextField("Select a table cell", text: formulaBinding)
+                .textFieldStyle(.plain)
+                .disabled(selectedCell == nil)
+            Spacer(minLength: 0)
+        }
+        .font(.paperCodexSystem(size: 13))
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.70))
+    }
+
+    private var formulaBinding: Binding<String> {
+        Binding(
+            get: { selectedValue },
+            set: { newValue in
+                guard let selectedCell else {
+                    return
+                }
+                onCellCommit(selectedCell.rowID, selectedCell.columnID, newValue)
+            }
+        )
+    }
+
+    private var selectedValue: String {
+        guard let selectedCell,
+              let row = collection.rows.first(where: { $0.id == selectedCell.rowID }) else {
+            return ""
+        }
+        return row.values[selectedCell.columnID, default: ""]
+    }
+
+    private var cellLabel: String {
+        guard let selectedCell,
+              let rowIndex = collection.rows.firstIndex(where: { $0.id == selectedCell.rowID }),
+              let column = columns.first(where: { $0.id == selectedCell.columnID }) else {
+            return "No cell"
+        }
+        return "R\(rowIndex + 1) \(column.title)"
+    }
+}
+
+private struct CollectionFieldInspector: View {
+    var collection: PaperCollectionDocument
+    var selectedCell: CollectionCellCoordinate?
+    var columns: [PaperCollectionColumn]
+    var validationIssues: [PaperCollectionValidationIssue]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Field Inspector", systemImage: "sidebar.right")
+                .font(.paperCodexSystem(size: 14, weight: .semibold))
+            if let column {
+                inspectorRow("Column", column.title)
+                inspectorRow("Type", column.valueKind.displayTitle)
+                inspectorRow("Required", column.isRequired ? "Yes" : "No")
+                inspectorRow("Allowed", column.allowedValues.isEmpty ? "Any value" : column.allowedValues.joined(separator: ", "))
+                if !column.description.isEmpty {
+                    inspectorRow("Description", column.description)
+                }
+                if let selectedCell {
+                    let issues = validationIssues.filter { $0.rowID == selectedCell.rowID && $0.columnID == selectedCell.columnID }
+                    if !issues.isEmpty {
+                        Divider()
+                        ForEach(issues) { issue in
+                            Label(issue.message, systemImage: "exclamationmark.triangle.fill")
+                                .font(.caption)
+                                .foregroundStyle(.red)
+                        }
+                    }
+                }
+            } else {
+                Text("Select a cell to inspect its field settings and validation state.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+        .padding(14)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.75))
+    }
+
+    private var column: PaperCollectionColumn? {
+        guard let selectedCell else {
+            return nil
+        }
+        return columns.first { $0.id == selectedCell.columnID }
+    }
+
+    private func inspectorRow(_ title: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.caption)
+                .textSelection(.enabled)
+        }
+    }
+}
+
+private struct CollectionStatusBar: View {
+    var displayRowCount: Int
+    var totalRowCount: Int
+    var selectedRowCount: Int
+    var visibleColumnCount: Int
+    var totalColumnCount: Int
+    var issueCount: Int
+    var editingCell: CollectionCellCoordinate?
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Label("\(displayRowCount)/\(totalRowCount) rows", systemImage: "line.3.horizontal")
+            Label("\(visibleColumnCount)/\(totalColumnCount) columns", systemImage: "rectangle.grid.3x2")
+            Label("\(selectedRowCount) selected", systemImage: "checkmark.circle")
+            Label("\(issueCount) issues", systemImage: issueCount == 0 ? "checkmark.seal" : "exclamationmark.triangle")
+            Spacer()
+            if editingCell != nil {
+                Label("Editing", systemImage: "pencil")
+            }
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 7)
+        .background(Color(nsColor: .controlBackgroundColor))
+    }
+}
+
 private struct CollectionSpreadsheet: View {
     var rows: [PaperCollectionRow]
     var columns: [PaperCollectionColumn]
     @Binding var selectedRowIDs: Set<String>
+    @Binding var selectedCell: CollectionCellCoordinate?
+    @Binding var editingCell: CollectionCellCoordinate?
     var sortColumnID: String?
     var sortAscending: Bool
     var onSortColumn: (String, Bool) -> Void
@@ -500,6 +858,8 @@ private struct CollectionSpreadsheet: View {
                         row: row,
                         columns: columns,
                         isSelected: selectedRowIDs.contains(row.id),
+                        selectedCell: $selectedCell,
+                        editingCell: $editingCell,
                         onToggleSelection: {
                             toggle(row.id)
                         },
@@ -622,6 +982,8 @@ private struct CollectionTableRow: View {
     var row: PaperCollectionRow
     var columns: [PaperCollectionColumn]
     var isSelected: Bool
+    @Binding var selectedCell: CollectionCellCoordinate?
+    @Binding var editingCell: CollectionCellCoordinate?
     var onToggleSelection: () -> Void
     var onOpenPaper: () -> Void
     var onCellCommit: (String, String) -> Void
@@ -645,9 +1007,14 @@ private struct CollectionTableRow: View {
             .overlay(CollectionGridLine(), alignment: .trailing)
 
             ForEach(columns) { column in
+                let coordinate = CollectionCellCoordinate(rowID: row.id, columnID: column.id)
                 CollectionTableCell(
                     value: row.values[column.id, default: ""],
                     column: column,
+                    coordinate: coordinate,
+                    isSelected: selectedCell == coordinate,
+                    selectedCell: $selectedCell,
+                    editingCell: $editingCell,
                     onOpenPaper: column.id == "paper_title" ? onOpenPaper : nil,
                     onCommit: { value in
                         onCellCommit(column.id, value)
@@ -673,6 +1040,10 @@ private struct CollectionTableRow: View {
 private struct CollectionTableCell: View {
     var value: String
     var column: PaperCollectionColumn
+    var coordinate: CollectionCellCoordinate
+    var isSelected: Bool
+    @Binding var selectedCell: CollectionCellCoordinate?
+    @Binding var editingCell: CollectionCellCoordinate?
     var onOpenPaper: (() -> Void)?
     var onCommit: (String) -> Void
 
@@ -693,6 +1064,9 @@ private struct CollectionTableCell: View {
                 .textFieldStyle(.plain)
                 .font(.paperCodexSystem(size: 13, weight: column.id == "paper_title" ? .medium : .regular))
                 .focused($isFocused)
+                .onTapGesture {
+                    selectedCell = coordinate
+                }
                 .onAppear {
                     draft = value
                 }
@@ -702,14 +1076,24 @@ private struct CollectionTableCell: View {
                     }
                 }
                 .onChange(of: isFocused) { _, focused in
-                    if !focused {
+                    if focused {
+                        selectedCell = coordinate
+                        editingCell = coordinate
+                    } else {
                         commitDraft()
+                        if editingCell == coordinate {
+                            editingCell = nil
+                        }
                     }
                 }
                 .onSubmit {
                     commitDraft()
                 }
         }
+        .background(
+            RoundedRectangle(cornerRadius: 4)
+                .fill(isSelected ? Color.accentColor.opacity(0.12) : Color.clear)
+        )
     }
 
     private func commitDraft() {

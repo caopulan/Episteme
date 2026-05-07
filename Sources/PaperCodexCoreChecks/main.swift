@@ -637,6 +637,21 @@ func runUILayoutSourceChecks() throws {
         "CollectionView should combine a spreadsheet surface, source JSON access, and collection chat"
     )
     try check(
+        collectionSource.contains("CollectionWorkbench")
+            && collectionSource.contains("CollectionWorkbenchHeader")
+            && collectionSource.contains("CollectionViewTabs")
+            && collectionSource.contains("CollectionFormulaBar")
+            && collectionSource.contains("CollectionFieldInspector")
+            && collectionSource.contains("CollectionStatusBar"),
+        "CollectionView should render the collection table through a complete workbench shell"
+    )
+    try check(
+        collectionSource.contains("enum CollectionTableViewMode")
+            && collectionSource.contains("struct CollectionCellCoordinate")
+            && collectionSource.contains("@State private var selectedCell"),
+        "CollectionView should model table view modes and selected cell coordinates"
+    )
+    try check(
         collectionSource.contains("model.addColumn(toCollectionID:")
             && collectionSource.contains("model.updateCollectionCell("),
         "CollectionView should support user-added columns and editable custom cells"
