@@ -71,7 +71,7 @@ struct SettingsView: View {
     @State private var draftArxivCategories = ""
     @State private var draftWhitelistTags = ""
     @State private var draftBlacklistTags = ""
-    @State private var draftSimilaritySources = ""
+    @State private var draftSimilarityCategoryIDs: Set<String> = []
     @State private var draftAutoEnrichOnOpen = false
     @State private var draftAutoEnrichOnSave = false
     @State private var draftCodexSystemPrompt = PromptBuilder.defaultSystemPrompt
@@ -97,7 +97,7 @@ struct SettingsView: View {
         let preferences = model.localDiscoverPreferences.normalized
         return splitDraftList(draftWhitelistTags) != preferences.whitelistTags
             || splitDraftList(draftBlacklistTags) != preferences.blacklistTags
-            || splitDraftList(draftSimilaritySources) != preferences.similaritySourceTagIDs
+            || draftSimilarityCategoryIDs != Set(model.similarityCategoryIDsForSettings())
     }
 
     private var isEnrichmentDirty: Bool {
@@ -176,6 +176,9 @@ struct SettingsView: View {
             }
         }
         .onChange(of: model.localDiscoverPreferences) { _, _ in
+            syncLocalDrafts()
+        }
+        .onChange(of: model.categories) { _, _ in
             syncLocalDrafts()
         }
         .onChange(of: model.codexSystemPrompt) { _, newValue in
@@ -288,15 +291,34 @@ struct SettingsView: View {
                 .textFieldStyle(.roundedBorder)
             TextField("Blacklist tags, comma separated", text: $draftBlacklistTags)
                 .textFieldStyle(.roundedBorder)
-            TextField("Similarity source tags or folders, comma separated", text: $draftSimilaritySources)
-                .textFieldStyle(.roundedBorder)
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Similarity categories")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                ScrollView(.vertical) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(model.categories) { category in
+                            similarityCategoryRow(category)
+                        }
+                    }
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxHeight: 180)
+                .background(Color(nsColor: .textBackgroundColor))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color.black.opacity(0.08), lineWidth: 1)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
             HStack {
                 Button {
                     model.setLocalTagFilters(
                         whitelist: splitDraftList(draftWhitelistTags),
                         blacklist: splitDraftList(draftBlacklistTags)
                     )
-                    model.setLocalSimilaritySourceTagIDs(splitDraftList(draftSimilaritySources))
+                    model.setLocalSimilarityCategoryIDs(selectedSimilarityCategoryIDsInOrder)
                 } label: {
                     Label(isRankingDirty ? "Save Ranking" : "Saved", systemImage: isRankingDirty ? "line.3.horizontal.decrease.circle" : "checkmark.circle")
                 }
@@ -305,11 +327,38 @@ struct SettingsView: View {
 
                 Spacer()
 
-                Text("\(model.localDiscoverPreferences.whitelistTags.count) white · \(model.localDiscoverPreferences.blacklistTags.count) black")
+                Text("\(model.localDiscoverPreferences.whitelistTags.count) white · \(model.localDiscoverPreferences.blacklistTags.count) black · \(draftSimilarityCategoryIDs.count)/\(model.categories.count) cats")
                     .font(.caption)
                     .foregroundStyle(isRankingDirty ? .orange : .secondary)
             }
         }
+    }
+
+    private func similarityCategoryRow(_ category: PaperCodexCore.Category) -> some View {
+        Button {
+            if draftSimilarityCategoryIDs.contains(category.id) {
+                draftSimilarityCategoryIDs.remove(category.id)
+            } else {
+                draftSimilarityCategoryIDs.insert(category.id)
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: draftSimilarityCategoryIDs.contains(category.id) ? "checkmark.square.fill" : "square")
+                    .foregroundStyle(draftSimilarityCategoryIDs.contains(category.id) ? Color.accentColor : Color.secondary)
+                Image(systemName: "folder")
+                    .foregroundStyle(.secondary)
+                Text(categoryDisplayName(category))
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .font(.paperCodexSystem(size: 12, weight: .medium))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(draftSimilarityCategoryIDs.contains(category.id) ? Color.accentColor.opacity(0.10) : Color(nsColor: .controlBackgroundColor))
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+        }
+        .buttonStyle(.plain)
     }
 
     private var codexEnrichmentSettings: some View {
@@ -689,7 +738,7 @@ struct SettingsView: View {
         draftArxivCategories = preferences.categories.joined(separator: ", ")
         draftWhitelistTags = preferences.whitelistTags.joined(separator: ", ")
         draftBlacklistTags = preferences.blacklistTags.joined(separator: ", ")
-        draftSimilaritySources = preferences.similaritySourceTagIDs.joined(separator: ", ")
+        draftSimilarityCategoryIDs = Set(model.similarityCategoryIDsForSettings())
         draftAutoEnrichOnOpen = preferences.enrichment.autoEnrichOnOpen
         draftAutoEnrichOnSave = preferences.enrichment.autoEnrichOnSave
         draftCodexSystemPrompt = model.codexSystemPrompt
@@ -705,5 +754,23 @@ struct SettingsView: View {
         text.components(separatedBy: CharacterSet(charactersIn: ",\n"))
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
+    }
+
+    private var selectedSimilarityCategoryIDsInOrder: [String] {
+        model.categories.map(\.id).filter { draftSimilarityCategoryIDs.contains($0) }
+    }
+
+    private func categoryDisplayName(_ category: PaperCodexCore.Category) -> String {
+        var names = [category.name]
+        var visited = Set([category.id])
+        var parentID = category.parentID
+        while let id = parentID,
+              !visited.contains(id),
+              let parent = model.categories.first(where: { $0.id == id }) {
+            names.append(parent.name)
+            visited.insert(parent.id)
+            parentID = parent.parentID
+        }
+        return names.reversed().joined(separator: " / ")
     }
 }

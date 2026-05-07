@@ -43,9 +43,25 @@ public enum SimilarityRanker {
         blacklistTags: [String],
         interestVectors: [[Double]]
     ) -> [ArxivFeedPaper] {
+        rank(
+            papers: papers,
+            whitelistTags: whitelistTags,
+            blacklistTags: blacklistTags,
+            interestVectorGroups: interestVectors.map { [$0] }
+        )
+    }
+
+    public static func rank(
+        papers: [ArxivFeedPaper],
+        whitelistTags: [String],
+        blacklistTags: [String],
+        interestVectorGroups: [[[Double]]]
+    ) -> [ArxivFeedPaper] {
         let whitelist = normalizedSet(whitelistTags)
         let blacklist = normalizedSet(blacklistTags)
-        let validInterestVectors = interestVectors.filter { !$0.isEmpty }
+        let validInterestVectorGroups = interestVectorGroups
+            .map { $0.filter { !$0.isEmpty } }
+            .filter { !$0.isEmpty }
         var grouped: [String: [(index: Int, paper: ArxivFeedPaper)]] = [
             "white": [],
             "neutral": [],
@@ -54,11 +70,17 @@ public enum SimilarityRanker {
 
         for (index, sourcePaper) in papers.enumerated() {
             var paper = sourcePaper
-            if let embedding = paper.embedding, !validInterestVectors.isEmpty {
-                let scores = validInterestVectors
-                    .filter { $0.count == embedding.count }
-                    .map { cosine(embedding, $0) }
-                paper.similarity = scores.max()
+            if let embedding = paper.embedding, !validInterestVectorGroups.isEmpty {
+                let categoryScores = validInterestVectorGroups.compactMap { vectors -> Double? in
+                    let scores = vectors
+                        .filter { $0.count == embedding.count }
+                        .map { cosine(embedding, $0) }
+                    guard !scores.isEmpty else {
+                        return nil
+                    }
+                    return scores.reduce(0, +) / Double(scores.count)
+                }
+                paper.similarity = categoryScores.max()
             }
             let group = filterGroup(tags: paper.tags, whitelist: whitelist, blacklist: blacklist)
             paper.filterGroup = group

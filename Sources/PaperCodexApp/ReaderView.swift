@@ -32,11 +32,15 @@ struct ReaderView: View {
                 SaveToLibrarySheet(
                     paperTitle: paper.title,
                     detail: paper.authors.prefix(4).joined(separator: ", "),
-                    libraryTags: model.tags,
-                    suggestedTagNames: model.suggestedTagNames(for: paper),
-                    onSave: { tagNames in
+                    libraryCategories: model.categories,
+                    initialCategoryIDs: model.paperCategoryIDsByID[paper.id, default: []],
+                    onSave: { selection in
                         isShowingSaveToLibrarySheet = false
-                        model.saveCachedPaperToLibrary(paper, selectedTagNames: tagNames)
+                        model.saveCachedPaperToLibrary(
+                            paper,
+                            selectedCategoryIDs: selection.categoryIDs,
+                            newCategoryNames: selection.newCategoryNames
+                        )
                     },
                     onCancel: {
                         isShowingSaveToLibrarySheet = false

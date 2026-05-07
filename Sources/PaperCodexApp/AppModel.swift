@@ -112,6 +112,11 @@ private struct DiscoverPaperProcessingResult: Sendable {
     var state: DiscoverPaperProcessingState
 }
 
+private struct DiscoverSimilarityCategorySource {
+    var categoryID: String
+    var papers: [Paper]
+}
+
 private struct SessionPaperContext {
     var papers: [Paper]
     var pagesByPaperID: [String: [PageIndex]]
@@ -809,12 +814,32 @@ final class AppModel: ObservableObject {
         postNotice(kind: .success, title: "Ranking Filters Saved")
     }
 
-    func setLocalSimilaritySourceTagIDs(_ tagIDs: [String]) {
+    func similarityCategoryIDsForSettings() -> [String] {
+        let configured = localDiscoverPreferences.normalized.similarityCategoryIDs ?? categories.map(\.id)
+        return normalizedIdentifiers(configured).filter { categoryID in
+            categories.contains { $0.id == categoryID }
+        }
+    }
+
+    func setLocalSimilarityCategoryIDs(_ categoryIDs: [String]) {
         var preferences = localDiscoverPreferences
-        preferences.similaritySourceTagIDs = tagIDs
+        preferences.similarityCategoryIDs = normalizedIdentifiers(categoryIDs)
         localDiscoverPreferences = preferences.normalized
         saveLocalDiscoverPreferencesToDefaults(localDiscoverPreferences)
-        postNotice(kind: .success, title: "Similarity Sources Saved")
+        postNotice(kind: .success, title: "Similarity Categories Saved")
+    }
+
+    private func includeCategoryInSimilarityDefaults(_ categoryID: String) {
+        var preferences = localDiscoverPreferences
+        guard var categoryIDs = preferences.similarityCategoryIDs else {
+            return
+        }
+        if !categoryIDs.contains(categoryID) {
+            categoryIDs.append(categoryID)
+            preferences.similarityCategoryIDs = categoryIDs
+            localDiscoverPreferences = preferences.normalized
+            saveLocalDiscoverPreferencesToDefaults(localDiscoverPreferences)
+        }
     }
 
     func setLocalEnrichmentPreferences(autoOpen: Bool, autoSave: Bool) {
@@ -1466,20 +1491,21 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func suggestedTagNames(for arxivPaper: ArxivFeedPaper) -> [String] {
-        normalizedTagNames(arxivPaper.tags)
-    }
-
-    func suggestedTagNames(for paper: Paper) -> [String] {
-        if let arxivPaper = arxivFeed?.papers.first(where: { candidate in
-            paper.sourceURL == candidate.links.abs || paper.sourceURL?.contains(candidate.id) == true
-        }) {
-            return suggestedTagNames(for: arxivPaper)
+    func suggestedCategoryIDsForDiscoverSave() -> [String] {
+        normalizedSimilaritySourceIDs(discoverSelectedSimilaritySourceIDs).compactMap { sourceID in
+            guard sourceID.hasPrefix("category:") else {
+                return nil
+            }
+            let categoryID = String(sourceID.dropFirst("category:".count))
+            return categories.contains(where: { $0.id == categoryID }) ? categoryID : nil
         }
-        return normalizedTagNames(paperTagsByID[paper.id, default: []].map(\.name))
     }
 
-    func addArxivPaperToLibrary(_ arxivPaper: ArxivFeedPaper, selectedTagNames: [String] = []) async {
+    func addArxivPaperToLibrary(
+        _ arxivPaper: ArxivFeedPaper,
+        selectedCategoryIDs: [String] = [],
+        newCategoryNames: [String] = []
+    ) async {
         do {
             guard let repository else {
                 throw AppModelError.repositoryUnavailable
@@ -1492,13 +1518,23 @@ final class AppModel: ObservableObject {
                 return
             }
             if let existing = libraryPaper(for: arxivPaper, includePlaceholders: false) {
-                try assignTags(named: selectedTagNames, to: existing, repository: repository)
+                try assignCategories(
+                    categoryIDs: selectedCategoryIDs,
+                    newCategoryNames: newCategoryNames,
+                    to: existing,
+                    repository: repository
+                )
                 try reloadLibrary()
                 openPaper(existing)
                 return
             }
             let paper = try await importArxivPaper(arxivPaper, isSaved: true)
-            try assignTags(named: selectedTagNames, to: paper, repository: repository)
+            try assignCategories(
+                categoryIDs: selectedCategoryIDs,
+                newCategoryNames: newCategoryNames,
+                to: paper,
+                repository: repository
+            )
             try reloadLibrary()
         } catch {
             errorMessage = String(describing: error)
@@ -1696,7 +1732,11 @@ final class AppModel: ObservableObject {
         try repository.deletePapers(ids: [placeholderID])
     }
 
-    func saveCachedPaperToLibrary(_ paper: Paper, selectedTagNames: [String] = []) {
+    func saveCachedPaperToLibrary(
+        _ paper: Paper,
+        selectedCategoryIDs: [String] = [],
+        newCategoryNames: [String] = []
+    ) {
         do {
             guard let repository else {
                 throw AppModelError.repositoryUnavailable
@@ -1718,7 +1758,12 @@ final class AppModel: ObservableObject {
                     storageSubpath: arxivStorageSubpath(forCachedPaper: paper)
                 )
             try reloadLibrary()
-            try assignTags(named: selectedTagNames, to: result.paper, repository: repository)
+            try assignCategories(
+                categoryIDs: selectedCategoryIDs,
+                newCategoryNames: newCategoryNames,
+                to: result.paper,
+                repository: repository
+            )
             try reloadLibrary()
             let savedPaper = papers.first { $0.id == result.paper.id } ?? result.paper
             selectedLibraryPaper = savedPaper
@@ -1777,6 +1822,7 @@ final class AppModel: ObservableObject {
                 sortOrder: nextSortOrder
             )
             try repository.upsertCategory(category)
+            includeCategoryInSimilarityDefaults(category.id)
             try reloadLibrary()
             postNotice(kind: .success, title: "Category Created", message: trimmed)
         } catch {
@@ -3482,31 +3528,61 @@ final class AppModel: ObservableObject {
         }
     }
 
-    private func ensureTag(named name: String, repository: PaperRepository) throws -> PaperTag {
+    private func ensureCategory(named name: String, repository: PaperRepository) throws -> PaperCodexCore.Category {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             throw AppModelError.emptyName
         }
-        if let existing = try repository.fetchTags().first(where: { $0.name.localizedCaseInsensitiveCompare(trimmed) == .orderedSame }) {
+        let existingCategories = try repository.fetchCategories()
+        if let existing = existingCategories.first(where: { $0.name.localizedCaseInsensitiveCompare(trimmed) == .orderedSame }) {
             return existing
         }
-        let tag = PaperTag(id: "tag-\(makeSlug(from: trimmed))", name: trimmed)
-        try repository.upsertTag(tag)
-        return tag
+        let category = PaperCodexCore.Category(
+            id: makeManualID(prefix: "cat", name: trimmed),
+            parentID: nil,
+            name: trimmed,
+            sortOrder: (existingCategories.map(\.sortOrder).max() ?? 0) + 1
+        )
+        try repository.upsertCategory(category)
+        includeCategoryInSimilarityDefaults(category.id)
+        return category
     }
 
-    private func assignTags(named tagNames: [String], to paper: Paper, repository: PaperRepository) throws {
-        for tagName in normalizedTagNames(tagNames) {
-            let tag = try ensureTag(named: tagName, repository: repository)
-            try repository.assignPaper(paper.id, toTag: tag.id)
+    private func assignCategories(
+        categoryIDs: [String],
+        newCategoryNames: [String],
+        to paper: Paper,
+        repository: PaperRepository
+    ) throws {
+        let existingCategoryIDs = Set(try repository.fetchCategories().map(\.id))
+        for categoryID in normalizedIdentifiers(categoryIDs) where existingCategoryIDs.contains(categoryID) {
+            try repository.assignPaper(paper.id, toCategory: categoryID)
+        }
+        for categoryName in normalizedNames(newCategoryNames) {
+            let category = try ensureCategory(named: categoryName, repository: repository)
+            try repository.assignPaper(paper.id, toCategory: category.id)
         }
     }
 
-    private func normalizedTagNames(_ tagNames: [String]) -> [String] {
+    private func normalizedIdentifiers(_ values: [String]) -> [String] {
+        var result: [String] = []
+        var seen: Set<String> = []
+        for value in values {
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty, !seen.contains(trimmed) else {
+                continue
+            }
+            seen.insert(trimmed)
+            result.append(trimmed)
+        }
+        return result
+    }
+
+    private func normalizedNames(_ values: [String]) -> [String] {
         var names: [String] = []
         var seen: Set<String> = []
-        for tagName in tagNames {
-            let trimmed = tagName.trimmingCharacters(in: .whitespacesAndNewlines)
+        for value in values {
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else {
                 continue
             }
@@ -3571,9 +3647,9 @@ final class AppModel: ObservableObject {
         let embedding = localDiscoverPreferences.normalized.embedding
         let model = embedding.model.trimmingCharacters(in: .whitespacesAndNewlines)
         guard embedding.enabled, !model.isEmpty else {
-            return "local-rank-v2-no-embedding"
+            return "local-rank-v3-no-embedding"
         }
-        return "local-rank-v2-\(model)"
+        return "local-rank-v3-category-average-\(model)"
     }
 
     private func applyDiscoverRanking(to feed: ArxivFeedResponse, query: DiscoverQuery) async throws -> ArxivFeedResponse {
@@ -3591,8 +3667,9 @@ final class AppModel: ObservableObject {
             return applyLocalDiscoverPreferences(to: feed)
         }
 
-        let sourcePapers = similaritySourcePapers(for: sourceIDs)
-        guard !sourcePapers.isEmpty else {
+        let categorySources = similarityCategorySources(for: sourceIDs)
+        let sourcePapers = uniquePapers(categorySources.flatMap(\.papers))
+        guard !categorySources.isEmpty, !sourcePapers.isEmpty else {
             errorMessage = "No library papers matched the selected similarity source."
             return applyLocalDiscoverPreferences(to: feed)
         }
@@ -3616,7 +3693,7 @@ final class AppModel: ObservableObject {
                 text: try libraryEmbeddingText(for: paper, repository: repository)
             )
         }
-        let interestVectors = try await cachedEmbeddings(
+        let sourceVectors = try await cachedEmbeddings(
             inputs: interestInputs,
             model: model,
             client: client,
@@ -3624,7 +3701,13 @@ final class AppModel: ObservableObject {
             progressTitle: "Embedding library sources",
             totalOffset: 0
         )
-        guard !interestVectors.isEmpty else {
+        let sourceVectorsByID = Dictionary(uniqueKeysWithValues: zip(interestInputs.map(\.sourceID), sourceVectors))
+        let interestVectorGroups = categorySources.map { source in
+            source.papers.compactMap { paper in
+                sourceVectorsByID["paper:\(paper.id)"]
+            }
+        }
+        guard !interestVectorGroups.flatMap({ $0 }).isEmpty else {
             return applyLocalDiscoverPreferences(to: feed)
         }
 
@@ -3653,7 +3736,7 @@ final class AppModel: ObservableObject {
             papers: papersWithEmbeddings,
             whitelistTags: preferences.whitelistTags,
             blacklistTags: preferences.blacklistTags,
-            interestVectors: interestVectors
+            interestVectorGroups: interestVectorGroups
         )
         arxivCacheProgress = ArxivCacheProgress(
             date: feed.date,
@@ -3746,7 +3829,14 @@ final class AppModel: ObservableObject {
         if !selected.isEmpty {
             return selected
         }
-        return normalizedSimilaritySourceIDs(localDiscoverPreferences.normalized.similaritySourceTagIDs)
+        return effectiveDiscoverSimilarityCategoryIDs().map { "category:\($0)" }
+    }
+
+    private func effectiveDiscoverSimilarityCategoryIDs() -> [String] {
+        let configured = localDiscoverPreferences.normalized.similarityCategoryIDs ?? categories.map(\.id)
+        return normalizedIdentifiers(configured).filter { categoryID in
+            categories.contains { $0.id == categoryID }
+        }
     }
 
     private func normalizedSimilaritySourceIDs(_ values: [String]) -> [String] {
@@ -3780,27 +3870,38 @@ final class AppModel: ObservableObject {
         return value
     }
 
-    private func similaritySourcePapers(for sourceIDs: [String]) -> [Paper] {
-        var selectedPaperIDs: Set<String> = []
+    private func similarityCategorySources(for sourceIDs: [String]) -> [DiscoverSimilarityCategorySource] {
+        var seenCategoryIDs: Set<String> = []
+        var sources: [DiscoverSimilarityCategorySource] = []
         for sourceID in sourceIDs {
-            if sourceID.hasPrefix("tag:") {
-                let tagID = String(sourceID.dropFirst("tag:".count))
-                for paper in papers where paperTagsByID[paper.id, default: []].contains(where: { $0.id == tagID || $0.name == tagID }) {
-                    selectedPaperIDs.insert(paper.id)
-                }
-            } else if sourceID.hasPrefix("category:") {
-                let categoryID = String(sourceID.dropFirst("category:".count))
-                let categoryIDs = Set([categoryID]).union(categoryDescendantIDs(of: categoryID))
-                for paper in papers where !Set(paperCategoryIDsByID[paper.id, default: []]).isDisjoint(with: categoryIDs) {
-                    selectedPaperIDs.insert(paper.id)
-                }
-            } else {
-                for paper in papers where paper.id == sourceID || paper.title.localizedCaseInsensitiveContains(sourceID) {
-                    selectedPaperIDs.insert(paper.id)
-                }
+            guard sourceID.hasPrefix("category:") else {
+                continue
+            }
+            let categoryID = String(sourceID.dropFirst("category:".count))
+            guard !seenCategoryIDs.contains(categoryID),
+                  categories.contains(where: { $0.id == categoryID }) else {
+                continue
+            }
+            let categoryIDs = Set([categoryID]).union(categoryDescendantIDs(of: categoryID))
+            let sourcePapers = papers.filter { paper in
+                !Set(paperCategoryIDsByID[paper.id, default: []]).isDisjoint(with: categoryIDs)
+            }
+            if !sourcePapers.isEmpty {
+                seenCategoryIDs.insert(categoryID)
+                sources.append(DiscoverSimilarityCategorySource(categoryID: categoryID, papers: sourcePapers))
             }
         }
-        return papers.filter { selectedPaperIDs.contains($0.id) }
+        return sources
+    }
+
+    private func uniquePapers(_ values: [Paper]) -> [Paper] {
+        var seen: Set<String> = []
+        var result: [Paper] = []
+        for paper in values where !seen.contains(paper.id) {
+            seen.insert(paper.id)
+            result.append(paper)
+        }
+        return result
     }
 
     private func libraryEmbeddingText(for paper: Paper, repository: PaperRepository) throws -> String {

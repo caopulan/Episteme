@@ -1,41 +1,47 @@
 import PaperCodexCore
 import SwiftUI
 
+struct SaveToLibraryCategorySelection: Equatable {
+    var categoryIDs: [String]
+    var newCategoryNames: [String]
+
+    static let empty = SaveToLibraryCategorySelection(categoryIDs: [], newCategoryNames: [])
+}
+
 struct SaveToLibrarySheet: View {
     var paperTitle: String
     var detail: String?
-    var libraryTags: [PaperTag]
-    var suggestedTagNames: [String]
-    var onSave: ([String]) -> Void
+    var libraryCategories: [PaperCodexCore.Category]
+    var initialCategoryIDs: [String]
+    var onSave: (SaveToLibraryCategorySelection) -> Void
     var onCancel: () -> Void
 
-    @State private var selectedKeys: Set<String>
-    @State private var customTagNames: [String] = []
-    @State private var newTagName = ""
+    @State private var selectedCategoryIDs: Set<String>
+    @State private var newCategoryName = ""
 
     init(
         paperTitle: String,
         detail: String? = nil,
-        libraryTags: [PaperTag],
-        suggestedTagNames: [String],
-        onSave: @escaping ([String]) -> Void,
+        libraryCategories: [PaperCodexCore.Category],
+        initialCategoryIDs: [String] = [],
+        onSave: @escaping (SaveToLibraryCategorySelection) -> Void,
         onCancel: @escaping () -> Void
     ) {
         self.paperTitle = paperTitle
         self.detail = detail
-        self.libraryTags = libraryTags
-        self.suggestedTagNames = suggestedTagNames
+        self.libraryCategories = libraryCategories
+        self.initialCategoryIDs = initialCategoryIDs
         self.onSave = onSave
         self.onCancel = onCancel
-        _selectedKeys = State(initialValue: Set(Self.uniqueNames(suggestedTagNames).map(Self.tagKey)))
+        _selectedCategoryIDs = State(initialValue: Set(initialCategoryIDs))
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             header
-            selectedTags
-            tagPicker
-            newTagRow
+            selectedCategories
+            categoryPicker
+            newCategoryRow
             Divider()
             actionRow
         }
@@ -67,21 +73,20 @@ struct SaveToLibrarySheet: View {
     }
 
     @ViewBuilder
-    private var selectedTags: some View {
-        let names = selectedTagNames
-        if !names.isEmpty {
+    private var selectedCategories: some View {
+        let categories = selectedLibraryCategories
+        if !categories.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
-                Text("Selected")
+                Text("Selected Categories")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 92), spacing: 6)], alignment: .leading, spacing: 6) {
-                    ForEach(names, id: \.self) { name in
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 126), spacing: 6)], alignment: .leading, spacing: 6) {
+                    ForEach(categories) { category in
                         Button {
-                            selectedKeys.remove(Self.tagKey(name))
-                            customTagNames.removeAll { Self.tagKey($0) == Self.tagKey(name) }
+                            selectedCategoryIDs.remove(category.id)
                         } label: {
                             HStack(spacing: 5) {
-                                Text(name)
+                                Text(categoryDisplayName(category))
                                     .lineLimit(1)
                                 Image(systemName: "xmark")
                                     .font(.paperCodexSystem(size: 9, weight: .bold))
@@ -100,12 +105,40 @@ struct SaveToLibrarySheet: View {
         }
     }
 
-    private var tagPicker: some View {
+    private var categoryPicker: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                tagSection(title: "Suggested", names: suggestedNames)
-                tagSection(title: "Library Tags", names: libraryNames)
+            VStack(alignment: .leading, spacing: 8) {
+                if libraryCategories.isEmpty {
+                    Text("No categories yet")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(12)
+                } else {
+                    ForEach(libraryCategories) { category in
+                        Button {
+                            toggle(category.id)
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: selectedCategoryIDs.contains(category.id) ? "checkmark.circle.fill" : "circle")
+                                    .foregroundStyle(selectedCategoryIDs.contains(category.id) ? Color.accentColor : Color.secondary)
+                                Image(systemName: "folder")
+                                    .foregroundStyle(.secondary)
+                                Text(categoryDisplayName(category))
+                                    .lineLimit(1)
+                                Spacer(minLength: 0)
+                            }
+                            .font(.paperCodexSystem(size: 12, weight: .medium))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 7)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(selectedCategoryIDs.contains(category.id) ? Color.accentColor.opacity(0.10) : Color(nsColor: .controlBackgroundColor))
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
             }
+            .padding(10)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(maxHeight: 230)
@@ -117,57 +150,14 @@ struct SaveToLibrarySheet: View {
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
-    @ViewBuilder
-    private func tagSection(title: String, names: [String]) -> some View {
-        if !names.isEmpty {
-            VStack(alignment: .leading, spacing: 8) {
-                Text(title)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 12)
-                    .padding(.top, 10)
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 118), spacing: 8)], alignment: .leading, spacing: 8) {
-                    ForEach(names, id: \.self) { name in
-                        Button {
-                            toggle(name)
-                        } label: {
-                            HStack(spacing: 6) {
-                                Image(systemName: isSelected(name) ? "checkmark.circle.fill" : "circle")
-                                    .foregroundStyle(isSelected(name) ? Color.accentColor : Color.secondary)
-                                Text(name)
-                                    .lineLimit(1)
-                                Spacer(minLength: 0)
-                            }
-                            .font(.paperCodexSystem(size: 12, weight: .medium))
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 6)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(isSelected(name) ? Color.accentColor.opacity(0.10) : Color(nsColor: .controlBackgroundColor))
-                            .clipShape(RoundedRectangle(cornerRadius: 6))
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(.horizontal, 12)
-                .padding(.bottom, 4)
-            }
-        }
-    }
-
-    private var newTagRow: some View {
+    private var newCategoryRow: some View {
         HStack(spacing: 8) {
-            TextField("New tag", text: $newTagName)
+            TextField("New category", text: $newCategoryName)
                 .textFieldStyle(.roundedBorder)
-                .onSubmit(addNewTag)
-            Button {
-                addNewTag()
-            } label: {
-                Image(systemName: "plus")
-                    .frame(width: 18, height: 18)
-            }
-            .buttonStyle(.bordered)
-            .disabled(trimmedNewTagName.isEmpty)
-            .help("Add Tag")
+            Image(systemName: "plus")
+                .foregroundStyle(trimmedNewCategoryName.isEmpty ? Color.secondary : Color.accentColor)
+                .frame(width: 18, height: 18)
+                .help("Create category on save")
         }
     }
 
@@ -176,81 +166,51 @@ struct SaveToLibrarySheet: View {
             Spacer()
             Button("Cancel", action: onCancel)
             Button {
-                onSave(Self.uniqueNames(selectedTagNames + [trimmedNewTagName]))
+                onSave(
+                    SaveToLibraryCategorySelection(
+                        categoryIDs: selectedCategoryIDsInOrder,
+                        newCategoryNames: trimmedNewCategoryName.isEmpty ? [] : [trimmedNewCategoryName]
+                    )
+                )
             } label: {
                 Label("Save", systemImage: "checkmark")
             }
             .buttonStyle(.borderedProminent)
+            .disabled(selectedCategoryIDs.isEmpty && trimmedNewCategoryName.isEmpty)
         }
     }
 
-    private var suggestedNames: [String] {
-        Self.uniqueNames(suggestedTagNames)
+    private var selectedLibraryCategories: [PaperCodexCore.Category] {
+        libraryCategories.filter { selectedCategoryIDs.contains($0.id) }
     }
 
-    private var libraryNames: [String] {
-        let suggestedKeys = Set(suggestedNames.map(Self.tagKey))
-        return Self.uniqueNames(libraryTags.map(\.name))
-            .filter { !suggestedKeys.contains(Self.tagKey($0)) }
+    private var selectedCategoryIDsInOrder: [String] {
+        libraryCategories.map(\.id).filter { selectedCategoryIDs.contains($0) }
     }
 
-    private var selectedTagNames: [String] {
-        Self.uniqueNames((suggestedNames + libraryNames + customTagNames).filter { selectedKeys.contains(Self.tagKey($0)) })
+    private var trimmedNewCategoryName: String {
+        newCategoryName.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private var trimmedNewTagName: String {
-        newTagName.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private func isSelected(_ name: String) -> Bool {
-        selectedKeys.contains(Self.tagKey(name))
-    }
-
-    private func toggle(_ name: String) {
-        let key = Self.tagKey(name)
-        if selectedKeys.contains(key) {
-            selectedKeys.remove(key)
-            customTagNames.removeAll { Self.tagKey($0) == key }
+    private func toggle(_ categoryID: String) {
+        if selectedCategoryIDs.contains(categoryID) {
+            selectedCategoryIDs.remove(categoryID)
         } else {
-            selectedKeys.insert(key)
+            selectedCategoryIDs.insert(categoryID)
         }
     }
 
-    private func addNewTag() {
-        let name = trimmedNewTagName
-        guard !name.isEmpty else {
-            return
+    private func categoryDisplayName(_ category: PaperCodexCore.Category) -> String {
+        var names = [category.name]
+        var visited = Set([category.id])
+        var parentID = category.parentID
+        while let id = parentID,
+              !visited.contains(id),
+              let parent = libraryCategories.first(where: { $0.id == id }) {
+            names.append(parent.name)
+            visited.insert(parent.id)
+            parentID = parent.parentID
         }
-        let key = Self.tagKey(name)
-        selectedKeys.insert(key)
-        let presentedKeys = Set((suggestedNames + libraryNames + customTagNames).map(Self.tagKey))
-        if !presentedKeys.contains(key) {
-            customTagNames.append(name)
-        }
-        newTagName = ""
-    }
-
-    private static func uniqueNames(_ names: [String]) -> [String] {
-        var result: [String] = []
-        var seen: Set<String> = []
-        for name in names {
-            let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else {
-                continue
-            }
-            let key = tagKey(trimmed)
-            guard !seen.contains(key) else {
-                continue
-            }
-            seen.insert(key)
-            result.append(trimmed)
-        }
-        return result
-    }
-
-    private static func tagKey(_ name: String) -> String {
-        name
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+        return names.reversed().joined(separator: " / ")
     }
 }

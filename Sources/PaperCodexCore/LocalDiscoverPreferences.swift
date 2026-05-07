@@ -31,6 +31,7 @@ public struct LocalDiscoverPreferences: Codable, Equatable, Sendable {
     public var whitelistTags: [String]
     public var blacklistTags: [String]
     public var similaritySourceTagIDs: [String]
+    public var similarityCategoryIDs: [String]?
     public var enrichment: LocalEnrichmentPreferences
     public var embedding: EmbeddingProviderSettings
 
@@ -39,6 +40,7 @@ public struct LocalDiscoverPreferences: Codable, Equatable, Sendable {
         whitelistTags: [String] = [],
         blacklistTags: [String] = [],
         similaritySourceTagIDs: [String] = [],
+        similarityCategoryIDs: [String]? = nil,
         enrichment: LocalEnrichmentPreferences = LocalEnrichmentPreferences(),
         embedding: EmbeddingProviderSettings = EmbeddingProviderSettings()
     ) {
@@ -46,6 +48,7 @@ public struct LocalDiscoverPreferences: Codable, Equatable, Sendable {
         self.whitelistTags = whitelistTags
         self.blacklistTags = blacklistTags
         self.similaritySourceTagIDs = similaritySourceTagIDs
+        self.similarityCategoryIDs = similarityCategoryIDs
         self.enrichment = enrichment
         self.embedding = embedding
     }
@@ -56,6 +59,7 @@ public struct LocalDiscoverPreferences: Codable, Equatable, Sendable {
             whitelistTags: Self.normalizedList(whitelistTags),
             blacklistTags: Self.normalizedList(blacklistTags),
             similaritySourceTagIDs: Self.normalizedList(similaritySourceTagIDs),
+            similarityCategoryIDs: similarityCategoryIDs.map(Self.normalizedList),
             enrichment: enrichment,
             embedding: embedding.normalized
         )

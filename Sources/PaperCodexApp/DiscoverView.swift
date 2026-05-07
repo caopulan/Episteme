@@ -112,12 +112,16 @@ struct DiscoverView: View {
                 SaveToLibrarySheet(
                     paperTitle: paper.displayTitle(language: model.globalLanguageMode.discoverLanguageCode),
                     detail: paper.authors.prefix(4).joined(separator: ", "),
-                    libraryTags: model.tags,
-                    suggestedTagNames: model.suggestedTagNames(for: paper),
-                    onSave: { tagNames in
+                    libraryCategories: model.categories,
+                    initialCategoryIDs: model.suggestedCategoryIDsForDiscoverSave(),
+                    onSave: { selection in
                         paperPendingSave = nil
                         Task {
-                            await model.addArxivPaperToLibrary(paper, selectedTagNames: tagNames)
+                            await model.addArxivPaperToLibrary(
+                                paper,
+                                selectedCategoryIDs: selection.categoryIDs,
+                                newCategoryNames: selection.newCategoryNames
+                            )
                         }
                     },
                     onCancel: {
@@ -1241,9 +1245,6 @@ private struct SimilaritySourceMenu: View {
         guard let first = model.discoverSelectedSimilaritySourceIDs.first else {
             return "Similarity"
         }
-        if let tag = model.tags.first(where: { "tag:\($0.id)" == first }) {
-            return tag.name
-        }
         if let category = model.categories.first(where: { "category:\($0.id)" == first }) {
             return category.name
         }
@@ -1263,25 +1264,9 @@ private struct SimilaritySourceMenu: View {
                 selectSources([])
             } label: {
                 if model.discoverSelectedSimilaritySourceIDs.isEmpty {
-                    Label("None", systemImage: "checkmark")
+                    Label("Settings default", systemImage: "checkmark")
                 } else {
-                    Text("None")
-                }
-            }
-            if !model.tags.isEmpty {
-                Divider()
-                Section("Tags") {
-                    ForEach(model.tags) { tag in
-                        Button {
-                            selectSources(["tag:\(tag.id)"])
-                        } label: {
-                            if model.discoverSelectedSimilaritySourceIDs == ["tag:\(tag.id)"] {
-                                Label(tag.name, systemImage: "checkmark")
-                            } else {
-                                Text(tag.name)
-                            }
-                        }
-                    }
+                    Text("Settings default")
                 }
             }
             if !model.categories.isEmpty {

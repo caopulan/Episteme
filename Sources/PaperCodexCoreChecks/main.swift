@@ -441,6 +441,7 @@ func runUILayoutSourceChecks() throws {
     let settingsViewSource = try String(contentsOf: settingsViewURL)
     let discoverViewURL = root.appendingPathComponent("Sources/PaperCodexApp/DiscoverView.swift")
     let discoverSource = try String(contentsOf: discoverViewURL)
+    let saveToLibrarySource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/SaveToLibrarySheet.swift"))
     try check(
         appModelSource.contains("movePapers(_ paperIDs: [String], toCategory categoryID: String?)"),
         "AppModel should provide a batch paper category move path for drag and drop"
@@ -458,6 +459,29 @@ func runUILayoutSourceChecks() throws {
         appModelSource.contains("func rerankCurrentDiscoverResults() async")
             && discoverSource.contains("await model.rerankCurrentDiscoverResults()"),
         "discover similarity source changes should rerank the current results without another search"
+    )
+    try check(
+        saveToLibrarySource.contains("libraryCategories")
+            && saveToLibrarySource.contains("selectedCategoryIDs")
+            && !saveToLibrarySource.contains("selectedTagNames"),
+        "saving a Discover paper should assign library categories instead of tags"
+    )
+    try check(
+        appModelSource.contains("selectedCategoryIDs:")
+            && appModelSource.contains("assignCategories(")
+            && !appModelSource.contains("addArxivPaperToLibrary(_ arxivPaper: ArxivFeedPaper, selectedTagNames"),
+        "arXiv save paths should assign selected categories instead of selected tags"
+    )
+    try check(
+        settingsViewSource.contains("Similarity categories")
+            && settingsViewSource.contains("draftSimilarityCategoryIDs"),
+        "settings should expose category-based similarity defaults"
+    )
+    try check(
+        appModelSource.contains("similarityCategorySources")
+            && appModelSource.contains("interestVectorGroups")
+            && appModelSource.contains("similarityCategoryIDs"),
+        "embedding ranking should score category groups separately"
     )
     try check(
         appModelSource.contains("assignPapers(_ paperIDs: [String], toTags tagIDs: [String])"),
@@ -2912,6 +2936,7 @@ func runLocalDiscoverPreferenceChecks() throws {
         whitelistTags: ["agent", "code", "agent"],
         blacklistTags: ["survey"],
         similaritySourceTagIDs: ["tag-agent", "tag-agent"],
+        similarityCategoryIDs: ["cat-vision", "cat-rl", "cat-vision"],
         enrichment: LocalEnrichmentPreferences(autoEnrichOnOpen: true, autoEnrichOnSave: true),
         embedding: EmbeddingProviderSettings(enabled: true, baseURL: "https://dashscope.aliyuncs.com", model: "text-embedding-v4")
     )
@@ -2919,6 +2944,7 @@ func runLocalDiscoverPreferenceChecks() throws {
     try check(normalized.categories == ["cs.CV", "cs.CL"], "local discover preferences should dedupe categories")
     try check(normalized.whitelistTags == ["agent", "code"], "local discover preferences should dedupe whitelist tags")
     try check(normalized.similaritySourceTagIDs == ["tag-agent"], "local discover preferences should dedupe similarity sources")
+    try check(normalized.similarityCategoryIDs == ["cat-vision", "cat-rl"], "local discover preferences should dedupe similarity category defaults")
     try check(normalized.embedding.model == "text-embedding-v4", "embedding settings should preserve model")
 
     let encoder = JSONEncoder()
@@ -3005,6 +3031,23 @@ func runSimilarityRankerChecks() throws {
     try check((ranked[0].similarity ?? 0) > (ranked[1].similarity ?? 0), "similarity ranker should attach cosine scores")
     try check(SimilarityRanker.meanVector([[1, 0], [0, 1]]) == [0.5, 0.5], "similarity ranker should compute collection mean vectors")
     try check(SimilarityRanker.cosine([1, 0], [0, 1]) == 0, "similarity ranker should return zero for orthogonal vectors")
+    let groupedRanked = SimilarityRanker.rank(
+        papers: papers,
+        whitelistTags: [],
+        blacklistTags: [],
+        interestVectorGroups: [
+            [[1, 0], [0, 1]],
+            [[0, 1]]
+        ]
+    )
+    try check(
+        groupedRanked.map(\.id) == ["b", "c", "a"],
+        "similarity ranker should use max category score after averaging each category"
+    )
+    try check(
+        abs((groupedRanked[0].similarity ?? 0) - 1.0) < 0.0001,
+        "category similarity should average scores within a category before taking the max"
+    )
 }
 
 func seedFixtureLibrary(at root: URL) throws {
