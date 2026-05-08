@@ -176,178 +176,6 @@ func runLocalStoreV2ModelChecks() throws {
     try check(PaperStorageState.feedPDFCache.rawValue == "feed_pdf_cache", "feed PDF cache state should be stable")
 }
 
-func runCollectionChecks() throws {
-    let now = Date(timeIntervalSince1970: 1_777_500_000)
-    let seedPaper = PaperCollectionSeedPaper(
-        paperID: "paper-a",
-        title: "Representation Autoencoders",
-        authors: ["Alice", "Bob"],
-        year: 2026,
-        sourceURL: "https://arxiv.org/abs/2604.00001",
-        categories: ["Generative Models"],
-        tags: ["vae", "diffusion"]
-    )
-    let document = PaperCollectionDocument.newDocument(
-        title: "VAE Comparison",
-        description: "Compare papers for a project decision.",
-        papers: [seedPaper],
-        createdAt: now
-    )
-
-    try check(document.schemaVersion == PaperCollectionDocument.currentSchemaVersion, "collection document should expose a stable schema version")
-    try check(document.columns.map(\.id).prefix(6) == ["paper_title", "authors", "year", "categories", "tags", "source_url"], "collection should start with stable paper metadata columns")
-    try check(document.rows.count == 1, "collection should create one row per seed paper")
-    try check(document.rows[0].paperID == "paper-a", "collection row should preserve paper id")
-    try check(document.rows[0].values["paper_title"] == "Representation Autoencoders", "collection row should copy existing title metadata")
-    try check(document.rows[0].values["tags"] == "vae, diffusion", "collection row should copy existing tag metadata")
-    try check(document.columns.allSatisfy { !$0.isHidden }, "collection columns should be visible by default")
-    let legacyColumnJSON = """
-    {
-      "id": "legacy_note",
-      "title": "Legacy Note",
-      "valueKind": "text",
-      "width": 160,
-      "isLocked": false,
-      "isHidden": false
-    }
-    """
-    let legacyColumn = try JSONDecoder().decode(PaperCollectionColumn.self, from: Data(legacyColumnJSON.utf8))
-    try check(!legacyColumn.isRequired, "collection column JSON decode should default missing required state to false")
-    try check(legacyColumn.allowedValues.isEmpty, "collection column JSON decode should default missing allowed values to empty")
-    try check(legacyColumn.description.isEmpty, "collection column JSON decode should default missing description to empty")
-
-    var edited = document
-    let customColumn = PaperCollectionColumn(
-        id: "codex_label",
-        title: "Codex Label",
-        valueKind: .badge,
-        width: 150,
-        isLocked: false
-    )
-    edited.columns.append(customColumn)
-    edited.rows[0].values[customColumn.id] = "latent"
-    let addedPaper = PaperCollectionSeedPaper(
-        paperID: "paper-b",
-        title: "Flow Matching Policies",
-        authors: ["Chen"],
-        year: nil,
-        sourceURL: nil,
-        categories: [],
-        tags: ["robotics"]
-    )
-    edited.addPapers([addedPaper], updatedAt: now.addingTimeInterval(60))
-
-    try check(edited.rows.count == 2, "collection should append new paper rows")
-    try check(edited.rows[0].values[customColumn.id] == "latent", "adding papers should preserve existing custom cells")
-    try check(edited.rows[1].values[customColumn.id] == "", "new rows should initialize custom cells")
-    edited.setColumnHidden("authors", hidden: true, updatedAt: now.addingTimeInterval(90))
-    try check(edited.columns.first { $0.id == "authors" }?.isHidden == true, "collection columns should support persistent hiding")
-    edited.setColumnRequired(customColumn.id, required: true, updatedAt: now.addingTimeInterval(100))
-    try check(edited.columns.first { $0.id == customColumn.id }?.isRequired == true, "collection columns should support required fields")
-
-    edited.setColumnAllowedValues(customColumn.id, allowedValues: [" latent ", "baseline", " "], updatedAt: now.addingTimeInterval(110))
-    try check(edited.columns.first { $0.id == customColumn.id }?.allowedValues == ["latent", "baseline"], "collection columns should support allowed values")
-
-    edited.setColumnDescription(customColumn.id, description: "Decision label for paper triage.", updatedAt: now.addingTimeInterval(120))
-    try check(edited.columns.first { $0.id == customColumn.id }?.description == "Decision label for paper triage.", "collection columns should support descriptions")
-
-    var invalid = edited
-    invalid.updateCell(rowID: invalid.rows[0].id, columnID: customColumn.id, value: "surprise", updatedAt: now.addingTimeInterval(130))
-    let invalidIssues = invalid.validationIssues()
-    try check(invalidIssues.contains { $0.rowID == invalid.rows[0].id && $0.columnID == customColumn.id }, "collection validation should report row and column ids")
-    try check(invalidIssues.contains { $0.message.contains("allowed") }, "collection validation should report allowed-value failures")
-
-    let requiredColumn = PaperCollectionColumn(id: "priority", title: "Priority", valueKind: .number, width: 100, isLocked: false, isRequired: true)
-    invalid.columns.append(requiredColumn)
-    for index in invalid.rows.indices {
-        invalid.rows[index].values[requiredColumn.id] = index == 0 ? "" : "not-a-number"
-    }
-    let requiredIssues = invalid.validationIssues()
-    try check(requiredIssues.contains { $0.columnID == "priority" && $0.message.contains("required") }, "collection validation should report empty required values")
-    try check(requiredIssues.contains { $0.columnID == "priority" && $0.reason == .required }, "collection validation should type required-value issues")
-    try check(requiredIssues.contains { $0.columnID == "priority" && $0.message.contains("number") }, "collection validation should report invalid number values")
-    try check(requiredIssues.contains { $0.columnID == "priority" && $0.reason == .number }, "collection validation should type invalid number issues")
-
-    var typedValidation = edited
-    typedValidation.columns.append(PaperCollectionColumn(id: "score", title: "Score", valueKind: .number, width: 100))
-    typedValidation.columns.append(PaperCollectionColumn(id: "bad_score", title: "Bad Score", valueKind: .number, width: 100))
-    typedValidation.columns.append(PaperCollectionColumn(id: "nan_score", title: "NaN Score", valueKind: .number, width: 100))
-    typedValidation.columns.append(PaperCollectionColumn(id: "pub_year", title: "Publication Year", valueKind: .year, width: 100))
-    typedValidation.columns.append(PaperCollectionColumn(id: "decision_date", title: "Decision Date", valueKind: .date, width: 120))
-    for index in typedValidation.rows.indices {
-        typedValidation.rows[index].values["score"] = index == 0 ? "1,234.56" : "-42"
-        typedValidation.rows[index].values["bad_score"] = index == 0 ? "1,2,3" : "123"
-        typedValidation.rows[index].values["nan_score"] = index == 0 ? "nan" : "inf"
-        typedValidation.rows[index].values["pub_year"] = index == 0 ? "2026" : "26"
-        typedValidation.rows[index].values["decision_date"] = index == 0 ? "2026-05-07" : "2026-13-40"
-    }
-    let typedIssues = typedValidation.validationIssues()
-    try check(!typedIssues.contains { $0.columnID == "score" }, "collection validation should accept finite numbers with valid comma grouping")
-    try check(typedIssues.contains { $0.columnID == "bad_score" && $0.message.contains("number") }, "collection validation should reject malformed number comma grouping")
-    try check(typedIssues.contains { $0.columnID == "nan_score" && $0.message.contains("number") }, "collection validation should reject non-finite number values")
-    try check(typedIssues.contains { $0.columnID == "pub_year" && $0.message.contains("year") }, "collection validation should report invalid year values")
-    try check(typedIssues.contains { $0.columnID == "pub_year" && $0.reason == .year }, "collection validation should type invalid year issues")
-    try check(typedIssues.contains { $0.columnID == "decision_date" && $0.message.contains("date") }, "collection validation should report invalid date values")
-    try check(typedIssues.contains { $0.columnID == "decision_date" && $0.reason == .date }, "collection validation should type invalid date issues")
-
-    let tempRoot = FileManager.default.temporaryDirectory
-        .appendingPathComponent("paper-codex-collections-\(UUID().uuidString)", isDirectory: true)
-    let store = PaperCollectionStore(root: tempRoot)
-    try store.save(edited)
-    let loaded = try store.load(id: edited.id)
-    try check(loaded == edited, "collection store should persist JSON documents losslessly")
-    let listedIDs = try store.list().map(\.id)
-    try check(listedIDs == [edited.id], "collection store should list saved documents")
-
-    let contract = PaperCollectionDocument.codexEditingContract(collectionJSONPath: "/tmp/collection.json")
-    try check(contract.contains("collection.json"), "collection codex contract should name the editable JSON source")
-    try check(contract.contains("Do not change"), "collection codex contract should protect stable ids")
-    try check(contract.contains("isHidden"), "collection codex contract should include hidden-column state")
-    try check(contract.contains("isRequired"), "collection codex contract should include required-column state")
-    try check(contract.contains("allowedValues"), "collection codex contract should include allowed values")
-    try check(contract.contains("description"), "collection codex contract should include field descriptions")
-}
-
-func runCollectionSourceChecks() throws {
-    let paperA = Paper(
-        id: "paper-a",
-        filePath: "/tmp/a.pdf",
-        fileHash: "hash-a",
-        title: "Paper A",
-        authors: ["Ada"],
-        year: 2025,
-        sourceURL: nil,
-        importedAt: Date(timeIntervalSince1970: 1_777_500_000),
-        updatedAt: Date(timeIntervalSince1970: 1_777_500_000)
-    )
-    let paperB = Paper(
-        id: "paper-b",
-        filePath: "/tmp/b.pdf",
-        fileHash: "hash-b",
-        title: "Paper B",
-        authors: ["Ben"],
-        year: nil,
-        sourceURL: nil,
-        importedAt: Date(timeIntervalSince1970: 1_777_500_000),
-        updatedAt: Date(timeIntervalSince1970: 1_777_500_000)
-    )
-    let categoriesByPaperID = ["paper-a": ["Vision"], "paper-b": ["Robotics"]]
-    let tagsByPaperID = [
-        "paper-a": [PaperTag(id: "tag-a", name: "diffusion")],
-        "paper-b": [PaperTag(id: "tag-b", name: "policy"), PaperTag(id: "tag-c", name: "control")]
-    ]
-
-    let seeds = PaperCollectionSeedPaper.seedPapers(
-        papers: [paperA, paperB],
-        categoriesByPaperID: categoriesByPaperID,
-        tagsByPaperID: tagsByPaperID
-    )
-
-    try check(seeds.map(\.paperID) == ["paper-a", "paper-b"], "seed papers should preserve input order")
-    try check(seeds[0].categories == ["Vision"], "seed papers should include display category names")
-    try check(seeds[1].tags == ["policy", "control"], "seed papers should include display tag names")
-}
-
 func runReaderTabStateChecks() throws {
     var state = ReaderTabState()
     let paperA = ReaderPaperTab(paperID: "paper-a", title: "Paper A", detail: "/tmp/a.pdf", isSaved: true)
@@ -614,179 +442,24 @@ func runUILayoutSourceChecks() throws {
     let discoverViewURL = root.appendingPathComponent("Sources/PaperCodexApp/DiscoverView.swift")
     let discoverSource = try String(contentsOf: discoverViewURL)
     let collectionViewURL = root.appendingPathComponent("Sources/PaperCodexApp/CollectionView.swift")
-    let collectionSource = try String(contentsOf: collectionViewURL)
+    let collectionViewExists = FileManager.default.fileExists(atPath: collectionViewURL.path)
     let appSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/PaperCodexApp.swift"))
     let chatViewURL = root.appendingPathComponent("Sources/PaperCodexApp/ChatView.swift")
     let chatSource = try String(contentsOf: chatViewURL)
     let saveToLibrarySource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/SaveToLibrarySheet.swift"))
     try check(
-        librarySource.contains("title: \"Collections\"")
-            && discoverSource.contains("title: \"Collections\"")
-            && settingsViewSource.contains("title: \"Collections\""),
-        "Library, Discover, and Settings sidebars should expose the Collections route under Discover"
-    )
-    try check(
-        librarySource.contains("createCollectionFromSelectedPapers")
-            && librarySource.contains("model.createCollectionFromCategory(category.id)"),
-        "Library should create collections quickly from multi-selected papers or the selected folder"
-    )
-    try check(
-        appSource.contains("case .collections") && appSource.contains("CollectionView()"),
-        "Root route should render the CollectionView"
-    )
-    try check(
-        collectionSource.contains("CollectionSpreadsheet")
-            && collectionSource.contains("CollectionChatPanel")
-            && collectionSource.contains("collectionJSONPath(for: collection.id)"),
-        "CollectionView should combine a spreadsheet surface, source JSON access, and collection chat"
-    )
-    try check(
-        collectionSource.contains("CollectionWorkbench")
-            && collectionSource.contains("CollectionWorkbenchHeader")
-            && collectionSource.contains("CollectionViewTabs")
-            && collectionSource.contains("CollectionFormulaBar")
-            && collectionSource.contains("CollectionAIDock")
-            && collectionSource.contains("CollectionFieldPanel")
-            && collectionSource.contains("CollectionStatusBar"),
-        "CollectionView should render the collection table through a complete workbench shell"
-    )
-    try check(
-        collectionSource.contains("CollectionAIDock")
-            && collectionSource.contains("enum CollectionAIDockTab")
-            && collectionSource.contains("CollectionSelectionPanel")
-            && collectionSource.contains("CollectionFieldPanel")
-            && collectionSource.contains("CollectionRunsPanel"),
-        "CollectionView should use a docked selection-first AI panel"
-    )
-    try check(
-        collectionSource.contains("CollectionChatPanel(")
-            && collectionSource.contains("case .chat")
-            && !collectionSource.contains("CollectionChatPanel(collection: collection)\n                    .frame(width: 380)"),
-        "Collection chat should live inside the integrated dock instead of a separate right panel"
-    )
-    try check(
-        collectionSource.contains("CollectionFieldPanel")
-            && !collectionSource.contains("CollectionFieldInspector("),
-        "Collection field settings should move into the dock Field tab"
-    )
-    try check(
-        appModelSource.contains("selectionContext:")
-            && appModelSource.contains("[Collection Selection Context]"),
-        "Collection chat prompts should support bounded selection context"
-    )
-    try check(
-        collectionSource.contains("selectionPromptContext(")
-            && collectionSource.contains("selected_cell:")
-            && collectionSource.contains("selected_row_ids:")
-            && collectionSource.contains("displayed_rows:"),
-        "CollectionView should derive bounded table selection context for AI prompts"
-    )
-    try check(
-        collectionSource.contains("enum CollectionTableViewMode")
-            && collectionSource.contains("struct CollectionCellCoordinate")
-            && collectionSource.contains("@State private var selectedCell"),
-        "CollectionView should model table view modes and selected cell coordinates"
-    )
-    try check(
-        collectionSource.contains("@State private var formulaDraft")
-            && collectionSource.contains("commitFormulaDraft()")
-            && collectionSource.contains("onSubmit")
-            && collectionSource.contains("onChange(of: isFormulaFocused)"),
-        "Collection formula bar should stage edits and commit on submit or blur"
-    )
-    try check(
-        collectionSource.contains("pruneSelectedCell")
-            && collectionSource.contains("onChange(of: displayedRowIDs)")
-            && collectionSource.contains("onChange(of: visibleColumnIDs)"),
-        "CollectionView should clear selected cells that leave visible rows or columns"
-    )
-    try check(
-        collectionSource.contains("onMoveSelection")
-            && collectionSource.contains("commitFormulaDraft()")
-            && collectionSource.contains("cancelCellEdit()")
-            && collectionSource.contains(".onKeyPress"),
-        "Collection spreadsheet should provide keyboard selection movement, formula commit/cancel, and SwiftUI onKeyPress handling"
-    )
-    try check(
-        collectionSource.contains("model.updateCollectionColumnTitle(collectionID:")
-            && collectionSource.contains("model.setCollectionColumnRequired(collectionID:")
-            && collectionSource.contains("model.setCollectionColumnAllowedValues(collectionID:")
-            && collectionSource.contains("model.setCollectionColumnDescription(collectionID:")
-            && collectionSource.contains("model.updateCollectionColumnWidth(collectionID:"),
-        "Collection field inspector should save field settings through AppModel column setting APIs"
-    )
-    try check(
-        collectionSource.contains("validationIssuesByCell")
-            && collectionSource.contains("Invalid Values")
-            && collectionSource.contains("Missing Required"),
-        "Collection validation UI should group issues by cell and expose invalid-value and missing-required views"
-    )
-    try check(
-        collectionSource.contains("formulaDraftCell")
-            && collectionSource.contains("commitFormulaDraft(collection: collection, coordinate:")
-            && collectionSource.contains("draftColumnID")
-            && collectionSource.contains("cancelledEditingCell"),
-        "Collection edit drafts should keep ownership across formula, inspector, and grid selection changes"
-    )
-    try check(
-        collectionSource.contains("visibleColumnCount")
-            && collectionSource.contains(".disabled(!column.isHidden && visibleColumnCount <= 1)"),
-        "Collection field inspector should not hide the last visible column"
-    )
-    try check(
-        collectionSource.contains("issue.reason == .required")
-            && !collectionSource.contains("message.localizedCaseInsensitiveContains(\"required\")"),
-        "Collection validation tabs should use typed validation reasons instead of message text"
-    )
-    try check(
-        collectionSource.contains("model.addColumn(toCollectionID:")
-            && collectionSource.contains("model.updateCollectionCell("),
-        "CollectionView should support user-added columns and editable custom cells"
-    )
-    try check(
-        collectionSource.contains("@State private var filterText")
-            && collectionSource.contains("@State private var sortColumnID")
-            && collectionSource.contains("model.setCollectionColumnHidden"),
-        "CollectionView should support filtering, sorting, and hiding columns"
-    )
-    try check(
-        !collectionSource.contains("lock.fill")
-            && !appModelSource.contains("collection.columns.first(where: { $0.id == columnID })?.isLocked == false"),
-        "Collection table cells should stay editable even for metadata columns"
-    )
-    try check(
-        collectionSource.contains("model.addCategory(category.id, toCollectionID: collection.id)")
-            && collectionSource.contains("model.openPapersForChat(selectedPapers.map(\\.id))"),
-        "CollectionView should add papers by folder and start paper chat from selected table rows"
-    )
-    try check(
-        appModelSource.contains("sendCollectionMessage")
-            && appModelSource.contains("collectionPrompt(")
-            && appModelSource.contains("PaperCollectionDocument.codexEditingContract"),
-        "AppModel should run collection chat against the fixed JSON editing contract"
-    )
-    try check(
-        appModelSource.contains("func updateCollectionColumnTitle")
-            && appModelSource.contains("func updateCollectionColumnWidth")
-            && appModelSource.contains("func setCollectionColumnRequired")
-            && appModelSource.contains("func setCollectionColumnAllowedValues")
-            && appModelSource.contains("func setCollectionColumnDescription")
-            && appModelSource.contains("validationIssues(for collection:"),
-        "AppModel should expose collection column setting and validation APIs"
-    )
-    try check(
-        appModelSource.contains("collectionColumnPromptLine")
-            && appModelSource.contains("\\\"required\\\": \\(column.isRequired)")
-            && appModelSource.contains("\\\"allowedValues\\\": \\(allowedValues)")
-            && appModelSource.contains("promptJSONString(column.description)"),
-        "collection prompt context should include structured required, allowed values, and description field settings"
-    )
-    try check(
-        appModelSource.contains("collectionValidationPromptColumnLimit")
-            && appModelSource.contains("collectionValidationPromptSampleLimit")
-            && appModelSource.contains("Dictionary(grouping: issues")
-            && appModelSource.contains("omittedIssueCount"),
-        "collection prompt validation issue summary should be bounded and grouped"
+        !collectionViewExists
+            && !appSource.contains("case .collections")
+            && !appSource.contains("CollectionView()")
+            && !appSource.contains("showCollections")
+            && !librarySource.contains("title: \"Collections\"")
+            && !librarySource.contains("createCollection")
+            && !discoverSource.contains("title: \"Collections\"")
+            && !settingsViewSource.contains("title: \"Collections\"")
+            && !appModelSource.contains("PaperCollection")
+            && !appModelSource.contains("collectionStore")
+            && !appModelSource.contains("showCollections"),
+        "Collection feature should be fully removed from routes, sidebars, AppModel, and dedicated views"
     )
     try check(
         appModelSource.contains("movePapers(_ paperIDs: [String], toCategory categoryID: String?)"),
@@ -3655,14 +3328,6 @@ do {
     if selectedChecks.isEmpty || selectedChecks.contains("local-store-v2-models") {
         try runLocalStoreV2ModelChecks()
         print("local-store-v2-models: pass")
-    }
-    if selectedChecks.isEmpty || selectedChecks.contains("collections") {
-        try runCollectionChecks()
-        print("collections: pass")
-    }
-    if selectedChecks.isEmpty || selectedChecks.contains("collection-sources") {
-        try runCollectionSourceChecks()
-        print("collection-sources: pass")
     }
     if selectedChecks.isEmpty || selectedChecks.contains("reader-tabs") {
         try runReaderTabStateChecks()

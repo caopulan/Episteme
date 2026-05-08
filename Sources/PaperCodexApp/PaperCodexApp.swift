@@ -28,8 +28,6 @@ struct RootView: View {
                 LibraryView()
             case .discover:
                 DiscoverView()
-            case .collections:
-                CollectionView()
             case .settings:
                 SettingsView()
             case .reader:
@@ -75,17 +73,12 @@ struct PaperCodexCommands: Commands {
             }
             .keyboardShortcut("2", modifiers: [.command])
 
-            Button("Collections") {
-                model.showCollections()
-            }
-            .keyboardShortcut("3", modifiers: [.command])
-
             Button("Reader") {
                 if model.selectedPaper != nil {
                     model.route = .reader
                 }
             }
-            .keyboardShortcut("4", modifiers: [.command])
+            .keyboardShortcut("3", modifiers: [.command])
             .disabled(model.selectedPaper == nil)
 
             Divider()

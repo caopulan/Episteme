@@ -7,7 +7,6 @@ import SwiftUI
 enum AppRoute {
     case library
     case discover
-    case collections
     case settings
     case reader
 }
@@ -311,9 +310,6 @@ final class AppModel: ObservableObject {
     @Published var watchedFolders: [WatchedFolder] = []
     @Published var paperCategoryIDsByID: [String: [String]] = [:]
     @Published var paperTagsByID: [String: [PaperTag]] = [:]
-    @Published var collections: [PaperCollectionDocument] = []
-    @Published var selectedCollectionID: String?
-    @Published var collectionChatMessagesByID: [String: [ChatMessage]] = [:]
     @Published var selectedLibraryPaper: Paper?
     @Published var librarySearchText = ""
     @Published var librarySelectedCategoryID: String?
@@ -402,7 +398,6 @@ final class AppModel: ObservableObject {
     private let arxivCache: ArxivFeedCache
     private let localDiscoverCache: LocalDiscoverCache
     private let thumbnailCache: PDFThumbnailCache
-    private let collectionStore: PaperCollectionStore
     private let workspaceManager = SessionWorkspaceManager()
     private var watchedFolderAutoScanTask: Task<Void, Never>?
     private var activeDiscoverSearchTask: Task<Void, Never>?
@@ -410,11 +405,8 @@ final class AppModel: ObservableObject {
     private var activeCodexRunHandlesBySessionID: [String: CodexRunHandle] = [:]
     private var activeDiscoverCodexRunHandles: [CodexRunHandle] = []
     private var cancellingCodexRunSessionIDs: Set<String> = []
-    private var collectionCodexSessionIDsByID: [String: String] = [:]
     private var isCancellingDiscoverProcessing = false
     private var isCancellingDiscoverPDFCache = false
-    private let collectionValidationPromptColumnLimit = 8
-    private let collectionValidationPromptSampleLimit = 3
 
     var activeCodexRun: ActiveCodexRun? {
         activeCodexRun(for: selectedSession?.id)
@@ -512,13 +504,6 @@ final class AppModel: ObservableObject {
         return linkedPapers
     }
 
-    var selectedCollection: PaperCollectionDocument? {
-        guard let selectedCollectionID else {
-            return nil
-        }
-        return collections.first { $0.id == selectedCollectionID }
-    }
-
     init() {
         let storedLanguageMode = loadGlobalLanguageModeFromDefaults()
         globalLanguageMode = storedLanguageMode
@@ -529,7 +514,6 @@ final class AppModel: ObservableObject {
         arxivCache = ArxivFeedCache(root: root.appendingPathComponent("arxiv-cache", isDirectory: true))
         localDiscoverCache = LocalDiscoverCache(root: root.appendingPathComponent("discover-cache", isDirectory: true))
         thumbnailCache = PDFThumbnailCache(root: root.appendingPathComponent("thumbnails", isDirectory: true))
-        collectionStore = PaperCollectionStore(root: root.appendingPathComponent("collections", isDirectory: true))
         discoverSelectedCategories = localDiscoverPreferences.categories.isEmpty ? ["cs.CV"] : [localDiscoverPreferences.categories[0]]
         do {
             try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -537,7 +521,6 @@ final class AppModel: ObservableObject {
             try store.migrate()
             repository = store
             try reloadLibrary()
-            try reloadCollections()
             loadCachedArxivState()
             refreshCacheStorageSummary()
             Task {
@@ -646,17 +629,6 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func reloadCollections() throws {
-        let previousSelection = selectedCollectionID
-        collections = try collectionStore.list()
-        if let previousSelection,
-           collections.contains(where: { $0.id == previousSelection }) {
-            selectedCollectionID = previousSelection
-        } else {
-            selectedCollectionID = collections.first?.id
-        }
-    }
-
     func refreshRecentSessions() {
         do {
             guard let repository else {
@@ -682,560 +654,6 @@ final class AppModel: ObservableObject {
             papers.first(where: { $0.id == paperID })
                 ?? visiblePapers.first(where: { $0.id == paperID })
         }
-    }
-
-    func collectionMessages(for collectionID: String) -> [ChatMessage] {
-        collectionChatMessagesByID[collectionID, default: []]
-    }
-
-    func activeCodexRun(forCollectionID collectionID: String?) -> ActiveCodexRun? {
-        guard let collectionID else {
-            return nil
-        }
-        return activeCodexRun(for: collectionRunKey(collectionID))
-    }
-
-    func isCollectionSending(_ collectionID: String?) -> Bool {
-        activeCodexRun(forCollectionID: collectionID) != nil
-    }
-
-    func selectCollection(_ collection: PaperCollectionDocument) {
-        selectedCollectionID = collection.id
-    }
-
-    func createCollection(title: String, description: String = "", paperIDs: [String]) {
-        do {
-            let seeds = try collectionSeedPapers(for: paperIDs)
-            guard !seeds.isEmpty else {
-                throw AppModelError.noSelectedPaper
-            }
-            let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
-            let document = PaperCollectionDocument.newDocument(
-                title: trimmedTitle.isEmpty ? "Paper Collection" : trimmedTitle,
-                description: description.trimmingCharacters(in: .whitespacesAndNewlines),
-                papers: seeds
-            )
-            try collectionStore.save(document)
-            try reloadCollections()
-            selectedCollectionID = document.id
-            route = .collections
-            postNotice(kind: .success, title: "Collection Created", message: "\(seeds.count) paper\(seeds.count == 1 ? "" : "s")")
-        } catch {
-            errorMessage = String(describing: error)
-        }
-    }
-
-    func createCollectionFromCategory(_ categoryID: String) {
-        do {
-            guard let category = categories.first(where: { $0.id == categoryID }) else {
-                throw AppModelError.categoryNotFound(categoryID)
-            }
-            let categoryIDs = Set([categoryID]).union(categoryDescendantIDs(of: categoryID))
-            let paperIDs = papers
-                .filter { paper in
-                    !paper.isArxivImportPlaceholder
-                        && !Set(paperCategoryIDsByID[paper.id, default: []]).isDisjoint(with: categoryIDs)
-                }
-                .map(\.id)
-            createCollection(title: category.name, description: "Built from folder \(category.name).", paperIDs: paperIDs)
-        } catch {
-            errorMessage = String(describing: error)
-        }
-    }
-
-    func addPapers(_ paperIDs: [String], toCollectionID collectionID: String) {
-        do {
-            guard var collection = collections.first(where: { $0.id == collectionID }) else {
-                throw AppModelError.collectionNotFound(collectionID)
-            }
-            let seeds = try collectionSeedPapers(for: paperIDs)
-            guard !seeds.isEmpty else {
-                return
-            }
-            collection.addPapers(seeds)
-            try collectionStore.save(collection)
-            try reloadCollections()
-            selectedCollectionID = collectionID
-            postNotice(kind: .success, title: "Papers Added", message: "\(seeds.count) sent to \(collection.title)")
-        } catch {
-            errorMessage = String(describing: error)
-        }
-    }
-
-    func addCategory(_ categoryID: String, toCollectionID collectionID: String) {
-        guard categories.contains(where: { $0.id == categoryID }) else {
-            errorMessage = AppModelError.categoryNotFound(categoryID).description
-            return
-        }
-        let categoryIDs = Set([categoryID]).union(categoryDescendantIDs(of: categoryID))
-        let paperIDs = papers
-            .filter { paper in
-                !paper.isArxivImportPlaceholder
-                    && !Set(paperCategoryIDsByID[paper.id, default: []]).isDisjoint(with: categoryIDs)
-            }
-            .map(\.id)
-        addPapers(paperIDs, toCollectionID: collectionID)
-    }
-
-    func addColumn(toCollectionID collectionID: String, title: String, kind: PaperCollectionColumnValueKind = .text) {
-        do {
-            guard var collection = collections.first(where: { $0.id == collectionID }) else {
-                throw AppModelError.collectionNotFound(collectionID)
-            }
-            let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else {
-                throw AppModelError.emptyName
-            }
-            _ = collection.addColumn(title: trimmed, valueKind: kind)
-            try collectionStore.save(collection)
-            try reloadCollections()
-            selectedCollectionID = collectionID
-            postNotice(kind: .success, title: "Column Added", message: trimmed)
-        } catch {
-            errorMessage = String(describing: error)
-        }
-    }
-
-    func updateCollectionCell(collectionID: String, rowID: String, columnID: String, value: String) {
-        do {
-            guard let collectionIndex = collections.firstIndex(where: { $0.id == collectionID }) else {
-                throw AppModelError.collectionNotFound(collectionID)
-            }
-            var collection = collections[collectionIndex]
-            collection.updateCell(rowID: rowID, columnID: columnID, value: value)
-            try collectionStore.save(collection)
-            collections[collectionIndex] = collection
-            selectedCollectionID = collectionID
-        } catch {
-            errorMessage = String(describing: error)
-        }
-    }
-
-    func setCollectionColumnHidden(collectionID: String, columnID: String, hidden: Bool) {
-        do {
-            guard let collectionIndex = collections.firstIndex(where: { $0.id == collectionID }) else {
-                throw AppModelError.collectionNotFound(collectionID)
-            }
-            var collection = collections[collectionIndex]
-            collection.setColumnHidden(columnID, hidden: hidden)
-            try collectionStore.save(collection)
-            collections[collectionIndex] = collection
-            selectedCollectionID = collectionID
-        } catch {
-            errorMessage = String(describing: error)
-        }
-    }
-
-    func updateCollectionColumnTitle(collectionID: String, columnID: String, title: String) {
-        do {
-            guard let collectionIndex = collections.firstIndex(where: { $0.id == collectionID }) else {
-                throw AppModelError.collectionNotFound(collectionID)
-            }
-            var collection = collections[collectionIndex]
-            collection.updateColumnTitle(columnID, title: title)
-            try collectionStore.save(collection)
-            collections[collectionIndex] = collection
-            selectedCollectionID = collectionID
-        } catch {
-            errorMessage = String(describing: error)
-        }
-    }
-
-    func updateCollectionColumnWidth(collectionID: String, columnID: String, width: Double) {
-        do {
-            guard let collectionIndex = collections.firstIndex(where: { $0.id == collectionID }) else {
-                throw AppModelError.collectionNotFound(collectionID)
-            }
-            var collection = collections[collectionIndex]
-            collection.updateColumnWidth(columnID, width: width)
-            try collectionStore.save(collection)
-            collections[collectionIndex] = collection
-            selectedCollectionID = collectionID
-        } catch {
-            errorMessage = String(describing: error)
-        }
-    }
-
-    func setCollectionColumnRequired(collectionID: String, columnID: String, required: Bool) {
-        do {
-            guard let collectionIndex = collections.firstIndex(where: { $0.id == collectionID }) else {
-                throw AppModelError.collectionNotFound(collectionID)
-            }
-            var collection = collections[collectionIndex]
-            collection.setColumnRequired(columnID, required: required)
-            try collectionStore.save(collection)
-            collections[collectionIndex] = collection
-            selectedCollectionID = collectionID
-        } catch {
-            errorMessage = String(describing: error)
-        }
-    }
-
-    func setCollectionColumnAllowedValues(collectionID: String, columnID: String, allowedValues: [String]) {
-        do {
-            guard let collectionIndex = collections.firstIndex(where: { $0.id == collectionID }) else {
-                throw AppModelError.collectionNotFound(collectionID)
-            }
-            var collection = collections[collectionIndex]
-            let normalizedValues = allowedValues
-                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty }
-            collection.setColumnAllowedValues(columnID, allowedValues: normalizedValues)
-            try collectionStore.save(collection)
-            collections[collectionIndex] = collection
-            selectedCollectionID = collectionID
-        } catch {
-            errorMessage = String(describing: error)
-        }
-    }
-
-    func setCollectionColumnDescription(collectionID: String, columnID: String, description: String) {
-        do {
-            guard let collectionIndex = collections.firstIndex(where: { $0.id == collectionID }) else {
-                throw AppModelError.collectionNotFound(collectionID)
-            }
-            var collection = collections[collectionIndex]
-            collection.setColumnDescription(columnID, description: description)
-            try collectionStore.save(collection)
-            collections[collectionIndex] = collection
-            selectedCollectionID = collectionID
-        } catch {
-            errorMessage = String(describing: error)
-        }
-    }
-
-    func validationIssues(for collection: PaperCollectionDocument) -> [PaperCollectionValidationIssue] {
-        collection.validationIssues()
-    }
-
-    func renameCollection(_ collectionID: String, title: String, description: String) {
-        do {
-            guard var collection = collections.first(where: { $0.id == collectionID }) else {
-                throw AppModelError.collectionNotFound(collectionID)
-            }
-            let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmedTitle.isEmpty else {
-                throw AppModelError.emptyName
-            }
-            collection.title = trimmedTitle
-            collection.description = description.trimmingCharacters(in: .whitespacesAndNewlines)
-            collection.updatedAt = Date()
-            try collectionStore.save(collection)
-            try reloadCollections()
-            selectedCollectionID = collectionID
-            postNotice(kind: .success, title: "Collection Updated", message: trimmedTitle)
-        } catch {
-            errorMessage = String(describing: error)
-        }
-    }
-
-    func deleteCollection(_ collectionID: String) {
-        do {
-            let title = collections.first(where: { $0.id == collectionID })?.title ?? "Collection"
-            try collectionStore.delete(id: collectionID)
-            collectionChatMessagesByID[collectionID] = nil
-            collectionCodexSessionIDsByID[collectionID] = nil
-            try reloadCollections()
-            postNotice(kind: .success, title: "Collection Deleted", message: title)
-        } catch {
-            errorMessage = String(describing: error)
-        }
-    }
-
-    func collectionJSONPath(for collectionID: String) -> String {
-        collectionStore.collectionJSONURL(id: collectionID).path
-    }
-
-    func revealCollectionSource(_ collectionID: String) {
-        revealPath(collectionJSONPath(for: collectionID))
-    }
-
-    func papers(in collection: PaperCollectionDocument, rowIDs: Set<String>? = nil) -> [Paper] {
-        let rows = rowIDs.map { ids in collection.rows.filter { ids.contains($0.id) } } ?? collection.rows
-        return rows.compactMap { row in
-            papers.first { $0.id == row.paperID }
-        }
-    }
-
-    func cancelCollectionCodexRun(_ collectionID: String) {
-        let runKey = collectionRunKey(collectionID)
-        guard let run = activeCodexRunsBySessionID[runKey] else {
-            return
-        }
-        cancellingCodexRunSessionIDs.insert(runKey)
-        activeCodexRunHandlesBySessionID[runKey]?.cancel()
-        postNotice(kind: .info, title: "Stopping Codex", message: run.title)
-    }
-
-    func sendCollectionMessage(_ text: String, collectionID: String, selectionContext: String? = nil) async {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            return
-        }
-        let runKey = collectionRunKey(collectionID)
-        guard !isSessionSending(runKey) else {
-            return
-        }
-
-        let userMessage = ChatMessage(
-            id: UUID().uuidString.lowercased(),
-            sessionID: runKey,
-            role: .user,
-            content: trimmed,
-            createdAt: Date()
-        )
-        collectionChatMessagesByID[collectionID, default: []].append(userMessage)
-
-        var activeRunKey: String?
-        defer {
-            if let activeRunKey {
-                finishCodexRun(sessionID: activeRunKey)
-            }
-        }
-
-        do {
-            guard let repository else {
-                throw AppModelError.repositoryUnavailable
-            }
-            guard let collection = collections.first(where: { $0.id == collectionID }) else {
-                throw AppModelError.collectionNotFound(collectionID)
-            }
-            activeRunKey = runKey
-            let runID = beginCodexRun(sessionID: runKey, title: "Updating \(collection.title)")
-            appendCodexRunEvent(
-                CodexRunEvent(kind: .status, title: "Collection", detail: "Preparing collection JSON and paper workspace"),
-                runID: runID
-            )
-
-            let paperIDs = uniqueIDs(collection.rows.map(\.paperID))
-            let collectionPapers = try repository.fetchPapers(ids: paperIDs).filter { !$0.isArxivImportPlaceholder }
-            try collectionStore.save(collection)
-
-            let workspaceURL = collectionStore
-                .collectionDirectoryURL(id: collectionID)
-                .appendingPathComponent("workspace", isDirectory: true)
-            try FileManager.default.createDirectory(at: workspaceURL, withIntermediateDirectories: true)
-            try FileManager.default.createDirectory(at: workspaceURL.appendingPathComponent("turns", isDirectory: true), withIntermediateDirectories: true)
-            let session = PaperSession(
-                id: runKey,
-                title: "Collection: \(collection.title)",
-                paperIDs: collectionPapers.map(\.id),
-                codexSessionID: collectionCodexSessionIDsByID[collectionID],
-                workspacePath: workspaceURL.path,
-                createdAt: collection.createdAt,
-                updatedAt: Date()
-            )
-            if let fallbackPaper = collectionPapers.first {
-                let context = try loadSessionPaperContext(session: session, fallbackPaper: fallbackPaper, repository: repository)
-                try workspaceManager.writeWorkspace(
-                    session: session,
-                    papers: context.papers,
-                    pagesByPaperID: context.pagesByPaperID,
-                    spansByPaperID: context.spansByPaperID,
-                    anchorsByPaperID: context.anchorsByPaperID
-                )
-            }
-            appendCodexRunEvent(
-                CodexRunEvent(kind: .status, title: "Workspace", detail: "Collection source: \(collectionStore.collectionJSONURL(id: collectionID).path)"),
-                runID: runID
-            )
-
-            let prompt = collectionPrompt(
-                userMessage: trimmed,
-                collection: collection,
-                papers: collectionPapers,
-                workspacePath: workspaceURL.path,
-                selectionContext: selectionContext
-            )
-            let codexReply = try await runCodex(
-                prompt: prompt,
-                session: session,
-                runID: runID,
-                prefersWorkspaceImageOutput: false
-            )
-            if let threadID = codexReply.threadID {
-                collectionCodexSessionIDsByID[collectionID] = threadID
-            }
-            let updatedCollection = try collectionStore.load(id: collectionID)
-            try reloadCollections()
-            selectedCollectionID = updatedCollection.id
-
-            let content = codexMessageContent(
-                lastMessage: codexReply.lastMessage,
-                stdout: codexReply.stdout,
-                generatedImages: codexReply.generatedImages
-            )
-            let reply = ChatMessage(
-                id: UUID().uuidString.lowercased(),
-                sessionID: runKey,
-                role: .codex,
-                content: content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Collection table updated." : content,
-                createdAt: Date()
-            )
-            collectionChatMessagesByID[collectionID, default: []].append(reply)
-            postNotice(kind: .success, title: "Collection Updated", message: updatedCollection.title)
-        } catch {
-            if cancellingCodexRunSessionIDs.contains(runKey) {
-                let cancelled = ChatMessage(
-                    id: UUID().uuidString.lowercased(),
-                    sessionID: runKey,
-                    role: .codex,
-                    content: "_Codex run stopped by the user._",
-                    createdAt: Date()
-                )
-                collectionChatMessagesByID[collectionID, default: []].append(cancelled)
-                return
-            }
-            let failure = ChatMessage(
-                id: UUID().uuidString.lowercased(),
-                sessionID: runKey,
-                role: .codex,
-                content: CodexFailureNotice(detail: String(describing: error)).messageContent,
-                createdAt: Date()
-            )
-            collectionChatMessagesByID[collectionID, default: []].append(failure)
-            errorMessage = String(describing: error)
-        }
-    }
-
-    private func collectionSeedPapers(for paperIDs: [String]) throws -> [PaperCollectionSeedPaper] {
-        guard let repository else {
-            throw AppModelError.repositoryUnavailable
-        }
-        let fetched = try repository.fetchPapers(ids: uniqueIDs(paperIDs)).filter { !$0.isArxivImportPlaceholder }
-        let categoryNamesByID = Dictionary(uniqueKeysWithValues: categories.map { ($0.id, $0.name) })
-        let categoriesByPaperID = Dictionary(uniqueKeysWithValues: fetched.map { paper in
-            (
-                paper.id,
-                paperCategoryIDsByID[paper.id, default: []].compactMap { categoryNamesByID[$0] }
-            )
-        })
-        let tagsByPaperID = Dictionary(uniqueKeysWithValues: fetched.map { paper in
-            (paper.id, paperTagsByID[paper.id, default: []])
-        })
-        return PaperCollectionSeedPaper.seedPapers(
-            papers: fetched,
-            categoriesByPaperID: categoriesByPaperID,
-            tagsByPaperID: tagsByPaperID
-        )
-    }
-
-    private func collectionPrompt(
-        userMessage: String,
-        collection: PaperCollectionDocument,
-        papers: [Paper],
-        workspacePath: String,
-        selectionContext: String?
-    ) -> String {
-        let collectionJSONPath = collectionStore.collectionJSONURL(id: collection.id).path
-        let paperPrompt = PromptBuilder().buildPrompt(
-            request: PromptRequest(
-                userMessage: userMessage,
-                workspacePath: workspacePath,
-                papers: papers,
-                selectedAnchors: [],
-                relevantSpans: [],
-                systemPromptTemplate: codexSystemPrompt,
-                languageMode: globalLanguageMode
-            )
-        )
-        let columns = collection.columns.map(collectionColumnPromptLine).joined(separator: "\n")
-        let validationIssues = validationIssues(for: collection)
-        let validationSummary = collectionValidationPromptSummary(for: collection, issues: validationIssues)
-        let selectionSummary = collectionSelectionPromptSummary(selectionContext)
-        return """
-        \(paperPrompt)
-
-        [Collection Table]
-        collection_id: \(collection.id)
-        collection_title: \(collection.title)
-        collection_json: \(collectionJSONPath)
-        rows: \(collection.rows.count)
-
-        [Collection Columns]
-        \(columns)
-        \(validationSummary)
-        \(selectionSummary)
-
-        \(PaperCollectionDocument.codexEditingContract(collectionJSONPath: collectionJSONPath))
-
-        [Collection User Request]
-        \(userMessage)
-
-        Update collection.json when the user asks for analysis, summaries, labels, grouping, classification, scores, or new comparison columns. After editing, answer briefly with what changed.
-        """
-    }
-
-    private func collectionSelectionPromptSummary(_ selectionContext: String?) -> String {
-        guard let selectionContext,
-              !selectionContext.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return ""
-        }
-        return """
-
-        [Collection Selection Context]
-        \(selectionContext)
-        """
-    }
-
-    private func collectionColumnPromptLine(_ column: PaperCollectionColumn) -> String {
-        let allowedValues = "[\(column.allowedValues.map { "\"\(promptJSONString($0))\"" }.joined(separator: ", "))]"
-        return "- {\"id\": \"\(promptJSONString(column.id))\", \"title\": \"\(promptJSONString(column.title))\", \"type\": \"\(column.valueKind.rawValue)\", \"locked\": \(column.isLocked), \"hidden\": \(column.isHidden), \"required\": \(column.isRequired), \"allowedValues\": \(allowedValues), \"description\": \"\(promptJSONString(column.description))\"}"
-    }
-
-    private func collectionValidationPromptSummary(
-        for collection: PaperCollectionDocument,
-        issues: [PaperCollectionValidationIssue]
-    ) -> String {
-        guard !issues.isEmpty else {
-            return ""
-        }
-        let columnsByID = Dictionary(uniqueKeysWithValues: collection.columns.map { ($0.id, $0) })
-        let rowsByID = Dictionary(uniqueKeysWithValues: collection.rows.map { ($0.id, $0) })
-        let groupedByColumn = Dictionary(grouping: issues, by: \.columnID)
-        let visibleGroups = groupedByColumn
-            .sorted {
-                if $0.value.count == $1.value.count {
-                    return $0.key < $1.key
-                }
-                return $0.value.count > $1.value.count
-            }
-            .prefix(collectionValidationPromptColumnLimit)
-        let issueLines = visibleGroups.map { columnID, columnIssues in
-            let columnTitle = columnsByID[columnID]?.title ?? columnID
-            let samples = columnIssues.prefix(collectionValidationPromptSampleLimit).map { issue in
-                let row = rowsByID[issue.rowID]
-                let paperID = row?.paperID ?? "unknown"
-                let paperTitle = row?.values["paper_title"] ?? paperID
-                return "{rowID: \"\(promptJSONString(issue.rowID))\", paperID: \"\(promptJSONString(paperID))\", paperTitle: \"\(promptJSONString(paperTitle))\", message: \"\(promptJSONString(issue.message))\"}"
-            }.joined(separator: ", ")
-            return "- column \(columnID) \"\(promptJSONString(columnTitle))\": \(columnIssues.count) issue(s), samples: [\(samples)]"
-        }
-        let shownIssueCount = visibleGroups.reduce(0) { $0 + $1.value.count }
-        let omittedColumnCount = max(0, groupedByColumn.count - visibleGroups.count)
-        let omittedIssueCount = max(0, issues.count - shownIssueCount)
-        let omittedLine = omittedIssueCount > 0
-            ? "\n- omitted: \(omittedIssueCount) issue(s) across \(omittedColumnCount) additional column(s)"
-            : ""
-        return """
-
-        [Collection Validation Issues]
-        total: \(issues.count)
-        \(issueLines.joined(separator: "\n"))\(omittedLine)
-        """
-    }
-
-    private func promptJSONString(_ value: String) -> String {
-        value
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-            .replacingOccurrences(of: "\n", with: "\\n")
-            .replacingOccurrences(of: "\r", with: "\\r")
-            .replacingOccurrences(of: "\t", with: "\\t")
-    }
-
-    private func collectionRunKey(_ collectionID: String) -> String {
-        "collection:\(collectionID)"
     }
 
     func importPDF(from sourceURL: URL) {
@@ -1386,16 +804,6 @@ final class AppModel: ObservableObject {
     func showDiscover() {
         route = .discover
         clearReaderContext()
-    }
-
-    func showCollections() {
-        do {
-            try reloadCollections()
-            route = .collections
-            clearReaderContext()
-        } catch {
-            errorMessage = String(describing: error)
-        }
     }
 
     func recordDiscoverScrollPosition(_ paperID: String?) {
@@ -3033,8 +2441,6 @@ final class AppModel: ObservableObject {
         do {
             if route == .discover {
                 readerReturnRoute = .discover
-            } else if route == .collections {
-                readerReturnRoute = .collections
             } else if route == .library {
                 readerReturnRoute = .library
             }
@@ -3046,7 +2452,7 @@ final class AppModel: ObservableObject {
 
     func openPapersForReading(_ paperIDs: [String]) {
         do {
-            readerReturnRoute = route == .collections ? .collections : .library
+            readerReturnRoute = .library
             try openPaperSet(paperIDs, opensReaderTabs: true, panelTab: .chat)
         } catch {
             errorMessage = String(describing: error)
@@ -3055,7 +2461,7 @@ final class AppModel: ObservableObject {
 
     func openPapersForChat(_ paperIDs: [String]) {
         do {
-            readerReturnRoute = route == .collections ? .collections : .library
+            readerReturnRoute = .library
             try openPaperSet(paperIDs, opensReaderTabs: true, panelTab: .chat)
         } catch {
             errorMessage = String(describing: error)
@@ -3701,8 +3107,6 @@ final class AppModel: ObservableObject {
         switch destination {
         case .discover:
             route = .discover
-        case .collections:
-            route = .collections
         case .library, .settings, .reader:
             route = .library
         }
@@ -5143,7 +4547,6 @@ enum AppModelError: Error, CustomStringConvertible {
     case downloadedFileIsNotPDF(String)
     case arxivMetadataNotFound(String)
     case categoryNotFound(String)
-    case collectionNotFound(String)
     case invalidCategoryMove
     case keychainFailure(OSStatus)
 
@@ -5171,8 +4574,6 @@ enum AppModelError: Error, CustomStringConvertible {
             "No arXiv metadata was found for \(arxivID)."
         case let .categoryNotFound(categoryID):
             "No folder was found for \(categoryID)."
-        case let .collectionNotFound(collectionID):
-            "No collection was found for \(collectionID)."
         case .invalidCategoryMove:
             "A category cannot be moved into itself or one of its subcategories."
         case let .keychainFailure(status):

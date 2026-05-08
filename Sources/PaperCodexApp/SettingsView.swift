@@ -198,9 +198,6 @@ struct SettingsView: View {
                 navButton(title: "Discover", systemImage: "sparkle.magnifyingglass") {
                     model.showDiscover()
                 }
-                navButton(title: "Collections", systemImage: "tablecells") {
-                    model.showCollections()
-                }
                 navButton(title: "Settings", systemImage: "gearshape", selected: true) {}
             }
 
