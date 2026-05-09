@@ -124,11 +124,18 @@ public struct DiscoverQuery: Codable, Equatable, Sendable {
 public struct DiscoverQueryResult: Codable, Equatable, Sendable {
     public var query: DiscoverQuery
     public var arxivIDs: [String]
+    public var feed: ArxivFeedResponse?
     public var generatedAt: Date
 
-    public init(query: DiscoverQuery, arxivIDs: [String], generatedAt: Date) {
+    public init(
+        query: DiscoverQuery,
+        arxivIDs: [String],
+        generatedAt: Date,
+        feed: ArxivFeedResponse? = nil
+    ) {
         self.query = query
         self.arxivIDs = arxivIDs
+        self.feed = feed
         self.generatedAt = generatedAt
     }
 }

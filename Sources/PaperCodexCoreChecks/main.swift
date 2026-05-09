@@ -1092,9 +1092,10 @@ func runUILayoutSourceChecks() throws {
     try check(
         appModelSource.contains("discoverScrollPositionPaperID")
             && appModelSource.contains("recordDiscoverScrollPosition")
-            && discoverSource.contains("DiscoverVisiblePaperPreferenceKey")
-            && discoverSource.contains(".coordinateSpace(name: DiscoverScrollCoordinateSpace.name)")
-            && discoverSource.contains("restoreDiscoverScrollPosition(scrollProxy)")
+            && discoverSource.contains("discoverScrollAnchorID")
+            && discoverSource.contains(".scrollPosition(id: $discoverScrollAnchorID, anchor: .top)")
+            && discoverSource.contains("restoreDiscoverScrollPosition()")
+            && discoverSource.contains("commitDiscoverScrollPosition")
             && !discoverSource.contains("discoverReturnPaperID"),
         "Discover should record the current visible paper and restore that scroll position when returning from Reader or other app sections"
     )
@@ -1165,6 +1166,22 @@ func runUILayoutSourceChecks() throws {
             && appModelSource.contains("discoverEnrichment(existing, satisfies: actions)")
             && appModelSource.contains("discoverEnrichmentPrompt(for: paper, actions: actions)"),
         "Discover translation and summarization actions should use action-aware enrichment prompts and cache completeness checks"
+    )
+    try check(
+        discoverSource.contains("@State private var discoverScrollAnchorID: String?")
+            && discoverSource.contains("@State private var discoverScrollPositionCommitTask: Task<Void, Never>?")
+            && discoverSource.contains(".scrollTargetLayout()")
+            && discoverSource.contains(".scrollPosition(id: $discoverScrollAnchorID, anchor: .top)")
+            && !discoverSource.contains("DiscoverVisiblePaperReporter")
+            && !discoverSource.contains("DiscoverVisiblePaperPreferenceKey"),
+        "Discover scroll restoration should use scroll position binding instead of per-card geometry tracking"
+    )
+    try check(
+        appModelSource.contains("if try loadCachedDiscoverSearch(query: query) {\n                return\n            }")
+            && appModelSource.contains("cacheQueryResult:")
+            && appModelSource.contains("guard !feed.papers.isEmpty else")
+            && appModelSource.contains("try loadDiscoverEnrichments(for: feed.papers)"),
+        "Discover search should hit cached non-empty query results before network fetch and immediately load cached enrichments"
     )
     try check(
         appModelSource.contains("tokenUsage: CodexTokenUsage?")
@@ -2810,6 +2827,15 @@ func runArxivFeedChecks() throws {
 }
 
 func runLocalDiscoverEngineChecks() throws {
+    let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+    let localDiscoverSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexCore/LocalDiscoverEngine.swift"))
+    try check(
+        localDiscoverSource.contains("public var feed: ArxivFeedResponse?")
+            && localDiscoverSource.contains("feed: ArxivFeedResponse? = nil")
+            && localDiscoverSource.contains("self.feed = feed"),
+        "discover query cache should persist the full non-empty search feed, not only paper ids"
+    )
+
     let range = try DiscoverDateRange(start: "2026-04-27", end: "2026-04-29")
     try check(range.dates == ["2026-04-27", "2026-04-28", "2026-04-29"], "discover date range should expand inclusive dates")
     let last7Days = try DiscoverQuickRange.last7Days.dateRange(endingAt: "2026-04-29")
@@ -2852,12 +2878,44 @@ func runLocalDiscoverEngineChecks() throws {
         .appendingPathComponent("paper-codex-discover-engine-\(UUID().uuidString)", isDirectory: true)
     let cache = LocalDiscoverCache(root: tempRoot)
     try cache.saveQueryResult(
-        DiscoverQueryResult(query: queryA.normalized, arxivIDs: ["2604.18803"], generatedAt: enrichment.generatedAt)
+        DiscoverQueryResult(
+            query: queryA.normalized,
+            arxivIDs: ["2604.18803"],
+            generatedAt: enrichment.generatedAt,
+            feed: ArxivFeedResponse(
+                date: "2026-04-27...2026-04-29",
+                count: 1,
+                papers: [
+                    ArxivFeedPaper(
+                        id: "2604.18803",
+                        arxivID: "2604.18803",
+                        arxivIDVersioned: nil,
+                        title: ArxivLocalizedText(en: "Local Paper Reader", zh: ""),
+                        abstract: ArxivLocalizedText(en: "A local-first paper reader.", zh: ""),
+                        summary: ArxivLocalizedText(en: "", zh: ""),
+                        authors: ["Alice Example"],
+                        categories: ["cs.CV"],
+                        primaryCategory: "cs.CV",
+                        listCategories: ["cs.CV"],
+                        tags: ["paper-reader"],
+                        comment: "",
+                        published: "2026-04-27T00:00:00Z",
+                        updated: nil,
+                        listDate: "2026-04-27",
+                        thumbnailVersion: nil,
+                        embedding: nil,
+                        links: ArxivFeedLinks(abs: "https://arxiv.org/abs/2604.18803", pdf: nil),
+                        assets: ArxivFeedAssets(small: nil, large: nil)
+                    )
+                ]
+            )
+        )
     )
     try cache.saveEnrichment(enrichment)
     let cachedQuery = try cache.loadQueryResult(cacheKey: queryA.cacheKey)
     let cachedEnrichment = try cache.loadEnrichment(arxivID: "2604.18803")
     try check(cachedQuery?.arxivIDs == ["2604.18803"], "discover query cache should round-trip ordered ids")
+    try check(cachedQuery?.feed?.papers.map(\.id) == ["2604.18803"], "discover query cache should round-trip the full search feed")
     try check(cachedEnrichment?.titleZH == "本地论文阅读器", "discover enrichment cache should round-trip processed metadata")
 
     let embeddingText = "Recursive multi-agent systems coordinate latent-state reasoning."

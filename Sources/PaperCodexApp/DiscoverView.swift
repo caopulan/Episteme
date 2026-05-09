@@ -15,7 +15,8 @@ struct DiscoverView: View {
     @State private var previewPaper: ArxivFeedPaper?
     @State private var discoverRowHeights: [Int: CGFloat] = [:]
     @State private var isShowingProcessSelection = false
-    @State private var isDiscoverScrollTrackingEnabled = false
+    @State private var discoverScrollAnchorID: String?
+    @State private var discoverScrollPositionCommitTask: Task<Void, Never>?
 
     private var papers: [ArxivFeedPaper] {
         var result = model.arxivFeed?.papers ?? []
@@ -301,56 +302,58 @@ struct DiscoverView: View {
                     let layoutSignature = rowLayoutSignature(papers: papers, columnCount: columnCount)
                     let imagePreloadURLs = discoverImagePreloadURLs(for: papers)
 
-                    ScrollViewReader { scrollProxy in
-                        ScrollView {
-                            LazyVStack(alignment: .leading, spacing: 14) {
-                                ForEach(Array(rows.enumerated()), id: \.offset) { rowIndex, rowPapers in
-                                    HStack(alignment: .top, spacing: 16) {
-                                        ForEach(rowPapers) { paper in
-                                            discoverCard(for: paper, rowIndex: rowIndex)
-                                                .id(paper.id)
-                                        }
-                                        ForEach(0..<max(0, columnCount - rowPapers.count), id: \.self) { _ in
-                                            Color.clear
-                                                .frame(maxWidth: .infinity)
-                                        }
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 14) {
+                            ForEach(Array(rows.enumerated()), id: \.offset) { rowIndex, rowPapers in
+                                HStack(alignment: .top, spacing: 16) {
+                                    ForEach(rowPapers) { paper in
+                                        discoverCard(for: paper, rowIndex: rowIndex)
+                                            .id(paper.id)
                                     }
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                }
-                            }
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 8)
-                            .onPreferenceChange(DiscoverRowHeightPreferenceKey.self) { values in
-                                var updated = discoverRowHeights
-                                var didChange = false
-                                for (rowIndex, height) in values where height > 0 {
-                                    let roundedHeight = (height * 2).rounded() / 2
-                                    if abs((updated[rowIndex] ?? 0) - roundedHeight) > 0.5 {
-                                        updated[rowIndex] = roundedHeight
-                                        didChange = true
+                                    ForEach(0..<max(0, columnCount - rowPapers.count), id: \.self) { _ in
+                                        Color.clear
+                                            .frame(maxWidth: .infinity)
                                     }
                                 }
-                                if didChange {
-                                    discoverRowHeights = updated
-                                }
-                            }
-                            .onChange(of: layoutSignature) { _, _ in
-                                discoverRowHeights = [:]
-                            }
-                            .onPreferenceChange(DiscoverVisiblePaperPreferenceKey.self) { positions in
-                                recordDiscoverVisiblePaper(positions)
-                            }
-                            .task(id: "\(layoutSignature):\(imagePreloadURLs.count)") {
-                                await warmDiscoverLocalImages(imagePreloadURLs)
+                                .frame(maxWidth: .infinity, alignment: .leading)
                             }
                         }
-                        .coordinateSpace(name: DiscoverScrollCoordinateSpace.name)
-                        .onAppear {
-                            restoreDiscoverScrollPosition(scrollProxy)
+                        .scrollTargetLayout()
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                        .onPreferenceChange(DiscoverRowHeightPreferenceKey.self) { values in
+                            var updated = discoverRowHeights
+                            var didChange = false
+                            for (rowIndex, height) in values where height > 0 {
+                                let roundedHeight = (height * 2).rounded() / 2
+                                if abs((updated[rowIndex] ?? 0) - roundedHeight) > 0.5 {
+                                    updated[rowIndex] = roundedHeight
+                                    didChange = true
+                                }
+                            }
+                            if didChange {
+                                discoverRowHeights = updated
+                            }
                         }
                         .onChange(of: layoutSignature) { _, _ in
-                            restoreDiscoverScrollPosition(scrollProxy)
+                            discoverRowHeights = [:]
                         }
+                        .task(id: "\(layoutSignature):\(imagePreloadURLs.count)") {
+                            await warmDiscoverLocalImages(imagePreloadURLs)
+                        }
+                    }
+                    .scrollPosition(id: $discoverScrollAnchorID, anchor: .top)
+                    .onAppear {
+                        restoreDiscoverScrollPosition()
+                    }
+                    .onChange(of: layoutSignature) { _, _ in
+                        restoreDiscoverScrollPosition()
+                    }
+                    .onChange(of: discoverScrollAnchorID) { _, paperID in
+                        scheduleDiscoverScrollPositionCommit(paperID)
+                    }
+                    .onDisappear {
+                        commitDiscoverScrollPosition()
                     }
                 }
             }
@@ -410,57 +413,48 @@ struct DiscoverView: View {
                 paperPendingSave = paper
             },
             onOpen: {
-                model.recordDiscoverScrollPosition(paper.id)
+                commitDiscoverScrollPosition(fallbackPaperID: paper.id)
                 Task {
                     await model.openArxivPaper(paper)
                 }
             }
         )
         .background(DiscoverCardHeightReporter(rowIndex: rowIndex))
-        .background(DiscoverVisiblePaperReporter(paperID: paper.id))
     }
 
-    private func restoreDiscoverScrollPosition(_ proxy: ScrollViewProxy) {
-        isDiscoverScrollTrackingEnabled = false
+    private func restoreDiscoverScrollPosition() {
         guard let paperID = model.discoverScrollPositionPaperID,
               papers.contains(where: { $0.id == paperID }) else {
-            isDiscoverScrollTrackingEnabled = true
             return
         }
-        DispatchQueue.main.async {
-            withAnimation(.easeOut(duration: 0.18)) {
-                proxy.scrollTo(paperID, anchor: .top)
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.30) {
-                isDiscoverScrollTrackingEnabled = true
-            }
+        discoverScrollPositionCommitTask?.cancel()
+        if discoverScrollAnchorID != paperID {
+            discoverScrollAnchorID = paperID
         }
     }
 
-    private func recordDiscoverVisiblePaper(_ positions: [String: CGFloat]) {
-        guard isDiscoverScrollTrackingEnabled, !positions.isEmpty else {
+    private func scheduleDiscoverScrollPositionCommit(_ paperID: String?) {
+        guard let paperID,
+              papers.contains(where: { $0.id == paperID }) else {
             return
         }
-        let ordered = papers.enumerated().compactMap { index, paper -> (index: Int, paperID: String, minY: CGFloat)? in
-            guard let minY = positions[paper.id] else {
-                return nil
+        discoverScrollPositionCommitTask?.cancel()
+        discoverScrollPositionCommitTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 350_000_000)
+            guard !Task.isCancelled else {
+                return
             }
-            return (index, paper.id, minY)
+            model.recordDiscoverScrollPosition(paperID)
         }
-        guard !ordered.isEmpty else {
+    }
+
+    private func commitDiscoverScrollPosition(fallbackPaperID: String? = nil) {
+        discoverScrollPositionCommitTask?.cancel()
+        guard let paperID = discoverScrollAnchorID ?? fallbackPaperID,
+              papers.contains(where: { $0.id == paperID }) else {
             return
         }
-        let candidate = ordered.min { left, right in
-            let leftDistance = abs(left.minY)
-            let rightDistance = abs(right.minY)
-            if abs(leftDistance - rightDistance) > 0.5 {
-                return leftDistance < rightDistance
-            }
-            return left.index < right.index
-        }
-        if let candidate {
-            model.recordDiscoverScrollPosition(candidate.paperID)
-        }
+        model.recordDiscoverScrollPosition(paperID)
     }
 
     private var toolbar: some View {
@@ -1648,33 +1642,6 @@ private struct DiscoverCardHeightReporter: View {
                 key: DiscoverRowHeightPreferenceKey.self,
                 value: [rowIndex: proxy.size.height]
             )
-        }
-    }
-}
-
-private enum DiscoverScrollCoordinateSpace {
-    static let name = "discover-scroll"
-}
-
-private struct DiscoverVisiblePaperReporter: View {
-    var paperID: String
-
-    var body: some View {
-        GeometryReader { proxy in
-            Color.clear.preference(
-                key: DiscoverVisiblePaperPreferenceKey.self,
-                value: [paperID: proxy.frame(in: .named(DiscoverScrollCoordinateSpace.name)).minY]
-            )
-        }
-    }
-}
-
-private struct DiscoverVisiblePaperPreferenceKey: PreferenceKey {
-    static let defaultValue: [String: CGFloat] = [:]
-
-    static func reduce(value: inout [String: CGFloat], nextValue: () -> [String: CGFloat]) {
-        for (paperID, minY) in nextValue() {
-            value[paperID] = minY
         }
     }
 }

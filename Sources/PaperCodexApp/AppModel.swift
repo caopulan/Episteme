@@ -808,6 +808,7 @@ final class AppModel: ObservableObject {
     func showDiscover() {
         route = .discover
         clearReaderContext()
+        refreshDiscoverEnrichmentsForCurrentFeed()
     }
 
     func recordDiscoverScrollPosition(_ paperID: String?) {
@@ -1122,6 +1123,10 @@ final class AppModel: ObservableObject {
             discoverSelectedCategories = query.categories
             discoverPaperInteractionStateByID = [:]
 
+            if try loadCachedDiscoverSearch(query: query) {
+                return
+            }
+
             arxivCacheProgress = ArxivCacheProgress(
                 date: "\(range.start)...\(range.end)",
                 title: "Searching arXiv",
@@ -1133,10 +1138,12 @@ final class AppModel: ObservableObject {
             let client = makeLocalArxivClient(categories: categories)
             let liveFeed = try await client.fetchFeed(range: range)
             let rankedFeed = try await applyDiscoverRanking(to: liveFeed, query: query)
-            try arxivCache.saveFeed(rankedFeed)
-            try mergeAndSaveArxivDate(rankedFeed.date)
+            if !rankedFeed.papers.isEmpty {
+                try arxivCache.saveFeed(rankedFeed)
+                try mergeAndSaveArxivDate(rankedFeed.date)
+            }
             let filteredFeed = filterDiscoverFeed(rankedFeed, keyword: query.keyword)
-            try displayDiscoverFeed(filteredFeed, query: query, progressTitle: "Search results cached", cacheRangeFeed: false)
+            try displayDiscoverFeed(filteredFeed, query: query, progressTitle: "Search results cached", cacheRangeFeed: false, cacheQueryResult: true)
         } catch {
             if isCancellationError(error) || isCancellingDiscoverSearch || Task.isCancelled {
                 arxivCacheProgress = nil
@@ -3247,6 +3254,7 @@ final class AppModel: ObservableObject {
         try mergeAndSaveArxivDate(feed.date)
         selectedArxivDate = feed.date
         arxivFeed = feed
+        try loadDiscoverEnrichments(for: feed.papers)
         let summary = try arxivCache.assetCacheSummary(for: feed, includeLarge: false)
         arxivCacheProgress = ArxivCacheProgress(
             date: feed.date,
@@ -3268,16 +3276,40 @@ final class AppModel: ObservableObject {
         _ liveFeed: ArxivFeedResponse,
         query: DiscoverQuery,
         progressTitle: String,
-        cacheRangeFeed: Bool = true
+        cacheRangeFeed: Bool = true,
+        cacheQueryResult: Bool = true
     ) throws {
         let feed = applyLocalDiscoverPreferences(to: liveFeed)
         if cacheRangeFeed {
             try arxivCache.saveFeed(feed)
         }
         try mergeAndSaveArxivDate(feed.date)
-        try localDiscoverCache.saveQueryResult(
-            DiscoverQueryResult(query: query.normalized, arxivIDs: feed.papers.map(\.id), generatedAt: Date())
-        )
+        if cacheQueryResult {
+            guard !feed.papers.isEmpty else {
+                selectedArxivDate = feed.date
+                arxivFeed = feed
+                discoverResultIDs = []
+                selectedArxivPaper = nil
+                discoverEnrichmentsByID = [:]
+                arxivCacheProgress = ArxivCacheProgress(
+                    date: feed.date,
+                    title: progressTitle,
+                    detail: "0 papers",
+                    completed: 0,
+                    total: 0
+                )
+                reloadCachedArxivAssets()
+                return
+            }
+            try localDiscoverCache.saveQueryResult(
+                DiscoverQueryResult(
+                    query: query.normalized,
+                    arxivIDs: feed.papers.map(\.id),
+                    generatedAt: Date(),
+                    feed: feed
+                )
+            )
+        }
         selectedArxivDate = feed.date
         arxivFeed = feed
         discoverResultIDs = feed.papers.map(\.id)
@@ -3354,11 +3386,26 @@ final class AppModel: ObservableObject {
             similaritySourceIDs: similaritySourceIDs,
             rankingVersion: discoverRankingVersion()
         ).normalized
-        guard let cachedFeed = try arxivCache.loadFeed(date: "\(range.start)...\(range.end)") else {
+        return try loadCachedDiscoverSearch(query: query)
+    }
+
+    @discardableResult
+    private func loadCachedDiscoverSearch(query: DiscoverQuery) throws -> Bool {
+        if let queryResult = try localDiscoverCache.loadQueryResult(cacheKey: query.cacheKey),
+           let cachedFeed = queryResult.feed,
+           !cachedFeed.papers.isEmpty {
+            try displayDiscoverFeed(cachedFeed, query: query, progressTitle: "Cached search", cacheRangeFeed: false, cacheQueryResult: false)
+            return true
+        }
+
+        guard let cachedFeed = try arxivCache.loadFeed(date: "\(query.dateRange.start)...\(query.dateRange.end)") else {
             return false
         }
         let filteredFeed = filterDiscoverFeed(cachedFeed, keyword: query.keyword)
-        try displayDiscoverFeed(filteredFeed, query: query, progressTitle: "Cached search", cacheRangeFeed: false)
+        guard !filteredFeed.papers.isEmpty else {
+            return false
+        }
+        try displayDiscoverFeed(filteredFeed, query: query, progressTitle: "Cached search", cacheRangeFeed: false, cacheQueryResult: true)
         return true
     }
 
@@ -3458,6 +3505,7 @@ final class AppModel: ObservableObject {
         selectedArxivDate = date
         let feed = applyLocalDiscoverPreferences(to: cachedFeed)
         arxivFeed = feed
+        try loadDiscoverEnrichments(for: feed.papers)
         if let selected = selectedArxivPaper,
            feed.papers.contains(where: { $0.id == selected.id }) {
             selectedArxivPaper = selected
@@ -3474,6 +3522,17 @@ final class AppModel: ObservableObject {
             total: summary.total
         )
         return true
+    }
+
+    private func refreshDiscoverEnrichmentsForCurrentFeed() {
+        do {
+            guard let arxivFeed else {
+                return
+            }
+            try loadDiscoverEnrichments(for: arxivFeed.papers)
+        } catch {
+            errorMessage = String(describing: error)
+        }
     }
 
     private func preloadArxivAssets(includeLarge: Bool, feed: ArxivFeedResponse) async throws {
