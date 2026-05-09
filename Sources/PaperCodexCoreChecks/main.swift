@@ -1138,7 +1138,30 @@ func runUILayoutSourceChecks() throws {
         "Discover processing should run selected actions, including PDF download and thumbnail generation"
     )
     try check(
-        appModelSource.contains("processDiscoverPaperForEnrichment(paper, actions: actions)")
+        appModelSource.contains("discoverCodexReasoningEffort")
+            && appModelSource.contains("discoverCodexReasoningEffortDefaultsKey")
+            && appModelSource.contains("processCurrentDiscoverResults(_ papers: [ArxivFeedPaper], actions: Set<DiscoverProcessAction> = Set(DiscoverProcessAction.allCases), modelOverride: String? = nil, reasoningEffort: CodexReasoningEffort? = nil)")
+            && appModelSource.contains("runDiscoverCodexEnrichment(for: paper, actions: actions, existing: existing, modelOverride: modelOverride, reasoningEffort: reasoningEffort)")
+            && !appModelSource.contains("reasoningEffort: codexReasoningEffort"),
+        "Discover processing should carry process-specific model and thinking settings instead of reusing chat reasoning"
+    )
+    try check(
+        discoverSource.contains("modelOverride:")
+            && discoverSource.contains("reasoningEffort:")
+            && discoverSource.contains("draftModelOverride")
+            && discoverSource.contains("draftReasoningEffort")
+            && discoverSource.contains("CodexReasoningEffort.allCases"),
+        "Discover Process Results sheet should allow choosing the model and thinking effort for this run"
+    )
+    try check(
+        settingsViewSource.contains("draftDiscoverCodexReasoningEffort")
+            && settingsViewSource.contains("Picker(\"Thinking\"")
+            && settingsViewSource.contains("model.setDiscoverCodexSettings(")
+            && settingsViewSource.contains("reasoningEffort: draftDiscoverCodexReasoningEffort"),
+        "Settings should expose the default Discover processing thinking effort next to the default model"
+    )
+    try check(
+        appModelSource.contains("processDiscoverPaperForEnrichment(paper, actions: actions, modelOverride: selectedModelOverride, reasoningEffort: selectedReasoningEffort)")
             && appModelSource.contains("discoverEnrichment(existing, satisfies: actions)")
             && appModelSource.contains("discoverEnrichmentPrompt(for: paper, actions: actions)"),
         "Discover translation and summarization actions should use action-aware enrichment prompts and cache completeness checks"

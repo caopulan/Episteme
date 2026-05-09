@@ -61,6 +61,8 @@
 "Save Enrichment" = "保存增强设置";
 "Discover Processing" = "Discover 处理";
 "Model" = "模型";
+"Thinking" = "思考等级";
+"Processing Runtime" = "处理运行参数";
 "Codex default" = "Codex 默认";
 "Custom model override" = "自定义模型覆盖";
 "Save Processing" = "保存处理设置";

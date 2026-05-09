@@ -133,10 +133,25 @@ struct DiscoverView: View {
             .sheet(isPresented: $isShowingProcessSelection) {
                 DiscoverProcessActionSheet(
                     paperCount: papers.count,
-                    onConfirm: { actions in
+                    availableModelIDs: model.availableCodexModelIDs,
+                    defaultModelID: model.codexDefaultModelID,
+                    defaultModelOverride: model.discoverCodexModelOverride,
+                    defaultReasoningEffort: model.discoverCodexReasoningEffort,
+                    isRefreshingModels: model.isRefreshingCodexModels,
+                    onRefreshModels: {
+                        Task {
+                            await model.refreshAvailableCodexModels()
+                        }
+                    },
+                    onConfirm: { actions, modelOverride, reasoningEffort in
                         isShowingProcessSelection = false
                         Task {
-                            await model.processCurrentDiscoverResults(papers, actions: Set(actions))
+                            await model.processCurrentDiscoverResults(
+                                papers,
+                                actions: Set(actions),
+                                modelOverride: modelOverride,
+                                reasoningEffort: reasoningEffort
+                            )
                         }
                     },
                     onCancel: {
@@ -979,24 +994,51 @@ private struct DiscoverProcessActionSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     var paperCount: Int
-    var onConfirm: ([DiscoverProcessAction]) -> Void
+    var availableModelIDs: [String]
+    var defaultModelID: String
+    var defaultModelOverride: String
+    var defaultReasoningEffort: CodexReasoningEffort
+    var isRefreshingModels: Bool
+    var onRefreshModels: () -> Void
+    var onConfirm: ([DiscoverProcessAction], String, CodexReasoningEffort) -> Void
     var onCancel: () -> Void
 
     @State private var selectedActions: Set<DiscoverProcessAction>
+    @State private var draftModelOverride: String
+    @State private var draftReasoningEffort: CodexReasoningEffort
 
     init(
         paperCount: Int,
-        onConfirm: @escaping ([DiscoverProcessAction]) -> Void,
+        availableModelIDs: [String],
+        defaultModelID: String,
+        defaultModelOverride: String,
+        defaultReasoningEffort: CodexReasoningEffort,
+        isRefreshingModels: Bool,
+        onRefreshModels: @escaping () -> Void,
+        onConfirm: @escaping ([DiscoverProcessAction], String, CodexReasoningEffort) -> Void,
         onCancel: @escaping () -> Void
     ) {
         self.paperCount = paperCount
+        self.availableModelIDs = availableModelIDs
+        self.defaultModelID = defaultModelID
+        self.defaultModelOverride = defaultModelOverride
+        self.defaultReasoningEffort = defaultReasoningEffort
+        self.isRefreshingModels = isRefreshingModels
+        self.onRefreshModels = onRefreshModels
         self.onConfirm = onConfirm
         self.onCancel = onCancel
         _selectedActions = State(initialValue: Set(DiscoverProcessAction.allCases))
+        _draftModelOverride = State(initialValue: defaultModelOverride)
+        _draftReasoningEffort = State(initialValue: defaultReasoningEffort)
     }
 
     private var selectedOrderedActions: [DiscoverProcessAction] {
         DiscoverProcessAction.allCases.filter { selectedActions.contains($0) }
+    }
+
+    private var codexDefaultModelLabel: String {
+        let trimmed = defaultModelID.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "Codex default" : "Codex default (\(trimmed))"
     }
 
     var body: some View {
@@ -1043,6 +1085,47 @@ private struct DiscoverProcessActionSheet: View {
                         )
                     }
                 }
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 8) {
+                        Label("Processing Runtime", systemImage: "cpu")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button {
+                            onRefreshModels()
+                        } label: {
+                            Label(isRefreshingModels ? "Refreshing" : "Refresh Models", systemImage: "arrow.clockwise")
+                        }
+                        .buttonStyle(.borderless)
+                        .controlSize(.small)
+                        .disabled(isRefreshingModels)
+                    }
+
+                    Picker("Model", selection: $draftModelOverride) {
+                        Text(codexDefaultModelLabel).tag("")
+                        ForEach(availableModelIDs, id: \.self) { modelID in
+                            Text(modelID).tag(modelID)
+                        }
+                        if !draftModelOverride.isEmpty,
+                           !availableModelIDs.contains(draftModelOverride) {
+                            Text("\(draftModelOverride) (custom)").tag(draftModelOverride)
+                        }
+                    }
+                    .pickerStyle(.menu)
+
+                    TextField("Custom model override", text: $draftModelOverride)
+                        .textFieldStyle(.roundedBorder)
+
+                    Picker("Thinking", selection: $draftReasoningEffort) {
+                        ForEach(CodexReasoningEffort.allCases, id: \.self) { effort in
+                            Text(effort.displayName).tag(effort)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                }
             }
             .padding(20)
 
@@ -1055,7 +1138,7 @@ private struct DiscoverProcessActionSheet: View {
                     dismiss()
                 }
                 Button("Process Results") {
-                    onConfirm(selectedOrderedActions)
+                    onConfirm(selectedOrderedActions, draftModelOverride, draftReasoningEffort)
                     dismiss()
                 }
                 .keyboardShortcut(.defaultAction)
@@ -1064,7 +1147,8 @@ private struct DiscoverProcessActionSheet: View {
             }
             .padding(20)
         }
-        .frame(minWidth: 520, minHeight: 360)
+        .frame(minWidth: 560, minHeight: 500)
+        .onAppear(perform: onRefreshModels)
     }
 }
 

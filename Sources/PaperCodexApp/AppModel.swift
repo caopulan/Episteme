@@ -159,6 +159,7 @@ private let codexReasoningEffortDefaultsKey = "PaperCodexCodexReasoningEffort"
 private let codexSystemPromptDefaultsKey = "PaperCodexCodexSystemPrompt"
 private let globalLanguageModeDefaultsKey = "PaperCodexGlobalLanguageMode"
 private let discoverCodexModelOverrideDefaultsKey = "PaperCodexDiscoverCodexModelOverride"
+private let discoverCodexReasoningEffortDefaultsKey = "PaperCodexDiscoverCodexReasoningEffort"
 private let discoverCodexConcurrencyDefaultsKey = "PaperCodexDiscoverCodexConcurrency"
 private let localDiscoverPreferencesDefaultsKey = "PaperCodexLocalDiscoverPreferences"
 private let embeddingProviderAPIKeyService = "PaperCodexEmbeddingProvider"
@@ -172,6 +173,11 @@ private let defaultDiscoverCodexConcurrency = 10
 private func loadDiscoverCodexConcurrencyFromDefaults() -> Int {
     let stored = UserDefaults.standard.integer(forKey: discoverCodexConcurrencyDefaultsKey)
     return stored == 0 ? defaultDiscoverCodexConcurrency : min(max(stored, 1), 20)
+}
+
+private func loadCodexReasoningEffortFromDefaults(key: String) -> CodexReasoningEffort {
+    let stored = UserDefaults.standard.string(forKey: key)
+    return stored.flatMap(CodexReasoningEffort.init(rawValue:)) ?? .default
 }
 
 private func loadQuickPromptsFromDefaults() -> [QuickPrompt] {
@@ -328,16 +334,14 @@ final class AppModel: ObservableObject {
     @Published var readerPosition: PaperReaderPosition?
     @Published var codexDiagnostic: CodexDiagnostic?
     @Published var codexModelOverride: String = UserDefaults.standard.string(forKey: codexModelOverrideDefaultsKey) ?? ""
-    @Published var codexReasoningEffort: CodexReasoningEffort = {
-        let stored = UserDefaults.standard.string(forKey: codexReasoningEffortDefaultsKey)
-        return stored.flatMap(CodexReasoningEffort.init(rawValue:)) ?? .default
-    }()
+    @Published var codexReasoningEffort: CodexReasoningEffort = loadCodexReasoningEffortFromDefaults(key: codexReasoningEffortDefaultsKey)
     @Published var codexSystemPrompt: String = PromptBuilder.defaultSystemPrompt
     @Published var globalLanguageMode: PaperCodexLanguageMode = .automatic
     @Published var activeCodexRunsBySessionID: [String: ActiveCodexRun] = [:]
     @Published var errorMessage: String?
     @Published var notices: [InteractionNotice] = []
     @Published var discoverCodexModelOverride: String = UserDefaults.standard.string(forKey: discoverCodexModelOverrideDefaultsKey) ?? ""
+    @Published var discoverCodexReasoningEffort: CodexReasoningEffort = loadCodexReasoningEffortFromDefaults(key: discoverCodexReasoningEffortDefaultsKey)
     @Published var discoverCodexConcurrency: Int = loadDiscoverCodexConcurrencyFromDefaults()
     @Published var availableCodexModelIDs: [String] = []
     @Published var codexDefaultModelID: String = CodexCLI.configuredDefaultModelID() ?? ""
@@ -918,18 +922,24 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func setDiscoverCodexSettings(modelOverride: String, concurrency: Int) {
+    func setDiscoverCodexSettings(modelOverride: String, concurrency: Int, reasoningEffort: CodexReasoningEffort) {
         let trimmedModel = modelOverride.trimmingCharacters(in: .whitespacesAndNewlines)
         discoverCodexModelOverride = trimmedModel
+        discoverCodexReasoningEffort = reasoningEffort
         discoverCodexConcurrency = min(max(concurrency, 1), 20)
         if trimmedModel.isEmpty {
             UserDefaults.standard.removeObject(forKey: discoverCodexModelOverrideDefaultsKey)
         } else {
             UserDefaults.standard.set(trimmedModel, forKey: discoverCodexModelOverrideDefaultsKey)
         }
+        if reasoningEffort == .default {
+            UserDefaults.standard.removeObject(forKey: discoverCodexReasoningEffortDefaultsKey)
+        } else {
+            UserDefaults.standard.set(reasoningEffort.rawValue, forKey: discoverCodexReasoningEffortDefaultsKey)
+        }
         UserDefaults.standard.set(discoverCodexConcurrency, forKey: discoverCodexConcurrencyDefaultsKey)
         mergeAvailableCodexModelIDs([trimmedModel])
-        postNotice(kind: .success, title: "Discover Processing Saved", message: "\(discoverCodexConcurrency) workers")
+        postNotice(kind: .success, title: "Discover Processing Saved", message: "\(discoverCodexConcurrency) workers · Think \(reasoningEffort.displayName)")
     }
 
     func setCodexSystemPrompt(_ prompt: String) {
@@ -1138,7 +1148,7 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func processCurrentDiscoverResults(_ papers: [ArxivFeedPaper], actions: Set<DiscoverProcessAction> = Set(DiscoverProcessAction.allCases)) async {
+    func processCurrentDiscoverResults(_ papers: [ArxivFeedPaper], actions: Set<DiscoverProcessAction> = Set(DiscoverProcessAction.allCases), modelOverride: String? = nil, reasoningEffort: CodexReasoningEffort? = nil) async {
         guard !isProcessingDiscoverResults else {
             return
         }
@@ -1146,6 +1156,8 @@ final class AppModel: ObservableObject {
         guard !visiblePapers.isEmpty, !actions.isEmpty else {
             return
         }
+        let selectedModelOverride = modelOverride?.trimmingCharacters(in: .whitespacesAndNewlines) ?? effectiveDiscoverCodexModelOverride()
+        let selectedReasoningEffort = reasoningEffort ?? discoverCodexReasoningEffort
         isProcessingDiscoverResults = true
         isCancellingDiscoverProcessing = false
         defer {
@@ -1184,7 +1196,7 @@ final class AppModel: ObservableObject {
                     let paper = visiblePapers[nextIndex]
                     nextIndex += 1
                     group.addTask {
-                        await self.processDiscoverPaperForEnrichment(paper, actions: actions)
+                        await self.processDiscoverPaperForEnrichment(paper, actions: actions, modelOverride: selectedModelOverride, reasoningEffort: selectedReasoningEffort)
                     }
                 }
 
@@ -1222,7 +1234,7 @@ final class AppModel: ObservableObject {
                         let paper = visiblePapers[nextIndex]
                         nextIndex += 1
                         group.addTask {
-                            await self.processDiscoverPaperForEnrichment(paper, actions: actions)
+                            await self.processDiscoverPaperForEnrichment(paper, actions: actions, modelOverride: selectedModelOverride, reasoningEffort: selectedReasoningEffort)
                         }
                     }
                 }
@@ -1305,7 +1317,12 @@ final class AppModel: ObservableObject {
         }
     }
 
-    private func processDiscoverPaperForEnrichment(_ paper: ArxivFeedPaper, actions: Set<DiscoverProcessAction>) async -> DiscoverPaperProcessingResult {
+    private func processDiscoverPaperForEnrichment(
+        _ paper: ArxivFeedPaper,
+        actions: Set<DiscoverProcessAction>,
+        modelOverride: String,
+        reasoningEffort: CodexReasoningEffort
+    ) async -> DiscoverPaperProcessingResult {
         if isCancellingDiscoverProcessing || Task.isCancelled {
             discoverPaperInteractionStateByID[paper.id] = .cancelled
             return DiscoverPaperProcessingResult(paperID: paper.id, state: .cancelled)
@@ -1321,7 +1338,7 @@ final class AppModel: ObservableObject {
 
         do {
             discoverPaperInteractionStateByID[paper.id] = .processing
-            let runResult = try await runDiscoverCodexEnrichment(for: paper, actions: actions, existing: existing)
+            let runResult = try await runDiscoverCodexEnrichment(for: paper, actions: actions, existing: existing, modelOverride: modelOverride, reasoningEffort: reasoningEffort)
             try localDiscoverCache.saveEnrichment(runResult.enrichment)
             discoverEnrichmentsByID[paper.id] = runResult.enrichment
             discoverPaperInteractionStateByID[paper.id] = .processed
@@ -4065,7 +4082,9 @@ final class AppModel: ObservableObject {
     private func runDiscoverCodexEnrichment(
         for paper: ArxivFeedPaper,
         actions: Set<DiscoverProcessAction>,
-        existing: DiscoverPaperEnrichment?
+        existing: DiscoverPaperEnrichment?,
+        modelOverride: String,
+        reasoningEffort: CodexReasoningEffort
     ) async throws -> (enrichment: DiscoverPaperEnrichment, tokenUsage: CodexTokenUsage?) {
         let executable = try CodexCLI.findCodexExecutable(preferWorkspaceImageOutput: false)
         let cli = CodexCLI(executablePath: executable)
@@ -4075,15 +4094,18 @@ final class AppModel: ObservableObject {
         try FileManager.default.createDirectory(at: workspaceURL, withIntermediateDirectories: true)
         let outputURL = workspaceURL.appendingPathComponent("last-message.json")
         let eventLogURL = workspaceURL.appendingPathComponent("events.jsonl")
-        let modelOverride = effectiveDiscoverCodexModelOverride()
-        let modelIdentity = modelOverride.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "codex" : "codex:\(modelOverride)"
+        let normalizedModelOverride = modelOverride.trimmingCharacters(in: .whitespacesAndNewlines)
+        let modelIdentity = discoverCodexModelIdentity(
+            modelOverride: normalizedModelOverride,
+            reasoningEffort: reasoningEffort
+        )
         let prompt = discoverEnrichmentPrompt(for: paper, actions: actions)
         let arguments = cli.startArguments(
             prompt: prompt,
             workspacePath: workspaceURL.path,
             outputLastMessagePath: outputURL.path,
-            modelOverride: modelOverride,
-            reasoningEffort: codexReasoningEffort
+            modelOverride: normalizedModelOverride,
+            reasoningEffort: reasoningEffort
         )
         let runHandle = CodexRunHandle()
         activeDiscoverCodexRunHandles.append(runHandle)
@@ -4358,11 +4380,19 @@ final class AppModel: ObservableObject {
     }
 
     private func effectiveDiscoverCodexModelOverride() -> String {
-        let trimmed = discoverCodexModelOverride.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmed.isEmpty {
-            return trimmed
+        discoverCodexModelOverride.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func discoverCodexModelIdentity(
+        modelOverride: String,
+        reasoningEffort: CodexReasoningEffort
+    ) -> String {
+        let trimmedModel = modelOverride.trimmingCharacters(in: .whitespacesAndNewlines)
+        var identity = trimmedModel.isEmpty ? "codex" : "codex:\(trimmedModel)"
+        if reasoningEffort != .default {
+            identity += ":think-\(reasoningEffort.rawValue)"
         }
-        return effectiveModelOverride(prefersWorkspaceImageOutput: false)
+        return identity
     }
 
     private func codexRunModeDescription(

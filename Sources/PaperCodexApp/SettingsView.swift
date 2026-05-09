@@ -76,6 +76,7 @@ struct SettingsView: View {
     @State private var draftAutoEnrichOnSave = false
     @State private var draftCodexSystemPrompt = PromptBuilder.defaultSystemPrompt
     @State private var draftDiscoverCodexModel = ""
+    @State private var draftDiscoverCodexReasoningEffort: CodexReasoningEffort = .default
     @State private var draftDiscoverCodexConcurrency = 10
     @State private var draftEmbeddingEnabled = false
     @State private var draftEmbeddingBaseURL = ""
@@ -108,6 +109,7 @@ struct SettingsView: View {
 
     private var isProcessingDirty: Bool {
         draftDiscoverCodexModel.trimmingCharacters(in: .whitespacesAndNewlines) != model.discoverCodexModelOverride
+            || draftDiscoverCodexReasoningEffort != model.discoverCodexReasoningEffort
             || draftDiscoverCodexConcurrency != model.discoverCodexConcurrency
     }
 
@@ -397,6 +399,13 @@ struct SettingsView: View {
             TextField("Custom model override", text: $draftDiscoverCodexModel)
                 .textFieldStyle(.roundedBorder)
 
+            Picker("Thinking", selection: $draftDiscoverCodexReasoningEffort) {
+                ForEach(CodexReasoningEffort.allCases, id: \.self) { effort in
+                    Text(effort.displayName).tag(effort)
+                }
+            }
+            .pickerStyle(.menu)
+
             Stepper(
                 "Concurrent Codex processes: \(draftDiscoverCodexConcurrency)",
                 value: $draftDiscoverCodexConcurrency,
@@ -407,7 +416,8 @@ struct SettingsView: View {
                 Button {
                     model.setDiscoverCodexSettings(
                         modelOverride: draftDiscoverCodexModel,
-                        concurrency: draftDiscoverCodexConcurrency
+                        concurrency: draftDiscoverCodexConcurrency,
+                        reasoningEffort: draftDiscoverCodexReasoningEffort
                     )
                 } label: {
                     Label(isProcessingDirty ? "Save Processing" : "Saved", systemImage: isProcessingDirty ? "checkmark" : "checkmark.circle")
@@ -427,7 +437,7 @@ struct SettingsView: View {
 
                 Spacer()
 
-                Text("\(model.discoverCodexConcurrency) workers")
+                Text("\(model.discoverCodexConcurrency) workers · Think \(model.discoverCodexReasoningEffort.displayName)")
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
             }
@@ -743,6 +753,7 @@ struct SettingsView: View {
         draftAutoEnrichOnSave = preferences.enrichment.autoEnrichOnSave
         draftCodexSystemPrompt = model.codexSystemPrompt
         draftDiscoverCodexModel = model.discoverCodexModelOverride
+        draftDiscoverCodexReasoningEffort = model.discoverCodexReasoningEffort
         draftDiscoverCodexConcurrency = model.discoverCodexConcurrency
         draftEmbeddingEnabled = preferences.embedding.enabled
         draftEmbeddingBaseURL = preferences.embedding.baseURL
