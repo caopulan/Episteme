@@ -464,22 +464,58 @@ func runUILayoutSourceChecks() throws {
         "Collection feature should be fully removed from routes, sidebars, AppModel, and dedicated views"
     )
     try check(
-        appSource.contains("AppShell {")
-            && appShellSource.contains("struct AppShell")
-            && appShellSource.contains("struct PrimarySidebar")
-            && appShellSource.contains("routedContent"),
-        "Root layout should use a persistent AppShell with one primary sidebar and routed content"
+        !appSource.contains("AppShell {")
+            && appSource.contains("routedContent")
+            && !appShellSource.contains("struct AppShell"),
+        "Root layout should not add an extra app-shell sidebar column"
     )
     try check(
-        appShellSource.contains("title: \"Recent Conversations\"")
-            && appShellSource.contains("model.showRecentConversations()")
+        appShellSource.contains("struct PrimaryNavigationSection")
             && appShellSource.contains("title: \"Library\"")
             && appShellSource.contains("model.goToLibrary()")
             && appShellSource.contains("title: \"Discover\"")
             && appShellSource.contains("model.showDiscover()")
             && appShellSource.contains("title: \"Settings\"")
-            && appShellSource.contains("model.showSettings()"),
-        "Primary sidebar should own all global navigation entries, including Recent Conversations"
+            && appShellSource.contains("model.showSettings()")
+            && appShellSource.contains("title: \"Recent Conversations\"")
+            && appShellSource.contains("model.showRecentConversations()")
+            && librarySource.contains("PrimaryNavigationSection()")
+            && discoverSource.contains("PrimaryNavigationSection()")
+            && settingsViewSource.contains("PrimaryNavigationSection()"),
+        "Library, Discover, and Settings should share one in-sidebar global navigation section"
+    )
+    if let navigationRange = appShellSource.range(of: "struct PrimaryNavigationSection"),
+       let libraryRange = appShellSource.range(of: "title: \"Library\""),
+       let discoverRange = appShellSource.range(of: "title: \"Discover\""),
+       let settingsRange = appShellSource.range(of: "title: \"Settings\""),
+       let recentRange = appShellSource.range(of: "title: \"Recent Conversations\"") {
+        try check(
+            navigationRange.lowerBound < libraryRange.lowerBound
+                && libraryRange.lowerBound < discoverRange.lowerBound
+                && discoverRange.lowerBound < settingsRange.lowerBound
+                && settingsRange.lowerBound < recentRange.lowerBound,
+            "Recent Conversations should live under Settings in the shared sidebar navigation"
+        )
+    } else {
+        throw CheckFailure(description: "shared sidebar navigation should include Library, Discover, Settings, and Recent Conversations")
+    }
+    try check(
+        !librarySource.contains("title: \"Discover\",")
+            && !librarySource.contains("title: \"Settings\",")
+            && !librarySource.contains("title: \"Recent Conversations\",")
+            && !discoverSource.contains("navButton(title: \"Library\"")
+            && !discoverSource.contains("navButton(title: \"Settings\"")
+            && !settingsViewSource.contains("navButton(title: \"Library\"")
+            && !settingsViewSource.contains("navButton(title: \"Discover\""),
+        "page sidebars should use the shared navigation component instead of duplicating route rows"
+    )
+    try check(
+        appShellSource.contains("PrimaryNavigationSection")
+            && appShellSource.contains("title: \"Library\"")
+            && appShellSource.contains("title: \"Discover\"")
+            && appShellSource.contains("title: \"Settings\"")
+            && appShellSource.contains("title: \"Recent Conversations\""),
+        "Shared sidebar navigation should centralize global route labels"
     )
     try check(
         appModelSource.contains("@Published var selectedLibrarySurface: LibrarySurface")
@@ -487,15 +523,6 @@ func runUILayoutSourceChecks() throws {
             && appModelSource.contains("selectedLibrarySurface = .recentConversations")
             && !librarySource.contains("@State private var selectedLibrarySurface"),
         "Recent Conversations selection should be app-level navigation state instead of LibraryView local state"
-    )
-    try check(
-        !librarySource.contains("title: \"Discover\",")
-            && !librarySource.contains("title: \"Settings\",")
-            && !discoverSource.contains("navButton(title: \"Library\"")
-            && !discoverSource.contains("navButton(title: \"Settings\"")
-            && !settingsViewSource.contains("navButton(title: \"Library\"")
-            && !settingsViewSource.contains("navButton(title: \"Discover\""),
-        "Library, Discover, and Settings sidebars should no longer duplicate global navigation"
     )
     try check(
         appModelSource.contains("movePapers(_ paperIDs: [String], toCategory categoryID: String?)"),
@@ -665,12 +692,10 @@ func runUILayoutSourceChecks() throws {
     )
     try check(
         windowChromeSource.contains("paperCodexSidebarChromePadding")
-            && windowChromeSource.contains("paperCodexContextSidebarPadding")
-            && appShellSource.contains("paperCodexSidebarChromePadding()")
-            && librarySource.contains("paperCodexContextSidebarPadding()")
-            && discoverSource.contains("paperCodexContextSidebarPadding()")
-            && settingsViewSource.contains("paperCodexContextSidebarPadding()"),
-        "primary sidebar should reserve traffic-light space while page context sidebars use tighter context padding"
+            && librarySource.contains("paperCodexSidebarChromePadding()")
+            && discoverSource.contains("paperCodexSidebarChromePadding()")
+            && settingsViewSource.contains("paperCodexSidebarChromePadding()"),
+        "single page sidebars should reserve top space for embedded traffic-light controls"
     )
     try check(
         sidebarSplitSource.contains("WindowSafeSplitterHandle") && sidebarSplitSource.contains("mouseDownCanMoveWindow"),
@@ -1098,18 +1123,18 @@ func runUILayoutSourceChecks() throws {
             && librarySource.contains("selectedCategoryPaperIDsInOrder"),
         "library should expose recent conversations and open multi-paper sessions from selections or folders"
     )
-    if let sidebarRange = appShellSource.range(of: "struct PrimarySidebar"),
+    if let sidebarRange = appShellSource.range(of: "struct PrimaryNavigationSection"),
        let paperListRange = librarySource.range(of: "private var paperList: some View"),
        let recentNavRange = appShellSource.range(of: "title: \"Recent Conversations\""),
-       let libraryButtonRange = appShellSource.range(of: "title: \"Library\"") {
+       let settingsButtonRange = appShellSource.range(of: "title: \"Settings\"") {
         try check(
             sidebarRange.lowerBound < recentNavRange.lowerBound
-                && recentNavRange.lowerBound < libraryButtonRange.lowerBound
+                && settingsButtonRange.lowerBound < recentNavRange.lowerBound
                 && !librarySource.prefix(upTo: paperListRange.lowerBound).contains("title: \"Recent Conversations\""),
-            "recent conversations should be a persistent primary-sidebar navigation item above Library"
+            "recent conversations should be a shared sidebar navigation item under Settings"
         )
     } else {
-        throw CheckFailure(description: "primary sidebar should include a Recent Conversations navigation item above Library")
+        throw CheckFailure(description: "shared sidebar navigation should include a Recent Conversations item under Settings")
     }
     try check(
         appModelSource.contains("enum LibrarySurface")

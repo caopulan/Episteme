@@ -22,9 +22,7 @@ struct RootView: View {
     @EnvironmentObject private var model: AppModel
 
     var body: some View {
-        AppShell {
-            routedContent
-        }
+        routedContent
         .environment(\.locale, Locale(identifier: model.globalLanguageMode.appLocaleIdentifier))
         .paperCodexTypographyScale()
         .overlay(alignment: .topTrailing) {

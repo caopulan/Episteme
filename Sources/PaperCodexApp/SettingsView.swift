@@ -190,6 +190,13 @@ struct SettingsView: View {
 
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 18) {
+            Text("Paper Codex")
+                .font(.paperCodexSystem(size: 24, weight: .semibold))
+
+            PrimaryNavigationSection()
+
+            Divider()
+
             Label("Settings Sections", systemImage: "gearshape")
                 .font(.headline)
                 .foregroundStyle(.secondary)
@@ -209,7 +216,7 @@ struct SettingsView: View {
 
             Spacer()
         }
-        .paperCodexContextSidebarPadding()
+        .paperCodexSidebarChromePadding()
         .background(Color(nsColor: .controlBackgroundColor))
     }
 

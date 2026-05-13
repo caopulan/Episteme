@@ -287,6 +287,13 @@ struct LibraryView: View {
 
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 18) {
+            Text("Paper Codex")
+                .font(.paperCodexSystem(size: 24, weight: .semibold))
+
+            PrimaryNavigationSection()
+
+            Divider()
+
             Label("Library Context", systemImage: "books.vertical")
                 .font(.headline)
                 .foregroundStyle(.secondary)
@@ -296,7 +303,7 @@ struct LibraryView: View {
             }
             .frame(maxHeight: .infinity, alignment: .top)
         }
-        .paperCodexContextSidebarPadding()
+        .paperCodexSidebarChromePadding()
         .background(Color(nsColor: .controlBackgroundColor))
     }
 
