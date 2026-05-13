@@ -525,7 +525,9 @@ final class AppModel: ObservableObject {
             try store.migrate()
             repository = store
             try reloadLibrary()
-            loadCachedArxivState()
+            if try !loadLastDiscoverResultsState() {
+                loadCachedArxivState()
+            }
             refreshCacheStorageSummary()
             Task {
                 scanWatchedFolders()
@@ -3394,6 +3396,7 @@ final class AppModel: ObservableObject {
         if let queryResult = try localDiscoverCache.loadQueryResult(cacheKey: query.cacheKey),
            let cachedFeed = queryResult.feed,
            !cachedFeed.papers.isEmpty {
+            try localDiscoverCache.saveLastQueryResult(queryResult)
             try displayDiscoverFeed(cachedFeed, query: query, progressTitle: "Cached search", cacheRangeFeed: false, cacheQueryResult: false)
             return true
         }
@@ -3600,6 +3603,23 @@ final class AppModel: ObservableObject {
         if let date = selectedArxivDate {
             _ = try? loadCachedArxivFeed(date: date)
         }
+    }
+
+    private func loadLastDiscoverResultsState() throws -> Bool {
+        guard let queryResult = try localDiscoverCache.loadLastQueryResult(),
+              let feed = queryResult.feed,
+              !feed.papers.isEmpty else {
+            return false
+        }
+
+        let query = queryResult.query.normalized
+        discoverKeyword = query.keyword
+        discoverStartDate = query.dateRange.start
+        discoverEndDate = query.dateRange.end
+        discoverSelectedCategories = query.categories
+        discoverSelectedSimilaritySourceIDs = query.similaritySourceIDs
+        try displayDiscoverFeed(feed, query: query, progressTitle: "Last search", cacheRangeFeed: false, cacheQueryResult: false)
+        return true
     }
 
     private func reloadCachedArxivAssets() {

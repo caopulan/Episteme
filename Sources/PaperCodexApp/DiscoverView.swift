@@ -3,6 +3,8 @@ import ImageIO
 import PaperCodexCore
 import SwiftUI
 
+private let discoverMediaHorizontalPadding: CGFloat = 14
+
 struct DiscoverView: View {
     @EnvironmentObject private var model: AppModel
     @State private var selectedCategory: String?
@@ -13,7 +15,6 @@ struct DiscoverView: View {
     @State private var selectedSimilarityBucket: DiscoverSimilarityBucket = .all
     @State private var paperPendingSave: ArxivFeedPaper?
     @State private var previewPaper: ArxivFeedPaper?
-    @State private var discoverRowHeights: [Int: CGFloat] = [:]
     @State private var isShowingProcessSelection = false
     @State private var discoverScrollAnchorID: String?
     @State private var discoverScrollPositionCommitTask: Task<Void, Never>?
@@ -171,14 +172,6 @@ struct DiscoverView: View {
                 .clipped()
         }
         .background(Color(nsColor: .windowBackgroundColor))
-        .onAppear {
-            let expectedDate = "\(model.discoverStartDate)...\(model.discoverEndDate)"
-            guard !model.isSearchingDiscover,
-                  model.arxivFeed == nil || model.selectedArxivDate != expectedDate else {
-                return
-            }
-            model.startDiscoverSearch()
-        }
     }
 
     private var sidebar: some View {
@@ -316,28 +309,12 @@ struct DiscoverView: View {
                                     }
                                 }
                                 .frame(maxWidth: .infinity, alignment: .leading)
+                                .id(rowPapers.first?.id)
                             }
                         }
                         .scrollTargetLayout()
                         .padding(.horizontal, 10)
                         .padding(.vertical, 8)
-                        .onPreferenceChange(DiscoverRowHeightPreferenceKey.self) { values in
-                            var updated = discoverRowHeights
-                            var didChange = false
-                            for (rowIndex, height) in values where height > 0 {
-                                let roundedHeight = (height * 2).rounded() / 2
-                                if abs((updated[rowIndex] ?? 0) - roundedHeight) > 0.5 {
-                                    updated[rowIndex] = roundedHeight
-                                    didChange = true
-                                }
-                            }
-                            if didChange {
-                                discoverRowHeights = updated
-                            }
-                        }
-                        .onChange(of: layoutSignature) { _, _ in
-                            discoverRowHeights = [:]
-                        }
                         .task(id: "\(layoutSignature):\(imagePreloadURLs.count)") {
                             await warmDiscoverLocalImages(imagePreloadURLs)
                         }
@@ -405,7 +382,6 @@ struct DiscoverView: View {
             downloadProgress: model.arxivDownloadProgress(for: paper),
             interactionState: model.discoverPaperInteractionStateByID[paper.id],
             languageMode: model.globalLanguageMode,
-            minimumHeight: discoverRowHeights[rowIndex] ?? 0,
             onPreview: {
                 previewPaper = paper
             },
@@ -419,7 +395,6 @@ struct DiscoverView: View {
                 }
             }
         )
-        .background(DiscoverCardHeightReporter(rowIndex: rowIndex))
     }
 
     private func restoreDiscoverScrollPosition() {
@@ -1381,7 +1356,6 @@ private struct ArxivPaperCard: View {
     var downloadProgress: Double?
     var interactionState: DiscoverPaperInteractionState?
     var languageMode: PaperCodexLanguageMode
-    var minimumHeight: CGFloat = 0
     var onPreview: () -> Void
     var onSave: () -> Void
     var onOpen: () -> Void
@@ -1409,6 +1383,10 @@ private struct ArxivPaperCard: View {
                 .buttonStyle(.plain)
                 .disabled(imageURL == nil && isBusy)
                 .help(imageURL == nil ? "Open cached PDF" : "Open image preview")
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .padding(.horizontal, discoverMediaHorizontalPadding)
+                .padding(.top, discoverMediaHorizontalPadding)
+                .padding(.bottom, 8)
             }
 
             VStack(alignment: .leading, spacing: 10) {
@@ -1454,7 +1432,7 @@ private struct ArxivPaperCard: View {
             .padding(.bottom, footerReservedHeight)
             .frame(
                 maxWidth: .infinity,
-                minHeight: contentMinimumHeight,
+                maxHeight: .infinity,
                 alignment: .topLeading
             )
             .overlay(alignment: .bottomLeading) {
@@ -1465,7 +1443,7 @@ private struct ArxivPaperCard: View {
             }
         }
         .contentShape(RoundedRectangle(cornerRadius: 8))
-        .frame(maxWidth: .infinity, minHeight: minimumHeight, alignment: .topLeading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Color(nsColor: .textBackgroundColor))
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(
@@ -1524,10 +1502,6 @@ private struct ArxivPaperCard: View {
             return 0
         }
         return imageURL != nil ? 150 : 154
-    }
-
-    private var contentMinimumHeight: CGFloat {
-        max(0, minimumHeight - previewHeight)
     }
 
     private var metadataRow: some View {
@@ -1633,28 +1607,6 @@ private struct ArxivPaperCard: View {
     }
 }
 
-private struct DiscoverCardHeightReporter: View {
-    var rowIndex: Int
-
-    var body: some View {
-        GeometryReader { proxy in
-            Color.clear.preference(
-                key: DiscoverRowHeightPreferenceKey.self,
-                value: [rowIndex: proxy.size.height]
-            )
-        }
-    }
-}
-
-private struct DiscoverRowHeightPreferenceKey: PreferenceKey {
-    static let defaultValue: [Int: CGFloat] = [:]
-
-    static func reduce(value: inout [Int: CGFloat], nextValue: () -> [Int: CGFloat]) {
-        for (rowIndex, height) in nextValue() {
-            value[rowIndex] = max(value[rowIndex] ?? 0, height)
-        }
-    }
-}
 
 private struct MetadataPill: View {
     var title: String

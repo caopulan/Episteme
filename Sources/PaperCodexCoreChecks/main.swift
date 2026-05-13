@@ -1184,6 +1184,26 @@ func runUILayoutSourceChecks() throws {
         "Discover search should hit cached non-empty query results before network fetch and immediately load cached enrichments"
     )
     try check(
+        appModelSource.contains("loadLastDiscoverResultsState()")
+            && appModelSource.contains("localDiscoverCache.loadLastQueryResult()")
+            && appModelSource.contains("discoverKeyword = query.keyword")
+            && appModelSource.contains("discoverSelectedCategories = query.categories")
+            && appModelSource.contains("discoverSelectedSimilaritySourceIDs = query.similaritySourceIDs"),
+        "Discover should restore the latest cached search result and its controls on launch"
+    )
+    try check(
+        !discoverSource.contains("let expectedDate = \"\\(model.discoverStartDate)...\\(model.discoverEndDate)\"")
+            && !discoverSource.contains("model.startDiscoverSearch()\n        }"),
+        "Opening Discover should not automatically start a network search"
+    )
+    try check(
+        discoverSource.contains("private let discoverMediaHorizontalPadding: CGFloat = 14")
+            && discoverSource.contains(".padding(.horizontal, discoverMediaHorizontalPadding)")
+            && discoverSource.contains(".padding(.top, discoverMediaHorizontalPadding)")
+            && discoverSource.contains(".padding(.bottom, 8)"),
+        "Discover paper images should use a small horizontal inset aligned with card text"
+    )
+    try check(
         appModelSource.contains("tokenUsage: CodexTokenUsage?")
             && appModelSource.contains("aggregateTokenUsage")
             && appModelSource.contains("Process Tokens")
@@ -2834,6 +2854,12 @@ func runLocalDiscoverEngineChecks() throws {
             && localDiscoverSource.contains("feed: ArxivFeedResponse? = nil")
             && localDiscoverSource.contains("self.feed = feed"),
         "discover query cache should persist the full non-empty search feed, not only paper ids"
+    )
+    try check(
+        localDiscoverSource.contains("public func loadLastQueryResult() throws -> DiscoverQueryResult?")
+            && localDiscoverSource.contains("lastQueryResultURL")
+            && localDiscoverSource.contains("try writeJSON(result, to: lastQueryResultURL())"),
+        "discover query cache should expose the latest saved search result for startup restoration"
     )
 
     let range = try DiscoverDateRange(start: "2026-04-27", end: "2026-04-29")

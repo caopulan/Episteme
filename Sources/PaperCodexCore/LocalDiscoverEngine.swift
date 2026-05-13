@@ -491,10 +491,23 @@ public final class LocalDiscoverCache {
 
     public func saveQueryResult(_ result: DiscoverQueryResult) throws {
         try writeJSON(result, to: queryResultURL(cacheKey: result.query.cacheKey))
+        try saveLastQueryResult(result)
     }
 
     public func loadQueryResult(cacheKey: String) throws -> DiscoverQueryResult? {
         let url = try queryResultURL(cacheKey: cacheKey)
+        guard fileManager.fileExists(atPath: url.path) else {
+            return nil
+        }
+        return try decoder.decode(DiscoverQueryResult.self, from: Data(contentsOf: url))
+    }
+
+    public func saveLastQueryResult(_ result: DiscoverQueryResult) throws {
+        try writeJSON(result, to: lastQueryResultURL())
+    }
+
+    public func loadLastQueryResult() throws -> DiscoverQueryResult? {
+        let url = lastQueryResultURL()
         guard fileManager.fileExists(atPath: url.path) else {
             return nil
         }
@@ -539,6 +552,12 @@ public final class LocalDiscoverCache {
         return root
             .appendingPathComponent("queries", isDirectory: true)
             .appendingPathComponent("\(cacheKey).json")
+    }
+
+    private func lastQueryResultURL() -> URL {
+        root
+            .appendingPathComponent("queries", isDirectory: true)
+            .appendingPathComponent("last.json")
     }
 
     private func enrichmentURL(arxivID: String) -> URL {

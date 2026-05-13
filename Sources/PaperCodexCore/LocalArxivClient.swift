@@ -182,7 +182,7 @@ public final class LocalArxivClient: Sendable {
         } while start < 30_000
 
         guard !papers.isEmpty else {
-            throw LocalArxivClientError.listDateUnavailable("\(range.start)...\(range.end)")
+            return ArxivFeedResponse(date: rangeLabel, count: 0, papers: [])
         }
 
         return ArxivFeedResponse(date: rangeLabel, count: papers.count, papers: papers)
