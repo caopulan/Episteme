@@ -22,17 +22,8 @@ struct RootView: View {
     @EnvironmentObject private var model: AppModel
 
     var body: some View {
-        Group {
-            switch model.route {
-            case .library:
-                LibraryView()
-            case .discover:
-                DiscoverView()
-            case .settings:
-                SettingsView()
-            case .reader:
-                ReaderView()
-            }
+        AppShell {
+            routedContent
         }
         .environment(\.locale, Locale(identifier: model.globalLanguageMode.appLocaleIdentifier))
         .paperCodexTypographyScale()
@@ -54,6 +45,20 @@ struct RootView: View {
             }
             model.postNotice(kind: .error, title: "Paper Codex", message: message, autoDismissAfter: nil)
             model.errorMessage = nil
+        }
+    }
+
+    @ViewBuilder
+    private var routedContent: some View {
+        switch model.route {
+        case .library:
+            LibraryView()
+        case .discover:
+            DiscoverView()
+        case .settings:
+            SettingsView()
+        case .reader:
+            ReaderView()
         }
     }
 }

@@ -441,6 +441,8 @@ func runUILayoutSourceChecks() throws {
     let settingsViewSource = try String(contentsOf: settingsViewURL)
     let discoverViewURL = root.appendingPathComponent("Sources/PaperCodexApp/DiscoverView.swift")
     let discoverSource = try String(contentsOf: discoverViewURL)
+    let appShellURL = root.appendingPathComponent("Sources/PaperCodexApp/AppShell.swift")
+    let appShellSource = FileManager.default.fileExists(atPath: appShellURL.path) ? try String(contentsOf: appShellURL) : ""
     let collectionViewURL = root.appendingPathComponent("Sources/PaperCodexApp/CollectionView.swift")
     let collectionViewExists = FileManager.default.fileExists(atPath: collectionViewURL.path)
     let appSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/PaperCodexApp.swift"))
@@ -460,6 +462,40 @@ func runUILayoutSourceChecks() throws {
             && !appModelSource.contains("collectionStore")
             && !appModelSource.contains("showCollections"),
         "Collection feature should be fully removed from routes, sidebars, AppModel, and dedicated views"
+    )
+    try check(
+        appSource.contains("AppShell {")
+            && appShellSource.contains("struct AppShell")
+            && appShellSource.contains("struct PrimarySidebar")
+            && appShellSource.contains("routedContent"),
+        "Root layout should use a persistent AppShell with one primary sidebar and routed content"
+    )
+    try check(
+        appShellSource.contains("title: \"Recent Conversations\"")
+            && appShellSource.contains("model.showRecentConversations()")
+            && appShellSource.contains("title: \"Library\"")
+            && appShellSource.contains("model.goToLibrary()")
+            && appShellSource.contains("title: \"Discover\"")
+            && appShellSource.contains("model.showDiscover()")
+            && appShellSource.contains("title: \"Settings\"")
+            && appShellSource.contains("model.showSettings()"),
+        "Primary sidebar should own all global navigation entries, including Recent Conversations"
+    )
+    try check(
+        appModelSource.contains("@Published var selectedLibrarySurface: LibrarySurface")
+            && appModelSource.contains("func showRecentConversations()")
+            && appModelSource.contains("selectedLibrarySurface = .recentConversations")
+            && !librarySource.contains("@State private var selectedLibrarySurface"),
+        "Recent Conversations selection should be app-level navigation state instead of LibraryView local state"
+    )
+    try check(
+        !librarySource.contains("title: \"Discover\",")
+            && !librarySource.contains("title: \"Settings\",")
+            && !discoverSource.contains("navButton(title: \"Library\"")
+            && !discoverSource.contains("navButton(title: \"Settings\"")
+            && !settingsViewSource.contains("navButton(title: \"Library\"")
+            && !settingsViewSource.contains("navButton(title: \"Discover\""),
+        "Library, Discover, and Settings sidebars should no longer duplicate global navigation"
     )
     try check(
         appModelSource.contains("movePapers(_ paperIDs: [String], toCategory categoryID: String?)"),
@@ -629,10 +665,12 @@ func runUILayoutSourceChecks() throws {
     )
     try check(
         windowChromeSource.contains("paperCodexSidebarChromePadding")
-            && librarySource.contains("paperCodexSidebarChromePadding()")
-            && discoverSource.contains("paperCodexSidebarChromePadding()")
-            && settingsViewSource.contains("paperCodexSidebarChromePadding()"),
-        "main sidebars should reserve top space for embedded traffic-light controls"
+            && windowChromeSource.contains("paperCodexContextSidebarPadding")
+            && appShellSource.contains("paperCodexSidebarChromePadding()")
+            && librarySource.contains("paperCodexContextSidebarPadding()")
+            && discoverSource.contains("paperCodexContextSidebarPadding()")
+            && settingsViewSource.contains("paperCodexContextSidebarPadding()"),
+        "primary sidebar should reserve traffic-light space while page context sidebars use tighter context padding"
     )
     try check(
         sidebarSplitSource.contains("WindowSafeSplitterHandle") && sidebarSplitSource.contains("mouseDownCanMoveWindow"),
@@ -1060,22 +1098,23 @@ func runUILayoutSourceChecks() throws {
             && librarySource.contains("selectedCategoryPaperIDsInOrder"),
         "library should expose recent conversations and open multi-paper sessions from selections or folders"
     )
-    if let sidebarRange = librarySource.range(of: "private var sidebar: some View"),
+    if let sidebarRange = appShellSource.range(of: "struct PrimarySidebar"),
        let paperListRange = librarySource.range(of: "private var paperList: some View"),
-       let recentNavRange = librarySource.range(of: "title: \"Recent Conversations\""),
-       let libraryButtonRange = librarySource.range(of: "title: \"Library\"") {
+       let recentNavRange = appShellSource.range(of: "title: \"Recent Conversations\""),
+       let libraryButtonRange = appShellSource.range(of: "title: \"Library\"") {
         try check(
             sidebarRange.lowerBound < recentNavRange.lowerBound
                 && recentNavRange.lowerBound < libraryButtonRange.lowerBound
-                && libraryButtonRange.lowerBound < paperListRange.lowerBound,
-            "recent conversations should be a left-sidebar navigation item above Library"
+                && !librarySource.prefix(upTo: paperListRange.lowerBound).contains("title: \"Recent Conversations\""),
+            "recent conversations should be a persistent primary-sidebar navigation item above Library"
         )
     } else {
-        throw CheckFailure(description: "library sidebar should include a Recent Conversations navigation item above Library")
+        throw CheckFailure(description: "primary sidebar should include a Recent Conversations navigation item above Library")
     }
     try check(
-        librarySource.contains("LibrarySurface")
-            && librarySource.contains("case recentConversations")
+        appModelSource.contains("enum LibrarySurface")
+            && appModelSource.contains("case recentConversations")
+            && librarySource.contains("LibrarySurface")
             && librarySource.contains("RecentConversationsContent")
             && librarySource.contains("RecentConversationDetailPanel"),
         "recent conversations should render session content in the main library panes instead of embedding session rows in the sidebar"

@@ -11,6 +11,11 @@ enum AppRoute {
     case reader
 }
 
+enum LibrarySurface {
+    case recentConversations
+    case papers
+}
+
 enum ArxivSaveOrganization: String, CaseIterable, Identifiable {
     case primaryCategory = "primary-category"
     case firstTag = "first-tag"
@@ -317,6 +322,7 @@ final class AppModel: ObservableObject {
     @Published var paperCategoryIDsByID: [String: [String]] = [:]
     @Published var paperTagsByID: [String: [PaperTag]] = [:]
     @Published var selectedLibraryPaper: Paper?
+    @Published var selectedLibrarySurface: LibrarySurface = .papers
     @Published var librarySearchText = ""
     @Published var librarySelectedCategoryID: String?
     @Published var librarySelectedTagID: String?
@@ -811,6 +817,13 @@ final class AppModel: ObservableObject {
         route = .discover
         clearReaderContext()
         refreshDiscoverEnrichmentsForCurrentFeed()
+    }
+
+    func showRecentConversations() {
+        selectedLibrarySurface = .recentConversations
+        route = .library
+        clearReaderContext()
+        refreshRecentSessions()
     }
 
     func recordDiscoverScrollPosition(_ paperID: String?) {
@@ -2479,6 +2492,7 @@ final class AppModel: ObservableObject {
     func openPapersForReading(_ paperIDs: [String]) {
         do {
             readerReturnRoute = .library
+            selectedLibrarySurface = .papers
             try openPaperSet(paperIDs, opensReaderTabs: true, panelTab: .chat)
         } catch {
             errorMessage = String(describing: error)
@@ -2488,6 +2502,7 @@ final class AppModel: ObservableObject {
     func openPapersForChat(_ paperIDs: [String]) {
         do {
             readerReturnRoute = .library
+            selectedLibrarySurface = .papers
             try openPaperSet(paperIDs, opensReaderTabs: true, panelTab: .chat)
         } catch {
             errorMessage = String(describing: error)
@@ -2508,6 +2523,7 @@ final class AppModel: ObservableObject {
                 throw AppModelError.noSelectedPaper
             }
             readerReturnRoute = .library
+            selectedLibrarySurface = .recentConversations
             selectedSessionPanelTab = .chat
             for paper in paperSet {
                 openOrUpdateReaderTab(paper)
@@ -3123,6 +3139,7 @@ final class AppModel: ObservableObject {
     }
 
     func goToLibrary() {
+        selectedLibrarySurface = .papers
         route = .library
         clearReaderContext()
     }

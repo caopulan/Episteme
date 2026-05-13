@@ -27,7 +27,6 @@ struct LibraryView: View {
     @State private var noteTitle = ""
     @State private var noteBody = ""
     @State private var editingNoteID: String?
-    @State private var selectedLibrarySurface: LibrarySurface = .papers
     @State private var selectedRecentSessionID: String?
     @AppStorage("PaperCodexLibrarySortOption") private var librarySortRawValue = LibrarySortOption.addedNewest.rawValue
     @AppStorage("PaperCodexLibrarySortAscending") private var librarySortAscending = false
@@ -52,6 +51,11 @@ struct LibraryView: View {
     private var selectedTagID: String? {
         get { model.librarySelectedTagID }
         nonmutating set { model.librarySelectedTagID = newValue }
+    }
+
+    private var selectedLibrarySurface: LibrarySurface {
+        get { model.selectedLibrarySurface }
+        nonmutating set { model.selectedLibrarySurface = newValue }
     }
 
     private var filteredPapers: [Paper] {
@@ -283,49 +287,16 @@ struct LibraryView: View {
 
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text("Paper Codex")
-                .font(.paperCodexSystem(size: 24, weight: .semibold))
-
-            VStack(alignment: .leading, spacing: 8) {
-                filterButton(
-                    title: "Recent Conversations",
-                    systemImage: "clock",
-                    isSelected: selectedLibrarySurface == .recentConversations
-                ) {
-                    selectedLibrarySurface = .recentConversations
-                    selectedRecentSessionID = selectedRecentSessionID ?? model.recentSessions.first?.id
-                }
-                filterButton(
-                    title: "Library",
-                    systemImage: "books.vertical.fill",
-                    isSelected: selectedLibrarySurface == .papers
-                ) {
-                    selectedLibrarySurface = .papers
-                }
-                filterButton(
-                    title: "Discover",
-                    systemImage: "sparkle.magnifyingglass",
-                    isSelected: false
-                ) {
-                    model.showDiscover()
-                }
-                filterButton(
-                    title: "Settings",
-                    systemImage: "gearshape",
-                    isSelected: false
-                ) {
-                    model.showSettings()
-                }
-            }
-
-            Divider()
+            Label("Library Context", systemImage: "books.vertical")
+                .font(.headline)
+                .foregroundStyle(.secondary)
 
             ScrollView(.vertical) {
                 sidebarLists
             }
             .frame(maxHeight: .infinity, alignment: .top)
         }
-        .paperCodexSidebarChromePadding()
+        .paperCodexContextSidebarPadding()
         .background(Color(nsColor: .controlBackgroundColor))
     }
 
@@ -1781,11 +1752,6 @@ private struct RecentConversationDetailPanel: View {
         formatter.unitsStyle = .short
         return formatter
     }()
-}
-
-private enum LibrarySurface {
-    case recentConversations
-    case papers
 }
 
 private struct BulkLibraryActionBar: View {

@@ -3,6 +3,7 @@ import SwiftUI
 
 enum PaperCodexWindowChrome {
     static let sidebarTopPadding: CGFloat = 48
+    static let contextSidebarTopPadding: CGFloat = 24
     static let sidebarHorizontalPadding: CGFloat = 22
     static let sidebarBottomPadding: CGFloat = 22
     static let titlebarDoubleClickZoomHeight: CGFloat = 54
@@ -91,6 +92,12 @@ struct WindowChromeConfigurator: NSViewRepresentable {
 extension View {
     func paperCodexSidebarChromePadding() -> some View {
         padding(.top, PaperCodexWindowChrome.sidebarTopPadding)
+            .padding(.horizontal, PaperCodexWindowChrome.sidebarHorizontalPadding)
+            .padding(.bottom, PaperCodexWindowChrome.sidebarBottomPadding)
+    }
+
+    func paperCodexContextSidebarPadding() -> some View {
+        padding(.top, PaperCodexWindowChrome.contextSidebarTopPadding)
             .padding(.horizontal, PaperCodexWindowChrome.sidebarHorizontalPadding)
             .padding(.bottom, PaperCodexWindowChrome.sidebarBottomPadding)
     }

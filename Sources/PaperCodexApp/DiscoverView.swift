@@ -176,20 +176,9 @@ struct DiscoverView: View {
 
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text("Paper Codex")
-                .font(.paperCodexSystem(size: 24, weight: .semibold))
-
-            VStack(alignment: .leading, spacing: 8) {
-                navButton(title: "Library", systemImage: "books.vertical") {
-                    model.goToLibrary()
-                }
-                navButton(title: "Discover", systemImage: "sparkle.magnifyingglass", selected: true) {}
-                navButton(title: "Settings", systemImage: "gearshape") {
-                    model.showSettings()
-                }
-            }
-
-            Divider()
+            Label("Discover Filters", systemImage: "line.3.horizontal.decrease.circle")
+                .font(.headline)
+                .foregroundStyle(.secondary)
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
@@ -274,7 +263,7 @@ struct DiscoverView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .paperCodexSidebarChromePadding()
+        .paperCodexContextSidebarPadding()
         .background(Color(nsColor: .controlBackgroundColor))
     }
 
@@ -519,10 +508,6 @@ struct DiscoverView: View {
                 }
             }
         }
-    }
-
-    private func navButton(title: String, systemImage: String, selected: Bool = false, action: @escaping () -> Void) -> some View {
-        SidebarRowButton(title: title, systemImage: systemImage, selected: selected, action: action)
     }
 
     private func filterButton(title: String, detail: String? = nil, selected: Bool, action: @escaping () -> Void) -> some View {

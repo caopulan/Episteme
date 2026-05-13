@@ -190,20 +190,9 @@ struct SettingsView: View {
 
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text("Paper Codex")
-                .font(.paperCodexSystem(size: 24, weight: .semibold))
-
-            VStack(alignment: .leading, spacing: 8) {
-                navButton(title: "Library", systemImage: "books.vertical") {
-                    model.goToLibrary()
-                }
-                navButton(title: "Discover", systemImage: "sparkle.magnifyingglass") {
-                    model.showDiscover()
-                }
-                navButton(title: "Settings", systemImage: "gearshape", selected: true) {}
-            }
-
-            Divider()
+            Label("Settings Sections", systemImage: "gearshape")
+                .font(.headline)
+                .foregroundStyle(.secondary)
 
             VStack(alignment: .leading, spacing: 8) {
                 ForEach(SettingsSectionAnchor.allCases) { anchor in
@@ -220,7 +209,7 @@ struct SettingsView: View {
 
             Spacer()
         }
-        .paperCodexSidebarChromePadding()
+        .paperCodexContextSidebarPadding()
         .background(Color(nsColor: .controlBackgroundColor))
     }
 
