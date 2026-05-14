@@ -525,6 +525,15 @@ func runUILayoutSourceChecks() throws {
         "Root layout should not add an extra app-shell sidebar column"
     )
     try check(
+        appSource.contains("@State private var renderedRoute: AppRoute = .library")
+            && appSource.contains("private let routePresentationDelayNanoseconds")
+            && appSource.contains("RouteTransitionPlaceholder")
+            && appSource.contains("scheduleRenderedRouteUpdate")
+            && appSource.contains("Task.sleep(nanoseconds: routePresentationDelayNanoseconds)")
+            && appSource.contains("model.route == renderedRoute"),
+        "route switching should update navigation immediately and defer heavy route content to the next frame"
+    )
+    try check(
         appShellSource.contains("struct PrimaryNavigationSection")
             && appShellSource.contains("title: \"Library\"")
             && appShellSource.contains("model.goToLibrary()")

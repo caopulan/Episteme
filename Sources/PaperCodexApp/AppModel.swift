@@ -382,6 +382,7 @@ final class AppModel: ObservableObject {
     private var cacheStorageSummaryTask: Task<Void, Never>?
     private var libraryThumbnailRefreshTask: Task<Void, Never>?
     private var readerContextCleanupTask: Task<Void, Never>?
+    private var routeDeferredWorkTask: Task<Void, Never>?
     private var cachedEmbeddingProviderAPIKey: String?
     private var activeCodexRunHandlesBySessionID: [String: CodexRunHandle] = [:]
     private var activeDiscoverCodexRunHandles: [CodexRunHandle] = []
@@ -523,6 +524,7 @@ final class AppModel: ObservableObject {
         cacheStorageSummaryTask?.cancel()
         libraryThumbnailRefreshTask?.cancel()
         readerContextCleanupTask?.cancel()
+        routeDeferredWorkTask?.cancel()
     }
 
     func postNotice(
@@ -843,7 +845,7 @@ final class AppModel: ObservableObject {
     func showDiscover() {
         route = .discover
         scheduleReaderContextClear()
-        startDiscoverCacheWarmupIfNeeded()
+        scheduleDiscoverCacheWarmup()
     }
 
     private func startDiscoverCacheWarmupIfNeeded() {
@@ -931,7 +933,7 @@ final class AppModel: ObservableObject {
         selectedLibrarySurface = .recentConversations
         route = .library
         scheduleReaderContextClear()
-        refreshRecentSessions()
+        scheduleRecentSessionsRefresh()
     }
 
     func recordDiscoverScrollPosition(_ paperID: String?) {
@@ -3288,6 +3290,33 @@ final class AppModel: ObservableObject {
             }
             self.clearReaderContext()
             self.readerContextCleanupTask = nil
+        }
+    }
+
+    private func scheduleDiscoverCacheWarmup() {
+        routeDeferredWorkTask?.cancel()
+        routeDeferredWorkTask = Task { [weak self] in
+            await Task.yield()
+            guard let self, !Task.isCancelled, self.route == .discover else {
+                return
+            }
+            self.startDiscoverCacheWarmupIfNeeded()
+            self.routeDeferredWorkTask = nil
+        }
+    }
+
+    private func scheduleRecentSessionsRefresh() {
+        routeDeferredWorkTask?.cancel()
+        routeDeferredWorkTask = Task { [weak self] in
+            await Task.yield()
+            guard let self,
+                  !Task.isCancelled,
+                  self.route == .library,
+                  self.selectedLibrarySurface == .recentConversations else {
+                return
+            }
+            self.refreshRecentSessions()
+            self.routeDeferredWorkTask = nil
         }
     }
 

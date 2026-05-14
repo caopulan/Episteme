@@ -1,5 +1,7 @@
 import SwiftUI
 
+private let routePresentationDelayNanoseconds: UInt64 = 16_000_000
+
 @main
 struct PaperCodexApp: App {
     @StateObject private var model = AppModel()
@@ -20,6 +22,8 @@ struct PaperCodexApp: App {
 
 struct RootView: View {
     @EnvironmentObject private var model: AppModel
+    @State private var renderedRoute: AppRoute = .library
+    @State private var routePresentationTask: Task<Void, Never>?
 
     var body: some View {
         routedContent
@@ -44,11 +48,30 @@ struct RootView: View {
             model.postNotice(kind: .error, title: "Paper Codex", message: message, autoDismissAfter: nil)
             model.errorMessage = nil
         }
+        .onAppear {
+            renderedRoute = model.route
+        }
+        .onChange(of: model.route) { _, newRoute in
+            scheduleRenderedRouteUpdate(to: newRoute)
+        }
+        .onDisappear {
+            routePresentationTask?.cancel()
+            routePresentationTask = nil
+        }
     }
 
     @ViewBuilder
     private var routedContent: some View {
-        switch model.route {
+        if model.route == renderedRoute {
+            routedContent(for: renderedRoute)
+        } else {
+            RouteTransitionPlaceholder(route: model.route)
+        }
+    }
+
+    @ViewBuilder
+    private func routedContent(for route: AppRoute) -> some View {
+        switch route {
         case .library:
             LibraryView()
         case .discover:
@@ -57,6 +80,80 @@ struct RootView: View {
             SettingsView()
         case .reader:
             ReaderView()
+        }
+    }
+
+    private func scheduleRenderedRouteUpdate(to route: AppRoute) {
+        routePresentationTask?.cancel()
+        routePresentationTask = Task { @MainActor in
+            await Task.yield()
+            try? await Task.sleep(nanoseconds: routePresentationDelayNanoseconds)
+            guard !Task.isCancelled, model.route == route else {
+                return
+            }
+            var transaction = Transaction()
+            transaction.animation = nil
+            withTransaction(transaction) {
+                renderedRoute = route
+            }
+            routePresentationTask = nil
+        }
+    }
+}
+
+private struct RouteTransitionPlaceholder: View {
+    var route: AppRoute
+
+    var body: some View {
+        SidebarSplitLayout(minContentWidth: minContentWidth) {
+            sidebar
+        } content: {
+            VStack(alignment: .leading, spacing: 12) {
+                Text(title)
+                    .font(.paperCodexSystem(size: 28, weight: .semibold))
+                ProgressView()
+                    .controlSize(.small)
+            }
+            .padding(28)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+        .transaction { transaction in
+            transaction.animation = nil
+        }
+    }
+
+    private var sidebar: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Text("Paper Codex")
+                .font(.paperCodexSystem(size: 24, weight: .semibold))
+
+            PrimaryNavigationSection()
+
+            Spacer()
+        }
+        .paperCodexSidebarChromePadding()
+        .background(Color(nsColor: .controlBackgroundColor))
+    }
+
+    private var title: String {
+        switch route {
+        case .library:
+            "文库"
+        case .discover:
+            "发现"
+        case .settings:
+            "设置"
+        case .reader:
+            "阅读"
+        }
+    }
+
+    private var minContentWidth: CGFloat {
+        switch route {
+        case .library:
+            840
+        case .discover, .settings, .reader:
+            760
         }
     }
 }
