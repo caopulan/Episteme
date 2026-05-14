@@ -140,6 +140,21 @@ public final class PaperRepository {
           content TEXT NOT NULL,
           created_at TEXT NOT NULL
         );
+
+        CREATE INDEX IF NOT EXISTS paper_categories_category_paper_idx
+        ON paper_categories(category_id, paper_id);
+
+        CREATE INDEX IF NOT EXISTS paper_tags_tag_paper_idx
+        ON paper_tags(tag_id, paper_id);
+
+        CREATE INDEX IF NOT EXISTS sessions_updated_id_idx
+        ON sessions(updated_at DESC, id DESC);
+
+        CREATE INDEX IF NOT EXISTS session_papers_session_order_idx
+        ON session_papers(session_id, sort_order, paper_id);
+
+        CREATE INDEX IF NOT EXISTS chat_messages_session_created_idx
+        ON chat_messages(session_id, created_at, id);
         """)
         let paperColumns = try database.query("PRAGMA table_info(papers);") { row in
             try row.text(1)
@@ -440,12 +455,47 @@ public final class PaperRepository {
         }
     }
 
+    public func fetchTagsByPaperID() throws -> [String: [PaperTag]] {
+        let rows = try database.query("""
+        SELECT paper_tags.paper_id, tags.id, tags.name
+        FROM paper_tags
+        JOIN tags ON tags.id = paper_tags.tag_id
+        JOIN papers ON papers.id = paper_tags.paper_id
+        WHERE papers.is_saved = 1
+        ORDER BY paper_tags.paper_id, tags.name, tags.id;
+        """) { row in
+            (
+                paperID: try row.text(0),
+                tag: PaperTag(id: try row.text(1), name: try row.text(2))
+            )
+        }
+        return Dictionary(grouping: rows, by: \.paperID)
+            .mapValues { $0.map(\.tag) }
+    }
+
     public func fetchCategoryIDs(forPaperID paperID: String) throws -> [String] {
         try database.query("""
         SELECT category_id FROM paper_categories WHERE paper_id = ? ORDER BY category_id;
         """, bindings: [.text(paperID)]) { row in
             try row.text(0)
         }
+    }
+
+    public func fetchCategoryIDsByPaperID() throws -> [String: [String]] {
+        let rows = try database.query("""
+        SELECT paper_categories.paper_id, paper_categories.category_id
+        FROM paper_categories
+        JOIN papers ON papers.id = paper_categories.paper_id
+        WHERE papers.is_saved = 1
+        ORDER BY paper_categories.paper_id, paper_categories.category_id;
+        """) { row in
+            (
+                paperID: try row.text(0),
+                categoryID: try row.text(1)
+            )
+        }
+        return Dictionary(grouping: rows, by: \.paperID)
+            .mapValues { $0.map(\.categoryID) }
     }
 
     public func upsertPage(_ page: PageIndex) throws {
@@ -597,11 +647,7 @@ public final class PaperRepository {
         """, bindings: [.text(paperID)]) { row in
             try session(from: row)
         }
-        return try sessions.map { session in
-            var updated = session
-            updated.paperIDs = try fetchPaperIDs(sessionID: session.id)
-            return updated
-        }
+        return try attachPaperIDs(to: sessions)
     }
 
     public func fetchRecentSessions(limit: Int) throws -> [PaperSession] {
@@ -614,11 +660,23 @@ public final class PaperRepository {
         """, bindings: [.int(safeLimit)]) { row in
             try session(from: row)
         }
-        return try sessions.map { session in
-            var updated = session
-            updated.paperIDs = try fetchPaperIDs(sessionID: session.id)
-            return updated
+        return try attachPaperIDs(to: sessions)
+    }
+
+    public func fetchPapersBySessionID(for sessions: [PaperSession]) throws -> [String: [Paper]] {
+        guard !sessions.isEmpty else {
+            return [:]
         }
+        var seenPaperIDs: Set<String> = []
+        var orderedPaperIDs: [String] = []
+        for paperID in sessions.flatMap(\.paperIDs) where !seenPaperIDs.contains(paperID) {
+            seenPaperIDs.insert(paperID)
+            orderedPaperIDs.append(paperID)
+        }
+        let papersByID = Dictionary(uniqueKeysWithValues: try fetchPapers(ids: orderedPaperIDs).map { ($0.id, $0) })
+        return Dictionary(uniqueKeysWithValues: sessions.map { session in
+            (session.id, session.paperIDs.compactMap { papersByID[$0] })
+        })
     }
 
     public func fetchSession(id: String) throws -> PaperSession? {
@@ -628,11 +686,10 @@ public final class PaperRepository {
         """, bindings: [.text(id)]) { row in
             try session(from: row)
         }
-        guard var session = sessions.first else {
+        guard let session = sessions.first else {
             return nil
         }
-        session.paperIDs = try fetchPaperIDs(sessionID: session.id)
-        return session
+        return try attachPaperIDs(to: [session]).first
     }
 
     public func upsertReaderPosition(_ position: PaperReaderPosition) throws {
@@ -811,6 +868,35 @@ public final class PaperRepository {
         SELECT paper_id FROM session_papers WHERE session_id = ? ORDER BY sort_order, paper_id;
         """, bindings: [.text(sessionID)]) { row in
             try row.text(0)
+        }
+    }
+
+    private func fetchPaperIDsBySessionID(sessionIDs: [String]) throws -> [String: [String]] {
+        guard !sessionIDs.isEmpty else {
+            return [:]
+        }
+        let placeholders = sessionIDs.map { _ in "?" }.joined(separator: ", ")
+        let rows = try database.query("""
+        SELECT session_id, paper_id
+        FROM session_papers
+        WHERE session_id IN (\(placeholders))
+        ORDER BY session_id, sort_order, paper_id;
+        """, bindings: sessionIDs.map(SQLiteValue.text)) { row in
+            (
+                sessionID: try row.text(0),
+                paperID: try row.text(1)
+            )
+        }
+        return Dictionary(grouping: rows, by: \.sessionID)
+            .mapValues { $0.map(\.paperID) }
+    }
+
+    private func attachPaperIDs(to sessions: [PaperSession]) throws -> [PaperSession] {
+        let paperIDsBySessionID = try fetchPaperIDsBySessionID(sessionIDs: sessions.map(\.id))
+        return sessions.map { session in
+            var updated = session
+            updated.paperIDs = paperIDsBySessionID[session.id, default: []]
+            return updated
         }
     }
 

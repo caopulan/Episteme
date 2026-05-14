@@ -101,7 +101,7 @@ struct ActiveCodexRun: Identifiable, Equatable {
     var events: [CodexRunEvent]
 }
 
-struct ArxivCacheProgress: Equatable {
+struct ArxivCacheProgress: Equatable, Sendable {
     var date: String
     var title: String
     var detail: String
@@ -321,6 +321,7 @@ final class AppModel: ObservableObject {
     @Published var watchedFolders: [WatchedFolder] = []
     @Published var paperCategoryIDsByID: [String: [String]] = [:]
     @Published var paperTagsByID: [String: [PaperTag]] = [:]
+    @Published var libraryDerivedState: PaperLibraryDerivedState = .empty
     @Published var selectedLibraryPaper: Paper?
     @Published var selectedLibrarySurface: LibrarySurface = .papers
     @Published var librarySearchText = ""
@@ -412,9 +413,14 @@ final class AppModel: ObservableObject {
     private var watchedFolderAutoScanTask: Task<Void, Never>?
     private var activeDiscoverSearchTask: Task<Void, Never>?
     private var activeDiscoverPDFCacheTask: Task<Void, Never>?
+    private var discoverCacheWarmupTask: Task<Void, Never>?
+    private var cacheStorageSummaryTask: Task<Void, Never>?
+    private var libraryThumbnailRefreshTask: Task<Void, Never>?
+    private var readerContextCleanupTask: Task<Void, Never>?
     private var activeCodexRunHandlesBySessionID: [String: CodexRunHandle] = [:]
     private var activeDiscoverCodexRunHandles: [CodexRunHandle] = []
     private var cancellingCodexRunSessionIDs: Set<String> = []
+    private var loadedPaperNotesPaperIDs: Set<String> = []
     private var isCancellingDiscoverProcessing = false
     private var isCancellingDiscoverPDFCache = false
 
@@ -531,9 +537,7 @@ final class AppModel: ObservableObject {
             try store.migrate()
             repository = store
             try reloadLibrary()
-            if try !loadLastDiscoverResultsState() {
-                loadCachedArxivState()
-            }
+            startDiscoverCacheWarmupIfNeeded()
             refreshCacheStorageSummary()
             Task {
                 scanWatchedFolders()
@@ -549,6 +553,10 @@ final class AppModel: ObservableObject {
     deinit {
         watchedFolderAutoScanTask?.cancel()
         activeDiscoverPDFCacheTask?.cancel()
+        discoverCacheWarmupTask?.cancel()
+        cacheStorageSummaryTask?.cancel()
+        libraryThumbnailRefreshTask?.cancel()
+        readerContextCleanupTask?.cancel()
     }
 
     func postNotice(
@@ -579,17 +587,18 @@ final class AppModel: ObservableObject {
     }
 
     func refreshCacheStorageSummary() {
-        let libraryRoot = supportRoot.appendingPathComponent("papers", isDirectory: true)
-        let disposableCacheRoot = supportRoot.appendingPathComponent("cache", isDirectory: true)
-        let arxivCacheRoot = supportRoot.appendingPathComponent("arxiv-cache", isDirectory: true)
-        let thumbnailRoot = supportRoot.appendingPathComponent("thumbnails", isDirectory: true)
-        cacheStorageSummary = CacheStorageSummary(
-            libraryBytes: directorySize(libraryRoot),
-            disposableCacheBytes: directorySize(disposableCacheRoot),
-            arxivCacheBytes: directorySize(arxivCacheRoot),
-            thumbnailBytes: directorySize(thumbnailRoot),
-            refreshedAt: Date()
-        )
+        cacheStorageSummaryTask?.cancel()
+        let supportRoot = supportRoot
+        cacheStorageSummaryTask = Task { [weak self] in
+            let summary = await Task.detached(priority: .utility) {
+                CacheStorageSummaryLoader.load(supportRoot: supportRoot)
+            }.value
+            guard !Task.isCancelled else {
+                return
+            }
+            self?.cacheStorageSummary = summary
+            self?.cacheStorageSummaryTask = nil
+        }
     }
 
     func revealPath(_ path: String) {
@@ -624,20 +633,50 @@ final class AppModel: ObservableObject {
             return
         }
         let selectedLibraryPaperID = selectedLibraryPaper?.id
-        papers = try repository.fetchPapers()
-        categories = try repository.fetchCategories()
-        tags = try repository.fetchTags()
-        watchedFolders = try repository.fetchWatchedFolders()
-        paperCategoryIDsByID = try Dictionary(uniqueKeysWithValues: papers.map { paper in
-            (paper.id, try repository.fetchCategoryIDs(forPaperID: paper.id))
-        })
-        paperTagsByID = try Dictionary(uniqueKeysWithValues: papers.map { paper in
-            (paper.id, try repository.fetchTags(forPaperID: paper.id))
-        })
+        let fetchedPapers = try repository.fetchPapers()
+        let fetchedCategories = try repository.fetchCategories()
+        let fetchedTags = try repository.fetchTags()
+        let fetchedWatchedFolders = try repository.fetchWatchedFolders()
+        let categoryIDsByPaperID = try repository.fetchCategoryIDsByPaperID()
+        let tagsByPaperID = try repository.fetchTagsByPaperID()
+        papers = fetchedPapers
+        categories = fetchedCategories
+        tags = fetchedTags
+        watchedFolders = fetchedWatchedFolders
+        paperCategoryIDsByID = categoryIDsByPaperID
+        paperTagsByID = tagsByPaperID
+        libraryDerivedState = PaperLibraryDerivedState.build(
+            papers: fetchedPapers,
+            categories: fetchedCategories,
+            categoryIDsByPaperID: categoryIDsByPaperID,
+            tagsByPaperID: tagsByPaperID
+        )
         try refreshRecentSessions(repository: repository)
-        refreshLibraryThumbnails()
+        startLibraryThumbnailRefresh(for: fetchedPapers)
         if let selectedLibraryPaperID {
             selectedLibraryPaper = papers.first { $0.id == selectedLibraryPaperID }
+        }
+    }
+
+    private func startLibraryThumbnailRefresh(for papers: [Paper]) {
+        let visibleIDs = Set(papers.map(\.id))
+        paperThumbnailURLsByID = paperThumbnailURLsByID.filter { visibleIDs.contains($0.key) }
+        libraryThumbnailRefreshTask?.cancel()
+        let supportRoot = supportRoot
+        let existing = paperThumbnailURLsByID
+        libraryThumbnailRefreshTask = Task { [weak self] in
+            let urlsByID = await Task.detached(priority: .utility) {
+                LibraryThumbnailLoader.load(
+                    supportRoot: supportRoot,
+                    papers: papers,
+                    existing: existing
+                )
+            }.value
+            guard let self, !Task.isCancelled else {
+                return
+            }
+            self.paperThumbnailURLsByID = urlsByID
+            self.libraryThumbnailRefreshTask = nil
         }
     }
 
@@ -655,9 +694,7 @@ final class AppModel: ObservableObject {
     private func refreshRecentSessions(repository: PaperRepository) throws {
         let sessions = try repository.fetchRecentSessions(limit: 8)
         recentSessions = sessions
-        recentSessionPapersByID = try Dictionary(uniqueKeysWithValues: sessions.map { session in
-            (session.id, try repository.fetchPapers(ids: session.paperIDs))
-        })
+        recentSessionPapersByID = try repository.fetchPapersBySessionID(for: sessions)
     }
 
     func papersForSession(_ session: PaperSession) -> [Paper] {
@@ -815,14 +852,95 @@ final class AppModel: ObservableObject {
 
     func showDiscover() {
         route = .discover
-        clearReaderContext()
-        refreshDiscoverEnrichmentsForCurrentFeed()
+        scheduleReaderContextClear()
+        startDiscoverCacheWarmupIfNeeded()
+    }
+
+    private func startDiscoverCacheWarmupIfNeeded() {
+        guard discoverCacheWarmupTask == nil else {
+            return
+        }
+        let supportRoot = supportRoot
+        let preferences = localDiscoverPreferences
+        let selectedDate = selectedArxivDate
+        if arxivFeed == nil {
+            isLoadingArxivFeed = true
+        }
+        discoverCacheWarmupTask = Task { [weak self] in
+            let result = await Task.detached(priority: .utility) {
+                do {
+                    return Result<DiscoverCachedState?, Error>.success(
+                        try DiscoverCacheLoader.loadInitialState(
+                            supportRoot: supportRoot,
+                            preferences: preferences,
+                            selectedDate: selectedDate
+                        )
+                    )
+                } catch {
+                    return Result<DiscoverCachedState?, Error>.failure(error)
+                }
+            }.value
+            guard let self, !Task.isCancelled else {
+                return
+            }
+            self.discoverCacheWarmupTask = nil
+            self.isLoadingArxivFeed = false
+            guard !self.isSearchingDiscover else {
+                return
+            }
+            switch result {
+            case .success(let state):
+                if let state {
+                    self.applyDiscoverCachedState(state)
+                }
+            case .failure(let error):
+                self.errorMessage = String(describing: error)
+            }
+        }
+    }
+
+    private func cancelDiscoverCacheWarmup() {
+        discoverCacheWarmupTask?.cancel()
+        discoverCacheWarmupTask = nil
+        if arxivFeed != nil {
+            isLoadingArxivFeed = false
+        }
+    }
+
+    private func applyDiscoverCachedState(_ state: DiscoverCachedState) {
+        if let query = state.query {
+            discoverKeyword = query.keyword
+            discoverStartDate = query.dateRange.start
+            discoverEndDate = query.dateRange.end
+            discoverSelectedCategories = query.categories
+            discoverSelectedSimilaritySourceIDs = query.similaritySourceIDs
+        }
+        arxivDates = state.arxivDates
+        selectedArxivDate = state.selectedDate
+        arxivFeed = state.feed
+        discoverResultIDs = state.feed.papers.map(\.id)
+        if let selected = selectedArxivPaper,
+           state.feed.papers.contains(where: { $0.id == selected.id }) {
+            selectedArxivPaper = selected
+        } else {
+            selectedArxivPaper = state.feed.papers.first
+        }
+        discoverEnrichmentsByID = state.enrichmentsByID
+        arxivAssetURLs = state.assetURLs
+        arxivPDFThumbnailURLsByID = state.pdfThumbnailURLsByID
+        arxivCacheProgress = ArxivCacheProgress(
+            date: state.selectedDate,
+            title: state.progressTitle,
+            detail: "Preview images \(state.assetCacheSummary.cached)/\(state.assetCacheSummary.total)",
+            completed: state.assetCacheSummary.cached,
+            total: state.assetCacheSummary.total
+        )
     }
 
     func showRecentConversations() {
         selectedLibrarySurface = .recentConversations
         route = .library
-        clearReaderContext()
+        scheduleReaderContextClear()
         refreshRecentSessions()
     }
 
@@ -842,7 +960,7 @@ final class AppModel: ObservableObject {
 
     func showSettings() {
         route = .settings
-        clearReaderContext()
+        scheduleReaderContextClear()
     }
 
     func setLocalArxivCategories(_ categories: [String]) {
@@ -1071,6 +1189,7 @@ final class AppModel: ObservableObject {
         guard activeDiscoverSearchTask == nil, !isSearchingDiscover else {
             return
         }
+        cancelDiscoverCacheWarmup()
         activeDiscoverSearchTask = Task { [weak self] in
             await self?.searchDiscover()
             await MainActor.run {
@@ -2183,6 +2302,10 @@ final class AppModel: ObservableObject {
             for paper in papersToDelete {
                 try removeManagedPaperStorage(for: paper)
             }
+            for paperID in deletedIDs {
+                paperNotesByID.removeValue(forKey: paperID)
+                loadedPaperNotesPaperIDs.remove(paperID)
+            }
             if let selectedLibraryPaper, deletedIDs.contains(selectedLibraryPaper.id) {
                 self.selectedLibraryPaper = nil
             }
@@ -2249,12 +2372,16 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func loadPaperNotes(for paper: Paper) {
+    func loadPaperNotes(for paper: Paper, force: Bool = false) {
         do {
+            guard force || !loadedPaperNotesPaperIDs.contains(paper.id) else {
+                return
+            }
             guard let repository else {
                 throw AppModelError.repositoryUnavailable
             }
             paperNotesByID[paper.id] = try repository.fetchNotes(paperID: paper.id)
+            loadedPaperNotesPaperIDs.insert(paper.id)
         } catch {
             errorMessage = String(describing: error)
         }
@@ -2285,6 +2412,7 @@ final class AppModel: ObservableObject {
             )
             try repository.upsertNote(note)
             paperNotesByID[paperID] = try repository.fetchNotes(paperID: paperID)
+            loadedPaperNotesPaperIDs.insert(paperID)
             postNotice(kind: .success, title: existing == nil ? "Note Added" : "Note Updated", message: note.title)
         } catch {
             errorMessage = String(describing: error)
@@ -2298,6 +2426,7 @@ final class AppModel: ObservableObject {
             }
             try repository.deleteNote(id: note.id)
             paperNotesByID[note.paperID] = try repository.fetchNotes(paperID: note.paperID)
+            loadedPaperNotesPaperIDs.insert(note.paperID)
             postNotice(kind: .success, title: "Note Deleted", message: note.title)
         } catch {
             errorMessage = String(describing: error)
@@ -3141,17 +3270,30 @@ final class AppModel: ObservableObject {
     func goToLibrary() {
         selectedLibrarySurface = .papers
         route = .library
-        clearReaderContext()
+        scheduleReaderContextClear()
     }
 
     func returnFromReader() {
         let destination = readerReturnRoute
-        clearReaderContext()
         switch destination {
         case .discover:
             route = .discover
+            startDiscoverCacheWarmupIfNeeded()
         case .library, .settings, .reader:
             route = .library
+        }
+        scheduleReaderContextClear()
+    }
+
+    private func scheduleReaderContextClear() {
+        readerContextCleanupTask?.cancel()
+        readerContextCleanupTask = Task { [weak self] in
+            await Task.yield()
+            guard let self, !Task.isCancelled, self.route != .reader else {
+                return
+            }
+            self.clearReaderContext()
+            self.readerContextCleanupTask = nil
         }
     }
 
@@ -3711,18 +3853,6 @@ final class AppModel: ObservableObject {
             )
         arxivDownloadProgressByID[arxivPaper.id] = 1
         return result.paper
-    }
-
-    private func refreshLibraryThumbnails() {
-        var urlsByID = paperThumbnailURLsByID
-        for paper in papers where urlsByID[paper.id] == nil {
-            if let urls = try? thumbnailCache.thumbnails(for: paper) {
-                urlsByID[paper.id] = urls
-            }
-        }
-        paperThumbnailURLsByID = urlsByID.filter { entry in
-            papers.contains { $0.id == entry.key }
-        }
     }
 
     private func ensureCategory(named name: String, repository: PaperRepository) throws -> PaperCodexCore.Category {

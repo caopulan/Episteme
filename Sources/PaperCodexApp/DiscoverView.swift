@@ -5,6 +5,17 @@ import SwiftUI
 
 private let discoverMediaHorizontalPadding: CGFloat = 14
 
+private struct DiscoverLayoutSignature: Hashable {
+    var columnCount: Int
+    var paperCount: Int
+    var paperIDHash: Int
+}
+
+private struct DiscoverImageWarmupSignature: Hashable {
+    var layout: DiscoverLayoutSignature
+    var imageCount: Int
+}
+
 struct DiscoverView: View {
     @EnvironmentObject private var model: AppModel
     @State private var selectedCategory: String?
@@ -276,20 +287,25 @@ struct DiscoverView: View {
 
     private var feed: some View {
         VStack(alignment: .leading, spacing: 14) {
+            let visiblePapers = papers
             toolbar
 
             if model.isSearchingDiscover && model.arxivFeed == nil {
                 ProgressView()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if papers.isEmpty {
+            } else if visiblePapers.isEmpty {
                 ContentUnavailableView("No Papers", systemImage: "doc.text.magnifyingglass")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 GeometryReader { proxy in
                     let columnCount = gridColumnCount(for: proxy.size.width)
-                    let rows = paperRows(papers, columnCount: columnCount)
-                    let layoutSignature = rowLayoutSignature(papers: papers, columnCount: columnCount)
-                    let imagePreloadURLs = discoverImagePreloadURLs(for: papers)
+                    let rows = paperRows(visiblePapers, columnCount: columnCount)
+                    let layoutSignature = rowLayoutSignature(papers: visiblePapers, columnCount: columnCount)
+                    let imagePreloadURLs = discoverImagePreloadURLs(for: visiblePapers)
+                    let warmupSignature = DiscoverImageWarmupSignature(
+                        layout: layoutSignature,
+                        imageCount: imagePreloadURLs.count
+                    )
 
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 14) {
@@ -311,22 +327,22 @@ struct DiscoverView: View {
                         .scrollTargetLayout()
                         .padding(.horizontal, 10)
                         .padding(.vertical, 8)
-                        .task(id: "\(layoutSignature):\(imagePreloadURLs.count)") {
+                        .task(id: warmupSignature) {
                             await warmDiscoverLocalImages(imagePreloadURLs)
                         }
                     }
                     .scrollPosition(id: $discoverScrollAnchorID, anchor: .top)
                     .onAppear {
-                        restoreDiscoverScrollPosition()
+                        restoreDiscoverScrollPosition(in: visiblePapers)
                     }
                     .onChange(of: layoutSignature) { _, _ in
-                        restoreDiscoverScrollPosition()
+                        restoreDiscoverScrollPosition(in: visiblePapers)
                     }
                     .onChange(of: discoverScrollAnchorID) { _, paperID in
-                        scheduleDiscoverScrollPositionCommit(paperID)
+                        scheduleDiscoverScrollPositionCommit(paperID, in: visiblePapers)
                     }
                     .onDisappear {
-                        commitDiscoverScrollPosition()
+                        commitDiscoverScrollPosition(in: visiblePapers)
                     }
                 }
             }
@@ -352,8 +368,16 @@ struct DiscoverView: View {
         }
     }
 
-    private func rowLayoutSignature(papers: [ArxivFeedPaper], columnCount: Int) -> String {
-        "\(columnCount):\(papers.map(\.id).joined(separator: ","))"
+    private func rowLayoutSignature(papers: [ArxivFeedPaper], columnCount: Int) -> DiscoverLayoutSignature {
+        var hasher = Hasher()
+        for paper in papers {
+            hasher.combine(paper.id)
+        }
+        return DiscoverLayoutSignature(
+            columnCount: columnCount,
+            paperCount: papers.count,
+            paperIDHash: hasher.finalize()
+        )
     }
 
     private func discoverImagePreloadURLs(for papers: [ArxivFeedPaper]) -> [URL] {
@@ -393,9 +417,9 @@ struct DiscoverView: View {
         )
     }
 
-    private func restoreDiscoverScrollPosition() {
+    private func restoreDiscoverScrollPosition(in visiblePapers: [ArxivFeedPaper]) {
         guard let paperID = model.discoverScrollPositionPaperID,
-              papers.contains(where: { $0.id == paperID }) else {
+              visiblePapers.contains(where: { $0.id == paperID }) else {
             return
         }
         discoverScrollPositionCommitTask?.cancel()
@@ -404,9 +428,13 @@ struct DiscoverView: View {
         }
     }
 
-    private func scheduleDiscoverScrollPositionCommit(_ paperID: String?) {
+    private func restoreDiscoverScrollPosition() {
+        restoreDiscoverScrollPosition(in: papers)
+    }
+
+    private func scheduleDiscoverScrollPositionCommit(_ paperID: String?, in visiblePapers: [ArxivFeedPaper]) {
         guard let paperID,
-              papers.contains(where: { $0.id == paperID }) else {
+              visiblePapers.contains(where: { $0.id == paperID }) else {
             return
         }
         discoverScrollPositionCommitTask?.cancel()
@@ -419,10 +447,10 @@ struct DiscoverView: View {
         }
     }
 
-    private func commitDiscoverScrollPosition(fallbackPaperID: String? = nil) {
+    private func commitDiscoverScrollPosition(fallbackPaperID: String? = nil, in visiblePapers: [ArxivFeedPaper]? = nil) {
         discoverScrollPositionCommitTask?.cancel()
         guard let paperID = discoverScrollAnchorID ?? fallbackPaperID,
-              papers.contains(where: { $0.id == paperID }) else {
+              (visiblePapers ?? papers).contains(where: { $0.id == paperID }) else {
             return
         }
         model.recordDiscoverScrollPosition(paperID)

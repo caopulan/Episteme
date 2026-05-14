@@ -73,15 +73,7 @@ struct LibraryView: View {
         }
         if !query.isEmpty {
             result = result.filter {
-                let categories = categories(for: $0).map(\.name).joined(separator: " ")
-                let tags = model.paperTagsByID[$0.id, default: []].map(\.name).joined(separator: " ")
-                let year = $0.year.map(String.init) ?? ""
-                return $0.title.localizedCaseInsensitiveContains(query)
-                    || $0.authors.joined(separator: " ").localizedCaseInsensitiveContains(query)
-                    || categories.localizedCaseInsensitiveContains(query)
-                    || tags.localizedCaseInsensitiveContains(query)
-                    || year.localizedCaseInsensitiveContains(query)
-                    || ($0.sourceURL ?? "").localizedCaseInsensitiveContains(query)
+                model.libraryDerivedState.matchesSearch(paperID: $0.id, query: query)
             }
         }
         return result
@@ -1050,13 +1042,11 @@ struct LibraryView: View {
     }
 
     private func paperCount(inCategory categoryID: String) -> Int {
-        model.paperCategoryIDsByID.values.filter { $0.contains(categoryID) }.count
+        model.libraryDerivedState.categoryPaperCountsByID[categoryID, default: 0]
     }
 
     private func paperCount(forTag tagID: String) -> Int {
-        model.paperTagsByID.values.filter { tags in
-            tags.contains { $0.id == tagID }
-        }.count
+        model.libraryDerivedState.tagPaperCountsByID[tagID, default: 0]
     }
 
     private func dropPDFs(from providers: [NSItemProvider]) -> Bool {
@@ -1506,20 +1496,18 @@ private struct ThumbnailStrip: View {
                 .frame(width: 42, height: 54)
             } else {
                 ForEach(Array(urls.enumerated()), id: \.offset) { index, url in
-                    if let image = NSImage(contentsOf: url) {
-                        Image(nsImage: image)
-                            .resizable()
-                            .scaledToFit()
-                            .padding(2)
-                            .frame(width: 42, height: 54)
-                            .background(Color(nsColor: .textBackgroundColor))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 5)
-                                    .stroke(Color.black.opacity(0.12), lineWidth: 1)
-                            )
-                            .clipShape(RoundedRectangle(cornerRadius: 5))
-                            .zIndex(Double(urls.count - index))
+                    LocalThumbnailImage(url: url, maxPixelSize: 180) {
+                        Color(nsColor: .textBackgroundColor)
                     }
+                    .padding(2)
+                    .frame(width: 42, height: 54)
+                    .background(Color(nsColor: .textBackgroundColor))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 5)
+                            .stroke(Color.black.opacity(0.12), lineWidth: 1)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 5))
+                    .zIndex(Double(urls.count - index))
                 }
             }
         }

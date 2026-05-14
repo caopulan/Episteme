@@ -50,7 +50,7 @@ struct AppOperationStatus: Equatable {
     var tint: Color
 }
 
-struct CacheStorageSummary: Equatable {
+struct CacheStorageSummary: Equatable, Sendable {
     var libraryBytes: Int64 = 0
     var disposableCacheBytes: Int64 = 0
     var arxivCacheBytes: Int64 = 0

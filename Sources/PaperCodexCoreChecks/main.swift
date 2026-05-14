@@ -284,6 +284,60 @@ func runReaderPositionRepositoryChecks() throws {
     try check(reopenedPositionA == positionA, "reader position should survive repository reopen")
 }
 
+func runLibraryDerivedStateChecks() throws {
+    let now = Date(timeIntervalSince1970: 1_777_400_000)
+    let paperA = Paper(
+        id: "paper-a",
+        filePath: "/tmp/a.pdf",
+        fileHash: "hash-a",
+        title: "Representation Autoencoders",
+        authors: ["Alice", "Bob"],
+        year: 2026,
+        sourceURL: "https://arxiv.org/abs/2604.00001",
+        importedAt: now,
+        updatedAt: now
+    )
+    let paperB = Paper(
+        id: "paper-b",
+        filePath: "/tmp/b.pdf",
+        fileHash: "hash-b",
+        title: "Flow Matching",
+        authors: ["Carol"],
+        year: 2025,
+        sourceURL: nil,
+        importedAt: now,
+        updatedAt: now
+    )
+    let categories = [
+        Category(id: "cat-methods", parentID: nil, name: "Methods", sortOrder: 1),
+        Category(id: "cat-vae", parentID: "cat-methods", name: "VAE", sortOrder: 2)
+    ]
+    let tagsByPaperID = [
+        "paper-a": [
+            PaperTag(id: "tag-autoencoder", name: "Autoencoder"),
+            PaperTag(id: "tag-diffusion", name: "Diffusion")
+        ],
+        "paper-b": [
+            PaperTag(id: "tag-diffusion", name: "Diffusion")
+        ]
+    ]
+    let state = PaperLibraryDerivedState.build(
+        papers: [paperA, paperB],
+        categories: categories,
+        categoryIDsByPaperID: [
+            "paper-a": ["cat-methods", "cat-vae"],
+            "paper-b": ["cat-methods"]
+        ],
+        tagsByPaperID: tagsByPaperID
+    )
+
+    try check(state.categoryPaperCountsByID == ["cat-methods": 2, "cat-vae": 1], "library derived state should precompute category counts")
+    try check(state.tagPaperCountsByID == ["tag-autoencoder": 1, "tag-diffusion": 2], "library derived state should precompute tag counts")
+    try check(state.matchesSearch(paperID: "paper-a", query: "vae autoencoder alice 2026"), "library search index should include title, authors, year, categories, tags, and URL")
+    try check(!state.matchesSearch(paperID: "paper-b", query: "alice"), "library search index should stay scoped to each paper")
+    try check(state.matchesSearch(paperID: "missing", query: "anything"), "missing papers should not be filtered out by an empty derived search index")
+}
+
 func runUILayoutSourceChecks() throws {
     let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
     let libraryViewURL = root.appendingPathComponent("Sources/PaperCodexApp/LibraryView.swift")
@@ -835,6 +889,42 @@ func runUILayoutSourceChecks() throws {
         appModelSource.contains("CacheStorageSummary"),
         "AppModel should expose a cache and storage summary for Settings"
     )
+    try check(
+        appModelSource.contains("@Published var libraryDerivedState")
+            && appModelSource.contains("PaperLibraryDerivedState.build")
+            && librarySource.contains("model.libraryDerivedState.matchesSearch")
+            && librarySource.contains("model.libraryDerivedState.categoryPaperCountsByID")
+            && librarySource.contains("model.libraryDerivedState.tagPaperCountsByID"),
+        "library filtering and sidebar counts should use a precomputed derived state instead of recomputing in the view body"
+    )
+    try check(
+        appModelSource.contains("libraryThumbnailRefreshTask")
+            && appModelSource.contains("startLibraryThumbnailRefresh(for:")
+            && appModelSource.contains("LibraryThumbnailLoader.load")
+            && !appModelSource.contains("refreshLibraryThumbnails()"),
+        "library reload should refresh PDF thumbnail URLs in a background task instead of rendering thumbnails on the main actor"
+    )
+    try check(
+        appModelSource.contains("startDiscoverCacheWarmupIfNeeded")
+            && appModelSource.contains("DiscoverCacheLoader.loadInitialState")
+            && appModelSource.contains("Task.detached")
+            && appModelSource.contains("applyDiscoverCachedState")
+            && !appModelSource.contains("func showDiscover() {\n        route = .discover\n        clearReaderContext()\n        refreshDiscoverEnrichmentsForCurrentFeed()\n    }"),
+        "opening Discover should show cached state while background loaders warm JSON, asset, and thumbnail data off the main actor"
+    )
+    let discoverCacheLoaderSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/DiscoverCacheLoader.swift"))
+    let pdfThumbnailCacheSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/PDFThumbnailCache.swift"))
+    try check(
+        pdfThumbnailCacheSource.contains("func cachedThumbnailURLs")
+            && discoverCacheLoaderSource.contains("thumbnailCache.cachedThumbnailURLs"),
+        "Discover cache warmup should read existing PDF thumbnails without generating missing thumbnails during navigation"
+    )
+    try check(
+        appModelSource.contains("refreshCacheStorageSummary()")
+            && appModelSource.contains("CacheStorageSummaryLoader.load")
+            && appModelSource.contains("cacheStorageSummaryTask"),
+        "cache storage size refresh should enumerate large cache directories off the main actor"
+    )
 
     try check(
         librarySource.contains("dropPDFs(from providers:"),
@@ -905,6 +995,11 @@ func runUILayoutSourceChecks() throws {
         "library inspector should expose per-paper notes"
     )
     try check(
+        librarySource.contains("LocalThumbnailImage")
+            && !librarySource.contains("NSImage(contentsOf: url)"),
+        "library thumbnail rows should decode local thumbnail images asynchronously instead of reading image files in body"
+    )
+    try check(
         appModelSource.contains("updateCategory(") && appModelSource.contains("deleteCategory("),
         "AppModel should manage category rename, move, and delete operations"
     )
@@ -915,6 +1010,13 @@ func runUILayoutSourceChecks() throws {
     try check(
         appModelSource.contains("saveNote("),
         "AppModel should persist paper notes"
+    )
+    try check(
+        appModelSource.contains("loadedPaperNotesPaperIDs")
+            && appModelSource.contains("func loadPaperNotes(for paper: Paper, force: Bool = false)")
+            && appModelSource.contains("guard force || !loadedPaperNotesPaperIDs.contains(paper.id)")
+            && appModelSource.contains("loadedPaperNotesPaperIDs.insert(paperID)"),
+        "paper notes should be cached after first load and explicitly refreshed after note mutations"
     )
     try check(
         appModelSource.contains("librarySelectedCategoryID"),
@@ -1006,6 +1108,13 @@ func runUILayoutSourceChecks() throws {
     try check(
         readerSource.contains("model.returnFromReader()"),
         "reader back navigation should return to the previous browsing surface instead of always resetting to Library"
+    )
+    try check(
+        appModelSource.contains("readerContextCleanupTask")
+            && appModelSource.contains("scheduleReaderContextClear()")
+            && appModelSource.contains("await Task.yield()")
+            && !appModelSource.contains("func returnFromReader() {\n        let destination = readerReturnRoute\n        clearReaderContext()"),
+        "reader navigation should switch routes before clearing PDF and chat context so return animations are not blocked by teardown"
     )
     try check(
         readerSource.contains("ReaderSessionPaperBar")
@@ -1241,6 +1350,13 @@ func runUILayoutSourceChecks() throws {
         "Discover scroll restoration should use scroll position binding instead of per-card geometry tracking"
     )
     try check(
+        discoverSource.contains("let visiblePapers = papers")
+            && discoverSource.contains("DiscoverLayoutSignature")
+            && discoverSource.contains("DiscoverImageWarmupSignature")
+            && !discoverSource.contains("papers.map(\\.id).joined(separator: \",\")"),
+        "Discover feed rendering should reuse one visible-paper snapshot and avoid building long string layout signatures in body"
+    )
+    try check(
         appModelSource.contains("if try loadCachedDiscoverSearch(query: query) {\n                return\n            }")
             && appModelSource.contains("cacheQueryResult:")
             && appModelSource.contains("guard !feed.papers.isEmpty else")
@@ -1466,6 +1582,15 @@ func runRepositoryChecks() throws {
     try check(recentSessions == [laterSession, multiPaperSession], "recent sessions should return newest sessions first with ordered paper IDs")
     let limitedRecentSessions = try repository.fetchRecentSessions(limit: 1)
     try check(limitedRecentSessions == [laterSession], "recent sessions should honor the requested limit")
+    let categoryIDsByPaperID = try repository.fetchCategoryIDsByPaperID()
+    let tagsByPaperID = try repository.fetchTagsByPaperID()
+    let recentPapersBySessionID = try repository.fetchPapersBySessionID(for: recentSessions)
+    try check(categoryIDsByPaperID == ["paper-a": ["cat-vae"]], "repository should batch-fetch category IDs grouped by paper")
+    try check(tagsByPaperID == ["paper-a": [tag]], "repository should batch-fetch tags grouped by paper")
+    try check(recentPapersBySessionID == [
+        laterSession.id: [paper],
+        multiPaperSession.id: [starredPaperB, paper]
+    ], "repository should batch-fetch recent session papers without per-session paper queries")
 
     try repository.removePaper("paper-a", fromCategory: "cat-vae")
     try repository.removePaper("paper-a", fromTag: "tag-control")
@@ -3507,6 +3632,10 @@ do {
     if selectedChecks.isEmpty || selectedChecks.contains("reader-positions") {
         try runReaderPositionRepositoryChecks()
         print("reader-positions: pass")
+    }
+    if selectedChecks.isEmpty || selectedChecks.contains("library-derived-state") {
+        try runLibraryDerivedStateChecks()
+        print("library-derived-state: pass")
     }
     if selectedChecks.isEmpty || selectedChecks.contains("ui-layout-source") {
         try runUILayoutSourceChecks()

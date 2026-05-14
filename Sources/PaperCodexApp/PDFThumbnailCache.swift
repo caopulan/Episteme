@@ -28,7 +28,7 @@ final class PDFThumbnailCache {
     ) throws -> [URL] {
         let directory = root.appendingPathComponent(safeCacheID(cacheID), isDirectory: true)
         try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
-        let existing = (1...pageLimit).map { directory.appendingPathComponent(String(format: "p%03d.png", $0)) }
+        let existing = thumbnailURLs(in: directory, pageLimit: pageLimit)
         if existing.allSatisfy({ fileManager.fileExists(atPath: $0.path) }) {
             return existing
         }
@@ -51,6 +51,16 @@ final class PDFThumbnailCache {
             urls.append(url)
         }
         return urls
+    }
+
+    func cachedThumbnailURLs(cacheID: String, pageLimit: Int = 5) -> [URL] {
+        let directory = root.appendingPathComponent(safeCacheID(cacheID), isDirectory: true)
+        let existing = thumbnailURLs(in: directory, pageLimit: pageLimit)
+        return existing.filter { fileManager.fileExists(atPath: $0.path) }
+    }
+
+    private func thumbnailURLs(in directory: URL, pageLimit: Int) -> [URL] {
+        (1...pageLimit).map { directory.appendingPathComponent(String(format: "p%03d.png", $0)) }
     }
 
     private func safeCacheID(_ value: String) -> String {
