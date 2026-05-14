@@ -79,6 +79,10 @@ struct LibraryView: View {
         return result
     }
 
+    private var filteredPaperIDs: [String] {
+        filteredPapers.map(\.id)
+    }
+
     private var sortedPapers: [Paper] {
         let option = LibrarySortOption(rawValue: librarySortRawValue) ?? .addedNewest
         return option.sorted(filteredPapers, ascending: librarySortAscending)
@@ -127,7 +131,7 @@ struct LibraryView: View {
         } content: {
             contentPane
         }
-        .onChange(of: sortedPapers.map(\.id)) { _, _ in
+        .onChange(of: filteredPaperIDs) { _, _ in
             prunePaperSelection()
         }
         .onChange(of: model.recentSessions.map(\.id)) { _, _ in
@@ -442,7 +446,8 @@ struct LibraryView: View {
     }
 
     private var paperList: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        let visiblePapers = sortedPapers
+        return VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 12) {
                 Text("Library")
                     .font(.paperCodexSystem(size: 28, weight: .semibold))
@@ -511,13 +516,13 @@ struct LibraryView: View {
                 .buttonStyle(.borderless)
             }
 
-            if sortedPapers.isEmpty {
+            if visiblePapers.isEmpty {
                 ContentUnavailableView("No Papers", systemImage: "doc.text.magnifyingglass")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
                     LazyVStack(spacing: 1) {
-                        ForEach(sortedPapers) { paper in
+                        ForEach(visiblePapers) { paper in
                             PaperRow(
                                 paper: paper,
                                 categories: categories(for: paper),
@@ -1935,7 +1940,18 @@ private enum LibrarySortOption: String, CaseIterable, Identifiable {
     }
 
     func sorted(_ papers: [Paper], ascending: Bool) -> [Paper] {
-        papers.sorted { left, right in
+        let arxivIDsByPaperID: [String: String]
+        if self == .arxivID {
+            arxivIDsByPaperID = Dictionary(
+                uniqueKeysWithValues: papers.compactMap { paper in
+                    arxivID(for: paper).map { (paper.id, $0) }
+                }
+            )
+        } else {
+            arxivIDsByPaperID = [:]
+        }
+
+        return papers.sorted { left, right in
             if left.isStarred != right.isStarred {
                 return left.isStarred
             }
@@ -1948,7 +1964,7 @@ private enum LibrarySortOption: String, CaseIterable, Identifiable {
             case .title:
                 return titleComesBefore(left, right, ascending: ascending)
             case .arxivID:
-                return arxivIDComesBefore(left, right, ascending: ascending)
+                return arxivIDComesBefore(left, right, ascending: ascending, arxivIDsByPaperID: arxivIDsByPaperID)
             }
         }
     }
@@ -1961,9 +1977,14 @@ private enum LibrarySortOption: String, CaseIterable, Identifiable {
         return left.id < right.id
     }
 
-    private func arxivIDComesBefore(_ left: Paper, _ right: Paper, ascending: Bool) -> Bool {
-        let leftID = arxivID(for: left)
-        let rightID = arxivID(for: right)
+    private func arxivIDComesBefore(
+        _ left: Paper,
+        _ right: Paper,
+        ascending: Bool,
+        arxivIDsByPaperID: [String: String]
+    ) -> Bool {
+        let leftID = arxivIDsByPaperID[left.id]
+        let rightID = arxivIDsByPaperID[right.id]
         switch (leftID, rightID) {
         case let (leftID?, rightID?):
             let comparison = leftID.localizedStandardCompare(rightID)

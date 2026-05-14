@@ -503,6 +503,7 @@ func runUILayoutSourceChecks() throws {
     let chatViewURL = root.appendingPathComponent("Sources/PaperCodexApp/ChatView.swift")
     let chatSource = try String(contentsOf: chatViewURL)
     let saveToLibrarySource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/SaveToLibrarySheet.swift"))
+    let arxivIDExtractorSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexCore/ArxivIDExtractor.swift"))
     try check(
         !collectionViewExists
             && !appSource.contains("case .collections")
@@ -1419,24 +1420,34 @@ func runUILayoutSourceChecks() throws {
         "settings should avoid exposing full long prompt editor contents as route-level accessibility text"
     )
     try check(
-        appModelSource.contains("private var cachedEmbeddingProviderAPIKey: String?")
-            && appModelSource.contains("private func embeddingProviderAPIKeyValue() async -> String")
-            && appModelSource.contains("Task.detached(priority: .utility) {\n            loadEmbeddingProviderAPIKeyFromKeychain()")
-            && !appModelSource.contains("@Published var embeddingProviderAPIKey")
-            && !appModelSource.contains("loadEmbeddingProviderAPIKey()"),
-        "embedding API key should be loaded from Keychain only on demand, not during startup or settings entry"
-    )
-    try check(
-        appModelSource.contains("private var embeddingProviderAPIKeySaveTask: Task<Void, Never>?")
-            && appModelSource.contains("Task.detached(priority: .utility) {\n                    try saveEmbeddingProviderAPIKeyToKeychain(trimmedAPIKey)")
-            && !appModelSource.contains("try saveEmbeddingProviderAPIKeyToKeychain(trimmedAPIKey)\n            embeddingProviderAPIKey = trimmedAPIKey"),
-        "embedding API key saves should not block settings interactions on the main actor"
+        appModelSource.contains("embeddingProviderAPIKeyDefaultsKey")
+            && appModelSource.contains("loadEmbeddingProviderAPIKeyFromDefaults()")
+            && appModelSource.contains("saveEmbeddingProviderAPIKeyToDefaults")
+            && appModelSource.contains("private func embeddingProviderAPIKeyValue() -> String")
+            && !appModelSource.contains("import Security")
+            && !appModelSource.contains("SecItem")
+            && !appModelSource.contains("Keychain")
+            && !appModelSource.contains("keychainFailure"),
+        "embedding API key should avoid Keychain entirely so app launch and route switching never trigger password prompts"
     )
     try check(
         appModelSource.contains("private var watchedFolderScanTask: Task<Void, Never>?")
             && appModelSource.contains("Task.detached(priority: .utility) {\n                    let repository = try PaperRepository(databasePath: databasePath)")
             && !appModelSource.contains("Task {\n                scanWatchedFolders()\n                await refreshCodexDiagnostic()"),
         "startup should not immediately scan watched folders or run folder enumeration on the main actor"
+    )
+    try check(
+        arxivIDExtractorSource.contains("private static let versionedIDRegex")
+            && arxivIDExtractorSource.contains("private static let versionSuffixRegex")
+            && !arxivIDExtractorSource.contains("guard let regex = try? NSRegularExpression(pattern:"),
+        "arXiv ID extraction should reuse compiled regular expressions instead of compiling during every sort comparison"
+    )
+    try check(
+        librarySource.contains(".onChange(of: filteredPaperIDs)")
+            && !librarySource.contains(".onChange(of: sortedPapers.map")
+            && librarySource.contains("let arxivIDsByPaperID")
+            && librarySource.contains("arxivIDComesBefore(left, right, ascending: ascending, arxivIDsByPaperID: arxivIDsByPaperID)"),
+        "library route updates should not sort and re-parse arXiv IDs while handling navigation changes"
     )
     try check(
         settingsViewSource.contains("isArxivFeedDirty"),

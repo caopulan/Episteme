@@ -1,7 +1,6 @@
 import AppKit
 import Foundation
 import PaperCodexCore
-import Security
 import SwiftUI
 
 enum AppRoute {
@@ -167,8 +166,7 @@ private let discoverCodexModelOverrideDefaultsKey = "PaperCodexDiscoverCodexMode
 private let discoverCodexReasoningEffortDefaultsKey = "PaperCodexDiscoverCodexReasoningEffort"
 private let discoverCodexConcurrencyDefaultsKey = "PaperCodexDiscoverCodexConcurrency"
 private let localDiscoverPreferencesDefaultsKey = "PaperCodexLocalDiscoverPreferences"
-private let embeddingProviderAPIKeyService = "PaperCodexEmbeddingProvider"
-private let embeddingProviderAPIKeyAccount = "default"
+private let embeddingProviderAPIKeyDefaultsKey = "PaperCodexEmbeddingProviderAPIKey"
 private let arxivSaveOrganizationDefaultsKey = "PaperCodexArxivSaveOrganization"
 private let quickPromptsDefaultsKey = "PaperCodexQuickPrompts"
 private let librarySidebarWidthDefaultsKey = "PaperCodexLibrarySidebarWidth"
@@ -244,51 +242,18 @@ private func saveLocalDiscoverPreferencesToDefaults(_ preferences: LocalDiscover
     }
 }
 
-private func loadEmbeddingProviderAPIKeyFromKeychain() -> String {
-    var query = embeddingProviderAPIKeyQuery()
-    query[kSecReturnData as String] = true
-    query[kSecMatchLimit as String] = kSecMatchLimitOne
-    var result: CFTypeRef?
-    let status = SecItemCopyMatching(query as CFDictionary, &result)
-    guard status == errSecSuccess,
-          let data = result as? Data,
-          let value = String(data: data, encoding: .utf8) else {
-        return ""
-    }
-    return value
+private func loadEmbeddingProviderAPIKeyFromDefaults() -> String {
+    UserDefaults.standard.string(forKey: embeddingProviderAPIKeyDefaultsKey)?
+        .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 }
 
-private func saveEmbeddingProviderAPIKeyToKeychain(_ value: String) throws {
-    let data = Data(value.utf8)
-    let baseQuery = embeddingProviderAPIKeyQuery()
-    if data.isEmpty {
-        SecItemDelete(baseQuery as CFDictionary)
-        return
+private func saveEmbeddingProviderAPIKeyToDefaults(_ value: String) {
+    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    if trimmed.isEmpty {
+        UserDefaults.standard.removeObject(forKey: embeddingProviderAPIKeyDefaultsKey)
+    } else {
+        UserDefaults.standard.set(trimmed, forKey: embeddingProviderAPIKeyDefaultsKey)
     }
-
-    let updateStatus = SecItemUpdate(baseQuery as CFDictionary, [kSecValueData as String: data] as CFDictionary)
-    if updateStatus == errSecSuccess {
-        return
-    }
-    if updateStatus != errSecItemNotFound {
-        throw AppModelError.keychainFailure(updateStatus)
-    }
-
-    var addQuery = baseQuery
-    addQuery[kSecValueData as String] = data
-    let addStatus = SecItemAdd(addQuery as CFDictionary, nil)
-    guard addStatus == errSecSuccess else {
-        throw AppModelError.keychainFailure(addStatus)
-    }
-}
-
-private func embeddingProviderAPIKeyQuery() -> [String: Any] {
-    [
-        kSecClass as String: kSecClassGenericPassword,
-        kSecAttrService as String: embeddingProviderAPIKeyService,
-        kSecAttrAccount as String: embeddingProviderAPIKeyAccount,
-        kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-    ]
 }
 
 private func isCancellationError(_ error: any Error) -> Bool {
@@ -417,7 +382,6 @@ final class AppModel: ObservableObject {
     private var cacheStorageSummaryTask: Task<Void, Never>?
     private var libraryThumbnailRefreshTask: Task<Void, Never>?
     private var readerContextCleanupTask: Task<Void, Never>?
-    private var embeddingProviderAPIKeySaveTask: Task<Void, Never>?
     private var cachedEmbeddingProviderAPIKey: String?
     private var activeCodexRunHandlesBySessionID: [String: CodexRunHandle] = [:]
     private var activeDiscoverCodexRunHandles: [CodexRunHandle] = []
@@ -559,7 +523,6 @@ final class AppModel: ObservableObject {
         cacheStorageSummaryTask?.cancel()
         libraryThumbnailRefreshTask?.cancel()
         readerContextCleanupTask?.cancel()
-        embeddingProviderAPIKeySaveTask?.cancel()
     }
 
     func postNotice(
@@ -589,13 +552,11 @@ final class AppModel: ObservableObject {
         notices.removeAll { $0.id == id }
     }
 
-    private func embeddingProviderAPIKeyValue() async -> String {
+    private func embeddingProviderAPIKeyValue() -> String {
         if let cachedEmbeddingProviderAPIKey {
             return cachedEmbeddingProviderAPIKey
         }
-        let value = await Task.detached(priority: .utility) {
-            loadEmbeddingProviderAPIKeyFromKeychain()
-        }.value
+        let value = loadEmbeddingProviderAPIKeyFromDefaults()
         cachedEmbeddingProviderAPIKey = value
         return value
     }
@@ -1060,26 +1021,9 @@ final class AppModel: ObservableObject {
             postNotice(kind: .success, title: "Embedding Provider Saved")
             return
         }
-        embeddingProviderAPIKeySaveTask?.cancel()
-        embeddingProviderAPIKeySaveTask = Task { [weak self] in
-            do {
-                try await Task.detached(priority: .utility) {
-                    try saveEmbeddingProviderAPIKeyToKeychain(trimmedAPIKey)
-                }.value
-                guard !Task.isCancelled else {
-                    return
-                }
-                self?.cachedEmbeddingProviderAPIKey = trimmedAPIKey
-                self?.postNotice(kind: .success, title: "Embedding Provider Saved")
-                self?.embeddingProviderAPIKeySaveTask = nil
-            } catch {
-                guard !Task.isCancelled else {
-                    return
-                }
-                self?.errorMessage = String(describing: error)
-                self?.embeddingProviderAPIKeySaveTask = nil
-            }
-        }
+        saveEmbeddingProviderAPIKeyToDefaults(trimmedAPIKey)
+        cachedEmbeddingProviderAPIKey = trimmedAPIKey
+        postNotice(kind: .success, title: "Embedding Provider Saved")
     }
 
     func testEmbeddingProvider(baseURL: String, apiKey: String, model: String) async {
@@ -1094,7 +1038,7 @@ final class AppModel: ObservableObject {
         do {
             let settings = EmbeddingProviderSettings(enabled: true, baseURL: baseURL, model: model)
             let trimmedAPIKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-            let effectiveAPIKey = trimmedAPIKey.isEmpty ? await embeddingProviderAPIKeyValue() : trimmedAPIKey
+            let effectiveAPIKey = trimmedAPIKey.isEmpty ? embeddingProviderAPIKeyValue() : trimmedAPIKey
             let client = try OpenAICompatibleEmbeddingClient(settings: settings, apiKey: effectiveAPIKey)
             let vectors = try await client.embed(texts: ["Paper Codex embedding connection test."])
             let dimensions = vectors.first?.count ?? 0
@@ -4038,7 +3982,7 @@ final class AppModel: ObservableObject {
 
         let embeddingSettings = preferences.embedding
         let model = embeddingSettings.model.trimmingCharacters(in: .whitespacesAndNewlines)
-        let apiKey = await embeddingProviderAPIKeyValue().trimmingCharacters(in: .whitespacesAndNewlines)
+        let apiKey = embeddingProviderAPIKeyValue().trimmingCharacters(in: .whitespacesAndNewlines)
         guard !embeddingSettings.baseURL.isEmpty, !model.isEmpty, !apiKey.isEmpty else {
             errorMessage = "Embedding similarity is enabled, but Base URL, API key, or model is missing."
             return applyLocalDiscoverPreferences(to: feed)
@@ -4846,7 +4790,6 @@ enum AppModelError: Error, CustomStringConvertible {
     case arxivMetadataNotFound(String)
     case categoryNotFound(String)
     case invalidCategoryMove
-    case keychainFailure(OSStatus)
 
     var description: String {
         switch self {
@@ -4874,8 +4817,6 @@ enum AppModelError: Error, CustomStringConvertible {
             "No folder was found for \(categoryID)."
         case .invalidCategoryMove:
             "A category cannot be moved into itself or one of its subcategories."
-        case let .keychainFailure(status):
-            "Keychain operation failed with status \(status)."
         }
     }
 }
