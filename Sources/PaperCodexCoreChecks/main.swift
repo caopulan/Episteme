@@ -525,13 +525,28 @@ func runUILayoutSourceChecks() throws {
         "Root layout should not add an extra app-shell sidebar column"
     )
     try check(
-        appSource.contains("@State private var renderedRoute: AppRoute = .library")
-            && appSource.contains("private let routePresentationDelayNanoseconds")
+        appModelSource.contains("enum AppRoute: Hashable")
+            && appModelSource.contains("final class AppNavigation: ObservableObject")
+            && appModelSource.contains("let navigation = AppNavigation()")
+            && appModelSource.contains("var route: AppRoute {\n        get { navigation.route }\n        set { navigation.route = newValue }\n    }")
+            && appModelSource.contains("final class AppNavigation: ObservableObject {\n    @Published var route: AppRoute = .library")
+            && !appModelSource.contains("final class AppModel: ObservableObject {\n    @Published var route")
+            && appSource.contains(".environmentObject(model.navigation)")
+            && appSource.contains("@EnvironmentObject private var navigation: AppNavigation")
+            && appShellSource.contains("@EnvironmentObject private var navigation: AppNavigation")
+            && appSource.contains("@State private var mountedRoutes: Set<AppRoute> = [.library]")
+            && appSource.contains("@State private var routeCacheWarmupTask: Task<Void, Never>?")
+            && appSource.contains("private let persistentRouteOrder: [AppRoute]")
+            && appSource.contains("persistentRoutedContent")
             && appSource.contains("RouteTransitionPlaceholder")
-            && appSource.contains("scheduleRenderedRouteUpdate")
-            && appSource.contains("Task.sleep(nanoseconds: routePresentationDelayNanoseconds)")
-            && appSource.contains("model.route == renderedRoute"),
-        "route switching should update navigation immediately and defer heavy route content to the next frame"
+            && appSource.contains("RouteVisibilityHost")
+            && appSource.contains("mountedRoutes.contains(navigation.route)")
+            && appSource.contains("scheduleRouteMount")
+            && appSource.contains("scheduleRouteCacheWarmup")
+            && appSource.contains(".allowsHitTesting(route == activeRoute)")
+            && appSource.contains(".accessibilityHidden(route != activeRoute)")
+            && !appModelSource.contains("scheduleReaderContextClear()"),
+        "routes should be persistently mounted, prewarmed, and preserve reader context across navigation"
     )
     try check(
         appShellSource.contains("struct PrimaryNavigationSection")
@@ -1123,11 +1138,11 @@ func runUILayoutSourceChecks() throws {
         "reader back navigation should return to the previous browsing surface instead of always resetting to Library"
     )
     try check(
-        appModelSource.contains("readerContextCleanupTask")
-            && appModelSource.contains("scheduleReaderContextClear()")
-            && appModelSource.contains("await Task.yield()")
-            && !appModelSource.contains("func returnFromReader() {\n        let destination = readerReturnRoute\n        clearReaderContext()"),
-        "reader navigation should switch routes before clearing PDF and chat context so return animations are not blocked by teardown"
+        !appModelSource.contains("readerContextCleanupTask")
+            && !appModelSource.contains("scheduleReaderContextClear()")
+            && !appModelSource.contains("clearReaderContext()")
+            && appModelSource.contains("func returnFromReader() {\n        let destination = readerReturnRoute"),
+        "reader navigation should preserve PDF and chat context so route switches can keep reading position"
     )
     try check(
         readerSource.contains("ReaderSessionPaperBar")

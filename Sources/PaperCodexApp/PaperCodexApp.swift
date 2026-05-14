@@ -1,6 +1,7 @@
 import SwiftUI
 
-private let routePresentationDelayNanoseconds: UInt64 = 16_000_000
+private let routeMountDelayNanoseconds: UInt64 = 16_000_000
+private let persistentRouteOrder: [AppRoute] = [.library, .discover, .settings, .reader]
 
 @main
 struct PaperCodexApp: App {
@@ -10,23 +11,26 @@ struct PaperCodexApp: App {
         WindowGroup {
             RootView()
                 .environmentObject(model)
+                .environmentObject(model.navigation)
                 .frame(minWidth: 1100, minHeight: 720)
                 .background(WindowChromeConfigurator())
         }
         .windowStyle(.hiddenTitleBar)
         .commands {
-            PaperCodexCommands(model: model)
+            PaperCodexCommands(model: model, navigation: model.navigation)
         }
     }
 }
 
 struct RootView: View {
     @EnvironmentObject private var model: AppModel
-    @State private var renderedRoute: AppRoute = .library
-    @State private var routePresentationTask: Task<Void, Never>?
+    @EnvironmentObject private var navigation: AppNavigation
+    @State private var mountedRoutes: Set<AppRoute> = [.library]
+    @State private var routeMountTask: Task<Void, Never>?
+    @State private var routeCacheWarmupTask: Task<Void, Never>?
 
     var body: some View {
-        routedContent
+        persistentRoutedContent
         .environment(\.locale, Locale(identifier: model.globalLanguageMode.appLocaleIdentifier))
         .paperCodexTypographyScale()
         .overlay(alignment: .topTrailing) {
@@ -49,24 +53,36 @@ struct RootView: View {
             model.errorMessage = nil
         }
         .onAppear {
-            renderedRoute = model.route
+            mountRoute(navigation.route)
+            scheduleRouteCacheWarmup()
         }
-        .onChange(of: model.route) { _, newRoute in
-            scheduleRenderedRouteUpdate(to: newRoute)
+        .onChange(of: navigation.route) { _, newRoute in
+            scheduleRouteMount(to: newRoute)
         }
         .onDisappear {
-            routePresentationTask?.cancel()
-            routePresentationTask = nil
+            routeMountTask?.cancel()
+            routeMountTask = nil
+            routeCacheWarmupTask?.cancel()
+            routeCacheWarmupTask = nil
         }
     }
 
     @ViewBuilder
-    private var routedContent: some View {
-        if model.route == renderedRoute {
-            routedContent(for: renderedRoute)
-        } else {
-            RouteTransitionPlaceholder(route: model.route)
+    private var persistentRoutedContent: some View {
+        ZStack {
+            ForEach(persistentRouteOrder, id: \.self) { route in
+                if mountedRoutes.contains(route) {
+                    RouteVisibilityHost(route: route, activeRoute: navigation.route) {
+                        routedContent(for: route)
+                    }
+                }
+            }
+
+            if !mountedRoutes.contains(navigation.route) {
+                RouteTransitionPlaceholder(route: navigation.route)
+            }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     @ViewBuilder
@@ -83,21 +99,65 @@ struct RootView: View {
         }
     }
 
-    private func scheduleRenderedRouteUpdate(to route: AppRoute) {
-        routePresentationTask?.cancel()
-        routePresentationTask = Task { @MainActor in
+    private func scheduleRouteMount(to route: AppRoute) {
+        guard !mountedRoutes.contains(route) else {
+            return
+        }
+        routeMountTask?.cancel()
+        routeMountTask = Task { @MainActor in
             await Task.yield()
-            try? await Task.sleep(nanoseconds: routePresentationDelayNanoseconds)
-            guard !Task.isCancelled, model.route == route else {
+            try? await Task.sleep(nanoseconds: routeMountDelayNanoseconds)
+            guard !Task.isCancelled else {
                 return
             }
-            var transaction = Transaction()
-            transaction.animation = nil
-            withTransaction(transaction) {
-                renderedRoute = route
-            }
-            routePresentationTask = nil
+            mountRoute(route)
+            routeMountTask = nil
         }
+    }
+
+    private func scheduleRouteCacheWarmup() {
+        routeCacheWarmupTask?.cancel()
+        routeCacheWarmupTask = Task { @MainActor in
+            await Task.yield()
+            for route in persistentRouteOrder {
+                guard !Task.isCancelled else {
+                    return
+                }
+                if !mountedRoutes.contains(route) {
+                    try? await Task.sleep(nanoseconds: routeMountDelayNanoseconds)
+                    guard !Task.isCancelled else {
+                        return
+                    }
+                    mountRoute(route)
+                }
+            }
+            routeCacheWarmupTask = nil
+        }
+    }
+
+    private func mountRoute(_ route: AppRoute) {
+        guard !mountedRoutes.contains(route) else {
+            return
+        }
+        var transaction = Transaction()
+        transaction.animation = nil
+        withTransaction(transaction) {
+            _ = mountedRoutes.insert(route)
+        }
+    }
+}
+
+private struct RouteVisibilityHost<Content: View>: View {
+    var route: AppRoute
+    var activeRoute: AppRoute
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        content()
+            .opacity(route == activeRoute ? 1 : 0)
+            .allowsHitTesting(route == activeRoute)
+            .accessibilityHidden(route != activeRoute)
+            .zIndex(route == activeRoute ? 1 : 0)
     }
 }
 
@@ -160,6 +220,7 @@ private struct RouteTransitionPlaceholder: View {
 
 struct PaperCodexCommands: Commands {
     @ObservedObject var model: AppModel
+    @ObservedObject var navigation: AppNavigation
 
     var body: some Commands {
         CommandMenu("Paper Codex") {
@@ -187,7 +248,7 @@ struct PaperCodexCommands: Commands {
                 model.newSessionButtonTapped()
             }
             .keyboardShortcut("n", modifiers: [.command])
-            .disabled(model.selectedPaper == nil || model.route != .reader)
+            .disabled(model.selectedPaper == nil || navigation.route != .reader)
 
             Button("Stop Codex") {
                 model.cancelActiveCodexRun()

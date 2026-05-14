@@ -2,13 +2,14 @@ import SwiftUI
 
 struct PrimaryNavigationSection: View {
     @EnvironmentObject private var model: AppModel
+    @EnvironmentObject private var navigation: AppNavigation
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             SidebarRowButton(
                 title: "Library",
-                systemImage: model.route == .library && model.selectedLibrarySurface == .papers ? "books.vertical.fill" : "books.vertical",
-                selected: model.route == .library && model.selectedLibrarySurface == .papers
+                systemImage: navigation.route == .library && model.selectedLibrarySurface == .papers ? "books.vertical.fill" : "books.vertical",
+                selected: navigation.route == .library && model.selectedLibrarySurface == .papers
             ) {
                 model.goToLibrary()
             }
@@ -16,7 +17,7 @@ struct PrimaryNavigationSection: View {
             SidebarRowButton(
                 title: "Discover",
                 systemImage: "sparkle.magnifyingglass",
-                selected: model.route == .discover
+                selected: navigation.route == .discover
             ) {
                 model.showDiscover()
             }
@@ -24,7 +25,7 @@ struct PrimaryNavigationSection: View {
             SidebarRowButton(
                 title: "Settings",
                 systemImage: "gearshape",
-                selected: model.route == .settings
+                selected: navigation.route == .settings
             ) {
                 model.showSettings()
             }
@@ -32,7 +33,7 @@ struct PrimaryNavigationSection: View {
             SidebarRowButton(
                 title: "Recent Conversations",
                 systemImage: "clock",
-                selected: model.route == .library && model.selectedLibrarySurface == .recentConversations
+                selected: navigation.route == .library && model.selectedLibrarySurface == .recentConversations
             ) {
                 model.showRecentConversations()
             }

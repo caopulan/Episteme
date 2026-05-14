@@ -3,11 +3,16 @@ import Foundation
 import PaperCodexCore
 import SwiftUI
 
-enum AppRoute {
+enum AppRoute: Hashable {
     case library
     case discover
     case settings
     case reader
+}
+
+@MainActor
+final class AppNavigation: ObservableObject {
+    @Published var route: AppRoute = .library
 }
 
 enum LibrarySurface {
@@ -279,7 +284,12 @@ private func latestCompleteArxivSubmissionISODate() -> String {
 
 @MainActor
 final class AppModel: ObservableObject {
-    @Published var route: AppRoute = .library
+    let navigation = AppNavigation()
+    var route: AppRoute {
+        get { navigation.route }
+        set { navigation.route = newValue }
+    }
+
     @Published var papers: [Paper] = []
     @Published var categories: [PaperCodexCore.Category] = []
     @Published var tags: [PaperTag] = []
@@ -381,7 +391,6 @@ final class AppModel: ObservableObject {
     private var discoverCacheWarmupTask: Task<Void, Never>?
     private var cacheStorageSummaryTask: Task<Void, Never>?
     private var libraryThumbnailRefreshTask: Task<Void, Never>?
-    private var readerContextCleanupTask: Task<Void, Never>?
     private var routeDeferredWorkTask: Task<Void, Never>?
     private var cachedEmbeddingProviderAPIKey: String?
     private var activeCodexRunHandlesBySessionID: [String: CodexRunHandle] = [:]
@@ -523,7 +532,6 @@ final class AppModel: ObservableObject {
         discoverCacheWarmupTask?.cancel()
         cacheStorageSummaryTask?.cancel()
         libraryThumbnailRefreshTask?.cancel()
-        readerContextCleanupTask?.cancel()
         routeDeferredWorkTask?.cancel()
     }
 
@@ -844,7 +852,6 @@ final class AppModel: ObservableObject {
 
     func showDiscover() {
         route = .discover
-        scheduleReaderContextClear()
         scheduleDiscoverCacheWarmup()
     }
 
@@ -932,7 +939,6 @@ final class AppModel: ObservableObject {
     func showRecentConversations() {
         selectedLibrarySurface = .recentConversations
         route = .library
-        scheduleReaderContextClear()
         scheduleRecentSessionsRefresh()
     }
 
@@ -952,7 +958,6 @@ final class AppModel: ObservableObject {
 
     func showSettings() {
         route = .settings
-        scheduleReaderContextClear()
     }
 
     func setLocalArxivCategories(_ categories: [String]) {
@@ -3266,7 +3271,6 @@ final class AppModel: ObservableObject {
     func goToLibrary() {
         selectedLibrarySurface = .papers
         route = .library
-        scheduleReaderContextClear()
     }
 
     func returnFromReader() {
@@ -3277,19 +3281,6 @@ final class AppModel: ObservableObject {
             startDiscoverCacheWarmupIfNeeded()
         case .library, .settings, .reader:
             route = .library
-        }
-        scheduleReaderContextClear()
-    }
-
-    private func scheduleReaderContextClear() {
-        readerContextCleanupTask?.cancel()
-        readerContextCleanupTask = Task { [weak self] in
-            await Task.yield()
-            guard let self, !Task.isCancelled, self.route != .reader else {
-                return
-            }
-            self.clearReaderContext()
-            self.readerContextCleanupTask = nil
         }
     }
 
@@ -3318,19 +3309,6 @@ final class AppModel: ObservableObject {
             self.refreshRecentSessions()
             self.routeDeferredWorkTask = nil
         }
-    }
-
-    private func clearReaderContext() {
-        selectedPaper = nil
-        selectedSession = nil
-        sessions = []
-        messages = []
-        currentSelection = nil
-        pdfJumpTarget = nil
-        readerPosition = nil
-        citationReturnPoint = nil
-        pdfDocumentStatus = nil
-        clearActiveCodexRunIfIdle()
     }
 
     private func clearActiveCodexRunIfIdle() {
