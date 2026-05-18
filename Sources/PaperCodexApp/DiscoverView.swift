@@ -134,7 +134,8 @@ struct DiscoverView: View {
                             await model.addArxivPaperToLibrary(
                                 paper,
                                 selectedCategoryIDs: selection.categoryIDs,
-                                newCategoryNames: selection.newCategoryNames
+                                newCategoryNames: selection.newCategoryNames,
+                                newCategories: selection.newCategories
                             )
                         }
                     },

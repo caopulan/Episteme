@@ -30,6 +30,7 @@ struct LibraryView: View {
     @State private var selectedRecentSessionID: String?
     @AppStorage("PaperCodexLibrarySortOption") private var librarySortRawValue = LibrarySortOption.addedNewest.rawValue
     @AppStorage("PaperCodexLibrarySortAscending") private var librarySortAscending = false
+    @AppStorage("PaperCodexLibraryIncludeSubfolders") private var libraryIncludeSubfolders = true
 
     private var searchText: String {
         get { model.librarySearchText }
@@ -62,8 +63,9 @@ struct LibraryView: View {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         var result = model.papers
         if let selectedCategoryID {
+            let categoryIDs = model.libraryDerivedState.categoryIDsForFilter(selectedCategoryID, includeDescendants: libraryIncludeSubfolders)
             result = result.filter { paper in
-                model.paperCategoryIDsByID[paper.id, default: []].contains(selectedCategoryID)
+                !Set(model.paperCategoryIDsByID[paper.id, default: []]).isDisjoint(with: categoryIDs)
             }
         }
         if let selectedTagID {
@@ -106,15 +108,23 @@ struct LibraryView: View {
     }
 
     private var selectedCategoryPaperIDsInOrder: [String] {
-        guard let selectedCategoryID else {
+        guard selectedCategoryID != nil else {
             return []
         }
         let option = LibrarySortOption(rawValue: librarySortRawValue) ?? .addedNewest
+        let categoryIDs = categoryIDsForSelectedCategoryFilter
         let categoryPapers = model.papers.filter { paper in
             !paper.isArxivImportPlaceholder
-                && model.paperCategoryIDsByID[paper.id, default: []].contains(selectedCategoryID)
+                && !Set(model.paperCategoryIDsByID[paper.id, default: []]).isDisjoint(with: categoryIDs)
         }
         return option.sorted(categoryPapers, ascending: librarySortAscending).map(\.id)
+    }
+
+    private var categoryIDsForSelectedCategoryFilter: Set<String> {
+        guard let selectedCategoryID else {
+            return []
+        }
+        return model.libraryDerivedState.categoryIDsForFilter(selectedCategoryID, includeDescendants: libraryIncludeSubfolders)
     }
 
     private var selectedRecentSession: PaperSession? {
@@ -607,6 +617,7 @@ struct LibraryView: View {
                 .font(.paperCodexSystem(size: 12.5))
                 .foregroundStyle(.tertiary)
             Spacer()
+            categoryScopeToggle
             Button {
                 model.openPapersForReading(selectedCategoryPaperIDsInOrder)
             } label: {
@@ -632,6 +643,17 @@ struct LibraryView: View {
             RoundedRectangle(cornerRadius: 8)
                 .stroke(Color.primary.opacity(0.08), lineWidth: 1)
         )
+    }
+
+    private var categoryScopeToggle: some View {
+        Button {
+            libraryIncludeSubfolders.toggle()
+        } label: {
+            Label(libraryIncludeSubfolders ? "Subfolders" : "Current", systemImage: libraryIncludeSubfolders ? "folder.badge.gearshape" : "folder")
+        }
+        .buttonStyle(.bordered)
+        .help(libraryIncludeSubfolders ? "Showing current folder and subfolders" : "Showing current folder only")
+        .accessibilityLabel(libraryIncludeSubfolders ? "Show Current Folder Only" : "Show Current Folder And Subfolders")
     }
 
     private var sortDirectionButton: some View {

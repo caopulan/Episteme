@@ -333,6 +333,9 @@ func runLibraryDerivedStateChecks() throws {
 
     try check(state.categoryPaperCountsByID == ["cat-methods": 2, "cat-vae": 1], "library derived state should precompute category counts")
     try check(state.tagPaperCountsByID == ["tag-autoencoder": 1, "tag-diffusion": 2], "library derived state should precompute tag counts")
+    try check(state.descendantCategoryIDsByID["cat-methods"] == ["cat-vae"], "library derived state should precompute category descendants")
+    try check(state.categoryIDsForFilter("cat-methods", includeDescendants: false) == ["cat-methods"], "library current-folder filter should only include the selected category")
+    try check(state.categoryIDsForFilter("cat-methods", includeDescendants: true) == ["cat-methods", "cat-vae"], "library subtree filter should include the selected category and descendants")
     try check(state.matchesSearch(paperID: "paper-a", query: "vae autoencoder alice 2026"), "library search index should include title, authors, year, categories, tags, and URL")
     try check(!state.matchesSearch(paperID: "paper-b", query: "alice"), "library search index should stay scoped to each paper")
     try check(state.matchesSearch(paperID: "missing", query: "anything"), "missing papers should not be filtered out by an empty derived search index")
@@ -630,10 +633,24 @@ func runUILayoutSourceChecks() throws {
         "saving a Discover paper should assign library categories instead of tags"
     )
     try check(
+        saveToLibrarySource.contains("SaveToLibraryNewCategory")
+            && saveToLibrarySource.contains("SaveToLibraryFolderRow")
+            && saveToLibrarySource.contains("collapsedCategoryIDs")
+            && saveToLibrarySource.contains("activeNewCategoryParentID")
+            && saveToLibrarySource.contains("newCategories: selectedNewCategoriesInOrder"),
+        "save-to-library should use an expandable folder tree with selectable folders and in-tree folder creation"
+    )
+    try check(
         appModelSource.contains("selectedCategoryIDs:")
             && appModelSource.contains("assignCategories(")
             && !appModelSource.contains("addArxivPaperToLibrary(_ arxivPaper: ArxivFeedPaper, selectedTagNames"),
         "arXiv save paths should assign selected categories instead of selected tags"
+    )
+    try check(
+        appModelSource.contains("newCategories: [SaveToLibraryNewCategory]")
+            && appModelSource.contains("ensureCategory(named name: String, parentID: String?, repository: PaperRepository)")
+            && appModelSource.contains("createdCategoryIDsByRequestID"),
+        "arXiv and cached-paper save paths should create new folders under their selected parent folders"
     )
     try check(
         settingsViewSource.contains("Similarity categories")
@@ -1051,6 +1068,13 @@ func runUILayoutSourceChecks() throws {
     try check(
         appModelSource.contains("librarySelectedCategoryID"),
         "AppModel should keep library category selection outside LibraryView local state"
+    )
+    try check(
+        librarySource.contains("libraryIncludeSubfolders")
+            && librarySource.contains("categoryScopeToggle")
+            && librarySource.contains("categoryIDsForSelectedCategoryFilter")
+            && librarySource.contains("categoryIDsForFilter(selectedCategoryID, includeDescendants: libraryIncludeSubfolders)"),
+        "library folder view should toggle between current-folder papers and current-plus-subfolders papers"
     )
     try check(
         appModelSource.contains("readerReturnRoute"),

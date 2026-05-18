@@ -4,11 +4,13 @@ public struct PaperLibraryDerivedState: Equatable, Sendable {
     public static let empty = PaperLibraryDerivedState(
         categoryPaperCountsByID: [:],
         tagPaperCountsByID: [:],
+        descendantCategoryIDsByID: [:],
         searchTextByPaperID: [:]
     )
 
     public var categoryPaperCountsByID: [String: Int]
     public var tagPaperCountsByID: [String: Int]
+    public var descendantCategoryIDsByID: [String: Set<String>]
     public var searchTextByPaperID: [String: String]
 
     public static func build(
@@ -18,6 +20,7 @@ public struct PaperLibraryDerivedState: Equatable, Sendable {
         tagsByPaperID: [String: [PaperTag]]
     ) -> PaperLibraryDerivedState {
         let categoryNamesByID = Dictionary(uniqueKeysWithValues: categories.map { ($0.id, $0.name) })
+        let descendantCategoryIDsByID = makeDescendantCategoryIDsByID(categories: categories)
         var categoryCounts: [String: Int] = [:]
         var tagCounts: [String: Int] = [:]
         var searchText: [String: String] = [:]
@@ -51,8 +54,16 @@ public struct PaperLibraryDerivedState: Equatable, Sendable {
         return PaperLibraryDerivedState(
             categoryPaperCountsByID: categoryCounts,
             tagPaperCountsByID: tagCounts,
+            descendantCategoryIDsByID: descendantCategoryIDsByID,
             searchTextByPaperID: searchText
         )
+    }
+
+    public func categoryIDsForFilter(_ categoryID: String, includeDescendants: Bool) -> Set<String> {
+        guard includeDescendants else {
+            return [categoryID]
+        }
+        return Set([categoryID]).union(descendantCategoryIDsByID[categoryID, default: []])
     }
 
     public func matchesSearch(paperID: String, query: String) -> Bool {
@@ -68,5 +79,27 @@ public struct PaperLibraryDerivedState: Equatable, Sendable {
             return true
         }
         return terms.allSatisfy { haystack.contains($0) }
+    }
+
+    private static func makeDescendantCategoryIDsByID(categories: [Category]) -> [String: Set<String>] {
+        let childrenByParentID = Dictionary(grouping: categories, by: \.parentID)
+        var descendantsByID: [String: Set<String>] = [:]
+
+        func collectDescendants(of categoryID: String, visited: Set<String>) -> Set<String> {
+            guard !visited.contains(categoryID) else {
+                return []
+            }
+            let nextVisited = visited.union([categoryID])
+            let children = childrenByParentID[categoryID, default: []]
+            return children.reduce(into: Set<String>()) { descendants, child in
+                descendants.insert(child.id)
+                descendants.formUnion(collectDescendants(of: child.id, visited: nextVisited))
+            }
+        }
+
+        for category in categories {
+            descendantsByID[category.id] = collectDescendants(of: category.id, visited: [])
+        }
+        return descendantsByID
     }
 }

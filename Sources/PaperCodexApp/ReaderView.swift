@@ -39,7 +39,8 @@ struct ReaderView: View {
                         model.saveCachedPaperToLibrary(
                             paper,
                             selectedCategoryIDs: selection.categoryIDs,
-                            newCategoryNames: selection.newCategoryNames
+                            newCategoryNames: selection.newCategoryNames,
+                            newCategories: selection.newCategories
                         )
                     },
                     onCancel: {

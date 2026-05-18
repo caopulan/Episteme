@@ -1,12 +1,22 @@
+import Foundation
 import PaperCodexCore
 import SwiftUI
+
+struct SaveToLibraryNewCategory: Equatable, Identifiable, Sendable {
+    var id: String
+    var parentID: String?
+    var name: String
+}
 
 struct SaveToLibraryCategorySelection: Equatable {
     var categoryIDs: [String]
     var newCategoryNames: [String]
+    var newCategories: [SaveToLibraryNewCategory]
 
-    static let empty = SaveToLibraryCategorySelection(categoryIDs: [], newCategoryNames: [])
+    static let empty = SaveToLibraryCategorySelection(categoryIDs: [], newCategoryNames: [], newCategories: [])
 }
+
+private let saveToLibraryRootDraftParentID = "__papercodex-save-root__"
 
 struct SaveToLibrarySheet: View {
     var paperTitle: String
@@ -17,6 +27,10 @@ struct SaveToLibrarySheet: View {
     var onCancel: () -> Void
 
     @State private var selectedCategoryIDs: Set<String>
+    @State private var selectedNewCategoryIDs: Set<String> = []
+    @State private var pendingNewCategories: [SaveToLibraryNewCategory] = []
+    @State private var collapsedCategoryIDs: Set<String> = []
+    @State private var activeNewCategoryParentID: String?
     @State private var newCategoryName = ""
 
     init(
@@ -39,14 +53,13 @@ struct SaveToLibrarySheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             header
-            selectedCategories
-            categoryPicker
-            newCategoryRow
+            selectedFolders
+            folderPicker
             Divider()
             actionRow
         }
         .padding(22)
-        .frame(width: 520)
+        .frame(width: 560)
     }
 
     private var header: some View {
@@ -73,20 +86,20 @@ struct SaveToLibrarySheet: View {
     }
 
     @ViewBuilder
-    private var selectedCategories: some View {
-        let categories = selectedLibraryCategories
-        if !categories.isEmpty {
+    private var selectedFolders: some View {
+        let folders = selectedFolderSummaries
+        if !folders.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
-                Text("Selected Categories")
+                Text("Selected Folders")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 126), spacing: 6)], alignment: .leading, spacing: 6) {
-                    ForEach(categories) { category in
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 142), spacing: 6)], alignment: .leading, spacing: 6) {
+                    ForEach(folders) { folder in
                         Button {
-                            selectedCategoryIDs.remove(category.id)
+                            toggleSelection(folder.id)
                         } label: {
                             HStack(spacing: 5) {
-                                Text(categoryDisplayName(category))
+                                Text(folder.path)
                                     .lineLimit(1)
                                 Image(systemName: "xmark")
                                     .font(.paperCodexSystem(size: 9, weight: .bold))
@@ -105,60 +118,99 @@ struct SaveToLibrarySheet: View {
         }
     }
 
-    private var categoryPicker: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 8) {
-                if libraryCategories.isEmpty {
-                    Text("No categories yet")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .padding(12)
-                } else {
-                    ForEach(libraryCategories) { category in
-                        Button {
-                            toggle(category.id)
-                        } label: {
-                            HStack(spacing: 8) {
-                                Image(systemName: selectedCategoryIDs.contains(category.id) ? "checkmark.circle.fill" : "circle")
-                                    .foregroundStyle(selectedCategoryIDs.contains(category.id) ? Color.accentColor : Color.secondary)
-                                Image(systemName: "folder")
-                                    .foregroundStyle(.secondary)
-                                Text(categoryDisplayName(category))
-                                    .lineLimit(1)
-                                Spacer(minLength: 0)
+    private var folderPicker: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label("Folders", systemImage: "folder")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button {
+                    beginNewCategory(parentID: nil)
+                } label: {
+                    Label("Add Folder", systemImage: "folder.badge.plus")
+                }
+                .buttonStyle(.borderless)
+            }
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 6) {
+                    if activeNewCategoryParentID == saveToLibraryRootDraftParentID {
+                        newCategoryInlineRow(parentID: nil, depth: 0)
+                    }
+
+                    if visibleFolderItems.isEmpty && activeNewCategoryParentID == nil {
+                        Text("No folders yet")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .padding(12)
+                    } else {
+                        ForEach(visibleFolderItems) { item in
+                            SaveToLibraryFolderRow(
+                                item: item,
+                                isSelected: isSelected(item.node.id),
+                                isExpanded: !collapsedCategoryIDs.contains(item.node.id),
+                                hasChildren: hasChildren(item.node.id),
+                                onToggleExpanded: {
+                                    toggleCollapsed(item.node.id)
+                                },
+                                onToggleSelected: {
+                                    toggleSelection(item.node.id)
+                                },
+                                onCreateChild: {
+                                    beginNewCategory(parentID: item.node.id)
+                                },
+                                onRemoveNewCategory: item.node.isNew ? {
+                                    removeNewCategory(item.node.id)
+                                } : nil
+                            )
+                            if activeNewCategoryParentID == item.node.id {
+                                newCategoryInlineRow(parentID: item.node.id, depth: item.depth + 1)
                             }
-                            .font(.paperCodexSystem(size: 12, weight: .medium))
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 7)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(selectedCategoryIDs.contains(category.id) ? Color.accentColor.opacity(0.10) : Color(nsColor: .controlBackgroundColor))
-                            .clipShape(RoundedRectangle(cornerRadius: 6))
                         }
-                        .buttonStyle(.plain)
                     }
                 }
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(10)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxHeight: 260)
+            .background(Color(nsColor: .textBackgroundColor))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color.black.opacity(0.08), lineWidth: 1)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 8))
         }
-        .frame(maxHeight: 230)
-        .background(Color(nsColor: .textBackgroundColor))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(Color.black.opacity(0.08), lineWidth: 1)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
-    private var newCategoryRow: some View {
+    private func newCategoryInlineRow(parentID: String?, depth: Int) -> some View {
         HStack(spacing: 8) {
-            TextField("New category", text: $newCategoryName)
+            SaveToLibraryDepthGuide(depth: depth)
+            Image(systemName: "folder.badge.plus")
+                .foregroundStyle(Color.accentColor)
+                .frame(width: 18)
+            TextField("New folder", text: $newCategoryName)
                 .textFieldStyle(.roundedBorder)
-            Image(systemName: "plus")
-                .foregroundStyle(trimmedNewCategoryName.isEmpty ? Color.secondary : Color.accentColor)
-                .frame(width: 18, height: 18)
-                .help("Create category on save")
+            Button {
+                commitNewCategory(parentID: parentID)
+            } label: {
+                Image(systemName: "checkmark")
+            }
+            .buttonStyle(.borderless)
+            .disabled(trimmedNewCategoryName.isEmpty)
+            .help("Add Folder")
+            Button {
+                cancelNewCategory()
+            } label: {
+                Image(systemName: "xmark")
+            }
+            .buttonStyle(.borderless)
+            .help("Cancel")
         }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(Color.accentColor.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 7))
     }
 
     private var actionRow: some View {
@@ -169,48 +221,331 @@ struct SaveToLibrarySheet: View {
                 onSave(
                     SaveToLibraryCategorySelection(
                         categoryIDs: selectedCategoryIDsInOrder,
-                        newCategoryNames: trimmedNewCategoryName.isEmpty ? [] : [trimmedNewCategoryName]
+                        newCategoryNames: [],
+                        newCategories: selectedNewCategoriesInOrder
                     )
                 )
             } label: {
                 Label("Save", systemImage: "checkmark")
             }
             .buttonStyle(.borderedProminent)
-            .disabled(selectedCategoryIDs.isEmpty && trimmedNewCategoryName.isEmpty)
+            .disabled(selectedCategoryIDs.isEmpty && selectedNewCategoryIDs.isEmpty)
         }
     }
 
-    private var selectedLibraryCategories: [PaperCodexCore.Category] {
-        libraryCategories.filter { selectedCategoryIDs.contains($0.id) }
+    private var visibleFolderItems: [SaveToLibraryFolderItem] {
+        folderItems(parentID: nil, respectingCollapse: true)
+    }
+
+    private var allFolderItems: [SaveToLibraryFolderItem] {
+        folderItems(parentID: nil, respectingCollapse: false)
+    }
+
+    private var allFolderNodes: [SaveToLibraryFolderNode] {
+        let existing = libraryCategories.map { category in
+            SaveToLibraryFolderNode(
+                id: category.id,
+                parentID: category.parentID,
+                name: category.name,
+                sortOrder: category.sortOrder,
+                isNew: false
+            )
+        }
+        let pending = pendingNewCategories.enumerated().map { index, category in
+            SaveToLibraryFolderNode(
+                id: category.id,
+                parentID: category.parentID,
+                name: category.name,
+                sortOrder: Int.max / 2 + index,
+                isNew: true
+            )
+        }
+        return existing + pending
+    }
+
+    private var selectedFolderSummaries: [SaveToLibrarySelectedFolderSummary] {
+        allFolderItems.compactMap { item in
+            guard isSelected(item.node.id) else {
+                return nil
+            }
+            return SaveToLibrarySelectedFolderSummary(id: item.node.id, path: folderDisplayPath(for: item.node))
+        }
     }
 
     private var selectedCategoryIDsInOrder: [String] {
-        libraryCategories.map(\.id).filter { selectedCategoryIDs.contains($0) }
+        allFolderItems.compactMap { item in
+            guard !item.node.isNew, selectedCategoryIDs.contains(item.node.id) else {
+                return nil
+            }
+            return item.node.id
+        }
+    }
+
+    private var selectedNewCategoriesInOrder: [SaveToLibraryNewCategory] {
+        let selectedIDs = selectedNewCategoryIDs.union(newCategoryAncestorIDs(for: selectedNewCategoryIDs))
+        return allFolderItems.compactMap { item in
+            guard item.node.isNew,
+                  selectedIDs.contains(item.node.id),
+                  let category = pendingNewCategories.first(where: { $0.id == item.node.id }) else {
+                return nil
+            }
+            return category
+        }
     }
 
     private var trimmedNewCategoryName: String {
         newCategoryName.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private func toggle(_ categoryID: String) {
-        if selectedCategoryIDs.contains(categoryID) {
-            selectedCategoryIDs.remove(categoryID)
-        } else {
-            selectedCategoryIDs.insert(categoryID)
+    private func folderItems(parentID: String?, depth: Int = 0, respectingCollapse: Bool, visited: Set<String> = []) -> [SaveToLibraryFolderItem] {
+        childNodes(parentID: parentID).flatMap { node -> [SaveToLibraryFolderItem] in
+            guard !visited.contains(node.id) else {
+                return []
+            }
+            let item = SaveToLibraryFolderItem(node: node, depth: depth)
+            if respectingCollapse && collapsedCategoryIDs.contains(node.id) {
+                return [item]
+            }
+            return [item] + folderItems(
+                parentID: node.id,
+                depth: depth + 1,
+                respectingCollapse: respectingCollapse,
+                visited: visited.union([node.id])
+            )
         }
     }
 
-    private func categoryDisplayName(_ category: PaperCodexCore.Category) -> String {
-        var names = [category.name]
-        var visited = Set([category.id])
-        var parentID = category.parentID
+    private func childNodes(parentID: String?) -> [SaveToLibraryFolderNode] {
+        allFolderNodes
+            .filter { $0.parentID == parentID }
+            .sorted { left, right in
+                if left.sortOrder == right.sortOrder {
+                    if left.isNew != right.isNew {
+                        return !left.isNew
+                    }
+                    return left.name.localizedCaseInsensitiveCompare(right.name) == .orderedAscending
+                }
+                return left.sortOrder < right.sortOrder
+            }
+    }
+
+    private func hasChildren(_ categoryID: String) -> Bool {
+        !childNodes(parentID: categoryID).isEmpty
+    }
+
+    private func isSelected(_ categoryID: String) -> Bool {
+        if pendingNewCategories.contains(where: { $0.id == categoryID }) {
+            return selectedNewCategoryIDs.contains(categoryID)
+        }
+        return selectedCategoryIDs.contains(categoryID)
+    }
+
+    private func toggleSelection(_ categoryID: String) {
+        if pendingNewCategories.contains(where: { $0.id == categoryID }) {
+            toggle(categoryID, in: &selectedNewCategoryIDs)
+        } else {
+            toggle(categoryID, in: &selectedCategoryIDs)
+        }
+    }
+
+    private func toggle(_ value: String, in set: inout Set<String>) {
+        if set.contains(value) {
+            set.remove(value)
+        } else {
+            set.insert(value)
+        }
+    }
+
+    private func toggleCollapsed(_ categoryID: String) {
+        toggle(categoryID, in: &collapsedCategoryIDs)
+    }
+
+    private func beginNewCategory(parentID: String?) {
+        activeNewCategoryParentID = parentID ?? saveToLibraryRootDraftParentID
+        newCategoryName = ""
+        if let parentID {
+            collapsedCategoryIDs.remove(parentID)
+        }
+    }
+
+    private func commitNewCategory(parentID: String?) {
+        let trimmed = trimmedNewCategoryName
+        guard !trimmed.isEmpty else {
+            return
+        }
+        let category = SaveToLibraryNewCategory(
+            id: "new-category-\(UUID().uuidString)",
+            parentID: parentID,
+            name: trimmed
+        )
+        pendingNewCategories.append(category)
+        selectedNewCategoryIDs.insert(category.id)
+        if let parentID {
+            collapsedCategoryIDs.remove(parentID)
+        }
+        cancelNewCategory()
+    }
+
+    private func cancelNewCategory() {
+        activeNewCategoryParentID = nil
+        newCategoryName = ""
+    }
+
+    private func removeNewCategory(_ categoryID: String) {
+        let idsToRemove = Set([categoryID]).union(descendantIDs(of: categoryID))
+        pendingNewCategories.removeAll { idsToRemove.contains($0.id) }
+        selectedNewCategoryIDs.subtract(idsToRemove)
+        collapsedCategoryIDs.subtract(idsToRemove)
+        if activeNewCategoryParentID.map({ idsToRemove.contains($0) }) == true {
+            cancelNewCategory()
+        }
+    }
+
+    private func descendantIDs(of categoryID: String) -> Set<String> {
+        var result: Set<String> = []
+        var didChange = true
+        while didChange {
+            didChange = false
+            for node in allFolderNodes where node.parentID.map({ $0 == categoryID || result.contains($0) }) == true && !result.contains(node.id) {
+                result.insert(node.id)
+                didChange = true
+            }
+        }
+        return result
+    }
+
+    private func newCategoryAncestorIDs(for categoryIDs: Set<String>) -> Set<String> {
+        var result: Set<String> = []
+        var queue = Array(categoryIDs)
+        while let categoryID = queue.popLast(),
+              let parentID = pendingNewCategories.first(where: { $0.id == categoryID })?.parentID {
+            if pendingNewCategories.contains(where: { $0.id == parentID }),
+               !result.contains(parentID) {
+                result.insert(parentID)
+                queue.append(parentID)
+            }
+        }
+        return result
+    }
+
+    private func folderDisplayPath(for node: SaveToLibraryFolderNode) -> String {
+        var names = [node.name]
+        var visited = Set([node.id])
+        var parentID = node.parentID
         while let id = parentID,
               !visited.contains(id),
-              let parent = libraryCategories.first(where: { $0.id == id }) {
+              let parent = allFolderNodes.first(where: { $0.id == id }) {
             names.append(parent.name)
             visited.insert(parent.id)
             parentID = parent.parentID
         }
         return names.reversed().joined(separator: " / ")
+    }
+}
+
+private struct SaveToLibraryFolderNode: Equatable, Identifiable {
+    var id: String
+    var parentID: String?
+    var name: String
+    var sortOrder: Int
+    var isNew: Bool
+}
+
+private struct SaveToLibraryFolderItem: Identifiable {
+    var node: SaveToLibraryFolderNode
+    var depth: Int
+
+    var id: String { node.id }
+}
+
+private struct SaveToLibrarySelectedFolderSummary: Identifiable {
+    var id: String
+    var path: String
+}
+
+private struct SaveToLibraryFolderRow: View {
+    var item: SaveToLibraryFolderItem
+    var isSelected: Bool
+    var isExpanded: Bool
+    var hasChildren: Bool
+    var onToggleExpanded: () -> Void
+    var onToggleSelected: () -> Void
+    var onCreateChild: () -> Void
+    var onRemoveNewCategory: (() -> Void)?
+
+    var body: some View {
+        HStack(spacing: 4) {
+            SaveToLibraryDepthGuide(depth: item.depth)
+            if hasChildren {
+                Button(action: onToggleExpanded) {
+                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.paperCodexSystem(size: 9, weight: .bold))
+                        .frame(width: 16, height: 24)
+                }
+                .buttonStyle(.plain)
+                .help(isExpanded ? "Collapse" : "Expand")
+            } else {
+                Color.clear
+                    .frame(width: 16, height: 24)
+            }
+
+            Button(action: onToggleSelected) {
+                HStack(spacing: 8) {
+                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                        .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                    Image(systemName: item.node.isNew ? "folder.badge.plus" : "folder")
+                        .foregroundStyle(item.node.isNew ? Color.accentColor : Color.secondary)
+                    Text(item.node.name)
+                        .lineLimit(1)
+                    if item.node.isNew {
+                        Text("New")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(Color.accentColor)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .font(.paperCodexSystem(size: 12, weight: .medium))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(isSelected ? Color.accentColor.opacity(0.10) : Color(nsColor: .controlBackgroundColor))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
+            .buttonStyle(.plain)
+
+            Button(action: onCreateChild) {
+                Image(systemName: "plus")
+                    .font(.paperCodexSystem(size: 11, weight: .semibold))
+                    .frame(width: 22, height: 22)
+            }
+            .buttonStyle(.plain)
+            .help("New subfolder")
+
+            if let onRemoveNewCategory {
+                Button(action: onRemoveNewCategory) {
+                    Image(systemName: "trash")
+                        .font(.paperCodexSystem(size: 11, weight: .semibold))
+                        .frame(width: 22, height: 22)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help("Remove new folder")
+            }
+        }
+    }
+}
+
+private struct SaveToLibraryDepthGuide: View {
+    var depth: Int
+
+    var body: some View {
+        HStack(spacing: 5) {
+            ForEach(0..<max(depth, 0), id: \.self) { level in
+                RoundedRectangle(cornerRadius: 1.5)
+                    .fill(Color.primary.opacity(level == depth - 1 ? 0.22 : 0.10))
+                    .frame(width: 2, height: 24)
+            }
+        }
+        .frame(width: CGFloat(max(depth, 0)) * 14, height: 28, alignment: .trailing)
     }
 }
