@@ -520,40 +520,35 @@ struct LibraryView: View {
                 ContentUnavailableView("No Papers", systemImage: "doc.text.magnifyingglass")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                ScrollView {
-                    LazyVStack(spacing: 1) {
-                        ForEach(visiblePapers) { paper in
-                            PaperRow(
-                                paper: paper,
-                                categories: categories(for: paper),
-                                tags: model.paperTagsByID[paper.id, default: []],
-                                thumbnailURLs: model.paperThumbnailURLsByID[paper.id, default: []],
-                                isImportPlaceholder: paper.isArxivImportPlaceholder,
-                                placeholderDetail: model.arxivImportPlaceholderDetail(for: paper),
-                                isSelected: model.selectedLibraryPaper?.id == paper.id,
-                                isMultiSelected: selectedPaperIDs.contains(paper.id),
-                                onToggleStar: {
-                                    model.togglePaperStar(paper)
-                                },
-                                onRead: {
-                                    model.openPaper(paper)
-                                }
-                            )
-                            .contentShape(Rectangle())
-                            .onDrag {
-                                NSItemProvider(object: paperDragPayload(for: paper) as NSString)
-                            } preview: {
-                                PaperDragPreview(
-                                    paper: paper,
-                                    selectedCount: dragPreviewPaperIDs(for: paper).count
-                                )
-                            }
-                            .onTapGesture {
-                                handlePaperRowClick(paper)
-                            }
+                LibraryPaperList(papers: visiblePapers) { paper in
+                    PaperRow(
+                        paper: paper,
+                        categories: categories(for: paper),
+                        tags: model.paperTagsByID[paper.id, default: []],
+                        thumbnailURLs: model.paperThumbnailURLsByID[paper.id, default: []],
+                        isImportPlaceholder: paper.isArxivImportPlaceholder,
+                        placeholderDetail: model.arxivImportPlaceholderDetail(for: paper),
+                        isSelected: model.selectedLibraryPaper?.id == paper.id,
+                        isMultiSelected: selectedPaperIDs.contains(paper.id),
+                        onToggleStar: {
+                            model.togglePaperStar(paper)
+                        },
+                        onRead: {
+                            model.openPaper(paper)
                         }
+                    )
+                    .contentShape(Rectangle())
+                    .onDrag {
+                        NSItemProvider(object: paperDragPayload(for: paper) as NSString)
+                    } preview: {
+                        PaperDragPreview(
+                            paper: paper,
+                            selectedCount: dragPreviewPaperIDs(for: paper).count
+                        )
                     }
-                    .padding(.vertical, 4)
+                    .onTapGesture {
+                        handlePaperRowClick(paper)
+                    }
                 }
                 .overlay(alignment: .top) {
                     bulkActionBarOverlay
@@ -1412,6 +1407,23 @@ private struct FolderBreadcrumbBar: View {
     }
 }
 
+private struct LibraryPaperList<RowContent: View>: View {
+    var papers: [Paper]
+    @ViewBuilder var rowContent: (Paper) -> RowContent
+
+    var body: some View {
+        List(papers) { paper in
+            rowContent(paper)
+                .listRowInsets(EdgeInsets(top: 2, leading: 0, bottom: 2, trailing: 0))
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
+        }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
 private struct LibraryPaperRowClick: Equatable {
     var paperID: String
     var clickedAt: Date
@@ -1421,6 +1433,8 @@ private enum LibraryLayout {
     static let splitPaneTopInset: CGFloat = 24
     static let bulkActionBarOverlayYOffset: CGFloat = 42
     static let bulkActionBarOverlayOpacity = 0.84
+    static let paperRowThumbnailLimit = 3
+    static let paperRowThumbnailMaxPixelSize = 128
     static let categoryDropContentTypes: [UTType] = [.plainText]
     static let categoryDragPayloadPrefix = "papercodex-category-id:"
 
@@ -1589,8 +1603,9 @@ private struct ThumbnailStrip: View {
                 }
                 .frame(width: 42, height: 54)
             } else {
-                ForEach(Array(urls.enumerated()), id: \.offset) { index, url in
-                    LocalThumbnailImage(url: url, maxPixelSize: 180) {
+                let visibleURLs = Array(urls.prefix(LibraryLayout.paperRowThumbnailLimit))
+                ForEach(Array(visibleURLs.enumerated()), id: \.offset) { index, url in
+                    LocalThumbnailImage(url: url, maxPixelSize: LibraryLayout.paperRowThumbnailMaxPixelSize) {
                         Color(nsColor: .textBackgroundColor)
                     }
                     .padding(2)
@@ -1601,7 +1616,7 @@ private struct ThumbnailStrip: View {
                             .stroke(Color.black.opacity(0.12), lineWidth: 1)
                     )
                     .clipShape(RoundedRectangle(cornerRadius: 5))
-                    .zIndex(Double(urls.count - index))
+                    .zIndex(Double(visibleURLs.count - index))
                 }
             }
         }

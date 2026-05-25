@@ -601,6 +601,7 @@ func runUILayoutSourceChecks() throws {
     let chatSource = try String(contentsOf: chatViewURL)
     let saveToLibrarySource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/SaveToLibrarySheet.swift"))
     let readerViewSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/ReaderView.swift"))
+    let localThumbnailSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/LocalThumbnailImage.swift"))
     let libraryFeatureStoreSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/LibraryFeatureStore.swift"))
     let readerFeatureStoreSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/ReaderFeatureStore.swift"))
     let discoverFeatureStoreSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/DiscoverFeatureStore.swift"))
@@ -822,6 +823,27 @@ func runUILayoutSourceChecks() throws {
             && readerViewSource.contains("paperTabAccent")
             && readerViewSource.contains("Close Paper Tab"),
         "reader papers should render as stable tabs with clear active state and quiet close affordances"
+    )
+    try check(
+        librarySource.contains("LibraryPaperList")
+            && librarySource.contains(".listStyle(.plain)")
+            && librarySource.contains("paperRowThumbnailLimit")
+            && librarySource.contains("paperRowThumbnailMaxPixelSize"),
+        "library paper scrolling should use a virtualized plain list with a bounded thumbnail strip"
+    )
+    try check(
+        localThumbnailSource.contains("LocalThumbnailDecodeGate")
+            && localThumbnailSource.contains("appearanceDelayNanoseconds")
+            && localThumbnailSource.contains("loadedURL")
+            && localThumbnailSource.contains("TaskPriority.utility"),
+        "local thumbnail decoding should be delayed, concurrency-limited, and clear reused cells so scrolling stays responsive"
+    )
+    try check(
+        discoverSource.contains("ScrollViewReader")
+            && discoverSource.contains("isRestoringDiscoverScrollPosition")
+            && discoverSource.contains("DiscoverImagePreloadPolicy")
+            && !discoverSource.contains(".scrollPosition(id: $discoverScrollAnchorID"),
+        "discover scrolling should restore via ScrollViewReader and avoid high-frequency scrollPosition state binding"
     )
     try check(
         settingsViewSource.contains("Similarity categories")
@@ -1191,7 +1213,8 @@ func runUILayoutSourceChecks() throws {
         "library folder hierarchy should render an explicit depth guide"
     )
     try check(
-        librarySource.contains("LazyVStack(spacing: 1)"),
+        librarySource.contains("LibraryPaperList(papers: visiblePapers)")
+            && librarySource.contains("listRowInsets"),
         "library paper rows should reduce inter-card gaps and make the card hit area larger"
     )
     try check(
@@ -1495,9 +1518,10 @@ func runUILayoutSourceChecks() throws {
     try check(
         appModelSource.contains("discoverScrollPositionPaperID")
             && appModelSource.contains("recordDiscoverScrollPosition")
-            && discoverSource.contains("discoverScrollAnchorID")
-            && discoverSource.contains(".scrollPosition(id: $discoverScrollAnchorID, anchor: .top)")
-            && discoverSource.contains("restoreDiscoverScrollPosition()")
+            && discoverSource.contains("visibleDiscoverPaperID")
+            && discoverSource.contains("markDiscoverVisibleRow")
+            && discoverSource.contains("ScrollViewReader")
+            && discoverSource.contains("restoreDiscoverScrollPosition(scrollProxy")
             && discoverSource.contains("commitDiscoverScrollPosition")
             && !discoverSource.contains("discoverReturnPaperID"),
         "Discover should record the current visible paper and restore that scroll position when returning from Reader or other app sections"
@@ -1571,13 +1595,14 @@ func runUILayoutSourceChecks() throws {
         "Discover translation and summarization actions should use action-aware enrichment prompts and cache completeness checks"
     )
     try check(
-        discoverSource.contains("@State private var discoverScrollAnchorID: String?")
+        discoverSource.contains("@State private var visibleDiscoverPaperID: String?")
             && discoverSource.contains("@State private var discoverScrollPositionCommitTask: Task<Void, Never>?")
             && discoverSource.contains(".scrollTargetLayout()")
-            && discoverSource.contains(".scrollPosition(id: $discoverScrollAnchorID, anchor: .top)")
+            && discoverSource.contains("isRestoringDiscoverScrollPosition")
+            && !discoverSource.contains(".scrollPosition(id:")
             && !discoverSource.contains("DiscoverVisiblePaperReporter")
             && !discoverSource.contains("DiscoverVisiblePaperPreferenceKey"),
-        "Discover scroll restoration should use scroll position binding instead of per-card geometry tracking"
+        "Discover scroll restoration should avoid per-pixel scroll binding and per-card geometry tracking"
     )
     try check(
         discoverSource.contains("let visiblePapers = papers")

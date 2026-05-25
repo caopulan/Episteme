@@ -5,6 +5,12 @@ import SwiftUI
 
 private let discoverMediaHorizontalPadding: CGFloat = 14
 
+private enum DiscoverImagePreloadPolicy {
+    static let visiblePaperLimit = 36
+    static let scrollRestoreSettleNanoseconds: UInt64 = 320_000_000
+    static let scrollPositionCommitDelayNanoseconds: UInt64 = 550_000_000
+}
+
 private struct DiscoverLayoutSignature: Hashable {
     var columnCount: Int
     var paperCount: Int
@@ -27,7 +33,8 @@ struct DiscoverView: View {
     @State private var paperPendingSave: ArxivFeedPaper?
     @State private var previewPaper: ArxivFeedPaper?
     @State private var isShowingProcessSelection = false
-    @State private var discoverScrollAnchorID: String?
+    @State private var visibleDiscoverPaperID: String?
+    @State private var isRestoringDiscoverScrollPosition = false
     @State private var discoverScrollPositionCommitTask: Task<Void, Never>?
 
     private var papers: [ArxivFeedPaper] {
@@ -308,42 +315,43 @@ struct DiscoverView: View {
                         imageCount: imagePreloadURLs.count
                     )
 
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 14) {
-                            ForEach(Array(rows.enumerated()), id: \.offset) { rowIndex, rowPapers in
-                                HStack(alignment: .top, spacing: 16) {
-                                    ForEach(rowPapers) { paper in
-                                        discoverCard(for: paper, rowIndex: rowIndex)
-                                            .id(paper.id)
+                    ScrollViewReader { scrollProxy in
+                        ScrollView {
+                            LazyVStack(alignment: .leading, spacing: 14) {
+                                ForEach(Array(rows.enumerated()), id: \.offset) { rowIndex, rowPapers in
+                                    HStack(alignment: .top, spacing: 16) {
+                                        ForEach(rowPapers) { paper in
+                                            discoverCard(for: paper, rowIndex: rowIndex)
+                                                .id(paper.id)
+                                        }
+                                        ForEach(0..<max(0, columnCount - rowPapers.count), id: \.self) { _ in
+                                            Color.clear
+                                                .frame(maxWidth: .infinity)
+                                        }
                                     }
-                                    ForEach(0..<max(0, columnCount - rowPapers.count), id: \.self) { _ in
-                                        Color.clear
-                                            .frame(maxWidth: .infinity)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .id(rowPapers.first?.id)
+                                    .onAppear {
+                                        markDiscoverVisibleRow(rowPapers.first?.id, in: visiblePapers)
                                     }
                                 }
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .id(rowPapers.first?.id)
+                            }
+                            .scrollTargetLayout()
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 8)
+                            .task(id: warmupSignature) {
+                                await warmDiscoverLocalImages(imagePreloadURLs)
                             }
                         }
-                        .scrollTargetLayout()
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 8)
-                        .task(id: warmupSignature) {
-                            await warmDiscoverLocalImages(imagePreloadURLs)
+                        .onAppear {
+                            restoreDiscoverScrollPosition(scrollProxy, in: visiblePapers)
                         }
-                    }
-                    .scrollPosition(id: $discoverScrollAnchorID, anchor: .top)
-                    .onAppear {
-                        restoreDiscoverScrollPosition(in: visiblePapers)
-                    }
-                    .onChange(of: layoutSignature) { _, _ in
-                        restoreDiscoverScrollPosition(in: visiblePapers)
-                    }
-                    .onChange(of: discoverScrollAnchorID) { _, paperID in
-                        scheduleDiscoverScrollPositionCommit(paperID, in: visiblePapers)
-                    }
-                    .onDisappear {
-                        commitDiscoverScrollPosition(in: visiblePapers)
+                        .onChange(of: layoutSignature) { _, _ in
+                            restoreDiscoverScrollPosition(scrollProxy, in: visiblePapers)
+                        }
+                        .onDisappear {
+                            commitDiscoverScrollPosition(fallbackPaperID: visibleDiscoverPaperID, in: visiblePapers)
+                        }
                     }
                 }
             }
@@ -382,7 +390,7 @@ struct DiscoverView: View {
     }
 
     private func discoverImagePreloadURLs(for papers: [ArxivFeedPaper]) -> [URL] {
-        papers.flatMap { paper in
+        papers.prefix(DiscoverImagePreloadPolicy.visiblePaperLimit).flatMap { paper in
             var urls: [URL] = []
             if let assetURL = model.cachedArxivAssetURL(for: paper.assets.small) {
                 urls.append(assetURL)
@@ -418,19 +426,32 @@ struct DiscoverView: View {
         )
     }
 
-    private func restoreDiscoverScrollPosition(in visiblePapers: [ArxivFeedPaper]) {
+    private func restoreDiscoverScrollPosition(_ scrollProxy: ScrollViewProxy, in visiblePapers: [ArxivFeedPaper]) {
         guard let paperID = model.discoverScrollPositionPaperID,
               visiblePapers.contains(where: { $0.id == paperID }) else {
             return
         }
         discoverScrollPositionCommitTask?.cancel()
-        if discoverScrollAnchorID != paperID {
-            discoverScrollAnchorID = paperID
+        visibleDiscoverPaperID = paperID
+        isRestoringDiscoverScrollPosition = true
+        scrollProxy.scrollTo(paperID, anchor: .top)
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: DiscoverImagePreloadPolicy.scrollRestoreSettleNanoseconds)
+            guard !Task.isCancelled else {
+                return
+            }
+            isRestoringDiscoverScrollPosition = false
         }
     }
 
-    private func restoreDiscoverScrollPosition() {
-        restoreDiscoverScrollPosition(in: papers)
+    private func markDiscoverVisibleRow(_ paperID: String?, in visiblePapers: [ArxivFeedPaper]) {
+        guard !isRestoringDiscoverScrollPosition,
+              let paperID,
+              visiblePapers.contains(where: { $0.id == paperID }) else {
+            return
+        }
+        visibleDiscoverPaperID = paperID
+        scheduleDiscoverScrollPositionCommit(paperID, in: visiblePapers)
     }
 
     private func scheduleDiscoverScrollPositionCommit(_ paperID: String?, in visiblePapers: [ArxivFeedPaper]) {
@@ -440,7 +461,7 @@ struct DiscoverView: View {
         }
         discoverScrollPositionCommitTask?.cancel()
         discoverScrollPositionCommitTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 350_000_000)
+            try? await Task.sleep(nanoseconds: DiscoverImagePreloadPolicy.scrollPositionCommitDelayNanoseconds)
             guard !Task.isCancelled else {
                 return
             }
@@ -450,7 +471,7 @@ struct DiscoverView: View {
 
     private func commitDiscoverScrollPosition(fallbackPaperID: String? = nil, in visiblePapers: [ArxivFeedPaper]? = nil) {
         discoverScrollPositionCommitTask?.cancel()
-        guard let paperID = discoverScrollAnchorID ?? fallbackPaperID,
+        guard let paperID = visibleDiscoverPaperID ?? fallbackPaperID,
               (visiblePapers ?? papers).contains(where: { $0.id == paperID }) else {
             return
         }

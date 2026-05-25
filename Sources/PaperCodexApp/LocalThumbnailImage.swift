@@ -37,6 +37,42 @@ private struct DecodedLocalThumbnailImage: @unchecked Sendable {
     var image: CGImage
 }
 
+private enum LocalThumbnailDecodePolicy {
+    static let appearanceDelayNanoseconds: UInt64 = 90_000_000
+    static let decodePriority = TaskPriority.utility
+}
+
+private actor LocalThumbnailDecodeGate {
+    static let shared = LocalThumbnailDecodeGate(maxConcurrent: 2)
+
+    private let maxConcurrent: Int
+    private var activeCount = 0
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    init(maxConcurrent: Int) {
+        self.maxConcurrent = maxConcurrent
+    }
+
+    func wait() async {
+        if activeCount < maxConcurrent {
+            activeCount += 1
+            return
+        }
+
+        await withCheckedContinuation { continuation in
+            waiters.append(continuation)
+        }
+    }
+
+    func signal() {
+        if waiters.isEmpty {
+            activeCount = max(0, activeCount - 1)
+        } else {
+            waiters.removeFirst().resume()
+        }
+    }
+}
+
 struct LocalThumbnailImage<Placeholder: View>: View {
     var url: URL
     var maxPixelSize: Int = 220
@@ -44,6 +80,7 @@ struct LocalThumbnailImage<Placeholder: View>: View {
     @ViewBuilder var placeholder: () -> Placeholder
 
     @State private var image: CGImage?
+    @State private var loadedURL: URL?
 
     var body: some View {
         Group {
@@ -64,6 +101,20 @@ struct LocalThumbnailImage<Placeholder: View>: View {
     private func load() async {
         if let cached = LocalThumbnailImageCache.shared.image(for: url) {
             image = cached
+            loadedURL = url
+            return
+        }
+        if loadedURL != url {
+            image = nil
+            loadedURL = url
+        }
+        try? await Task.sleep(nanoseconds: LocalThumbnailDecodePolicy.appearanceDelayNanoseconds)
+        guard !Task.isCancelled else {
+            return
+        }
+        if let cached = LocalThumbnailImageCache.shared.image(for: url) {
+            image = cached
+            loadedURL = url
             return
         }
         guard let decoded = await decodeLocalThumbnailImage(at: url, maxPixelSize: maxPixelSize) else {
@@ -79,7 +130,13 @@ struct LocalThumbnailImage<Placeholder: View>: View {
 }
 
 private func decodeLocalThumbnailImage(at url: URL, maxPixelSize: Int) async -> DecodedLocalThumbnailImage? {
-    await Task.detached(priority: .userInitiated) {
+    await LocalThumbnailDecodeGate.shared.wait()
+    if Task.isCancelled {
+        await LocalThumbnailDecodeGate.shared.signal()
+        return nil
+    }
+
+    let result = await Task.detached(priority: LocalThumbnailDecodePolicy.decodePriority) { () -> DecodedLocalThumbnailImage? in
         let sourceOptions = [
             kCGImageSourceShouldCache: false
         ] as CFDictionary
@@ -98,4 +155,6 @@ private func decodeLocalThumbnailImage(at url: URL, maxPixelSize: Int) async -> 
         }
         return DecodedLocalThumbnailImage(image: image)
     }.value
+    await LocalThumbnailDecodeGate.shared.signal()
+    return result
 }
