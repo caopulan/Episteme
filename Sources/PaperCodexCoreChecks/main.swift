@@ -3023,6 +3023,27 @@ func runArxivFeedChecks() throws {
     try cache.saveFeed(response)
     let cached = try cache.loadFeed(date: "2026-04-22")
     try check(cached == response, "arXiv feed cache should round-trip feed JSON")
+    var rangePaperA = paper
+    rangePaperA.listDate = "2026-04-28"
+    rangePaperA.categories = ["cs.CV"]
+    rangePaperA.primaryCategory = "cs.CV"
+    rangePaperA.listCategories = ["cs.CV"]
+    var rangePaperB = paper
+    rangePaperB.id = "2604.18587"
+    rangePaperB.arxivID = "2604.18587"
+    rangePaperB.listDate = "2026-04-29"
+    rangePaperB.categories = ["cs.CL"]
+    rangePaperB.primaryCategory = "cs.CL"
+    rangePaperB.listCategories = ["cs.CL"]
+    let broaderRangeFeed = ArxivFeedResponse(
+        date: "2026-04-22...2026-04-29",
+        count: 2,
+        papers: [rangePaperA, rangePaperB]
+    )
+    try cache.saveFeed(broaderRangeFeed)
+    let containedRange = try DiscoverDateRange(start: "2026-04-27", end: "2026-04-29")
+    let containingFeed = try cache.loadFeed(containing: containedRange)
+    try check(containingFeed?.date == broaderRangeFeed.date, "arXiv feed cache should reuse a cached range that contains a Discover range")
     let assetURL = try cache.saveAsset(Data("small".utf8), path: "images/2026-04-22/2604.18586_small.png")
     try check(FileManager.default.fileExists(atPath: assetURL.path), "arXiv feed cache should store asset bytes")
     try check(
@@ -3148,6 +3169,11 @@ func runLocalDiscoverEngineChecks() throws {
 
     let range = try DiscoverDateRange(start: "2026-04-27", end: "2026-04-29")
     try check(range.dates == ["2026-04-27", "2026-04-28", "2026-04-29"], "discover date range should expand inclusive dates")
+    try check(range.cacheLabel == "2026-04-27...2026-04-29", "discover date range should expose a stable cache label")
+    let parsedRange = try DiscoverDateRange(cacheLabel: range.cacheLabel)
+    let containedRange = try DiscoverDateRange(start: "2026-04-28", end: "2026-04-29")
+    try check(parsedRange == range, "discover date range should parse cache labels")
+    try check(range.contains(containedRange), "discover date range should recognize contained ranges")
     let last7Days = try DiscoverQuickRange.last7Days.dateRange(endingAt: "2026-04-29")
     try check(last7Days.start == "2026-04-23", "last 7 days should include the ending date")
     try check(last7Days.end == "2026-04-29", "quick range should preserve the ending date")
@@ -3168,6 +3194,42 @@ func runLocalDiscoverEngineChecks() throws {
     )
     try check(queryA.normalized == queryB.normalized, "discover query normalization should ignore whitespace and duplicate order")
     try check(queryA.cacheKey == queryB.cacheKey, "discover query cache key should be stable for equivalent queries")
+
+    func cachedDiscoverPaper(id: String, listDate: String, categories: [String], title: String) -> ArxivFeedPaper {
+        ArxivFeedPaper(
+            id: id,
+            arxivID: id,
+            arxivIDVersioned: nil,
+            title: ArxivLocalizedText(en: title, zh: ""),
+            abstract: ArxivLocalizedText(en: title, zh: ""),
+            summary: ArxivLocalizedText(en: "", zh: ""),
+            authors: ["Alice Example"],
+            categories: categories,
+            primaryCategory: categories.first,
+            listCategories: categories,
+            tags: [],
+            comment: "",
+            published: "\(listDate)T00:00:00Z",
+            updated: nil,
+            listDate: listDate,
+            thumbnailVersion: nil,
+            embedding: nil,
+            links: ArxivFeedLinks(abs: "https://arxiv.org/abs/\(id)", pdf: nil),
+            assets: ArxivFeedAssets(small: nil, large: nil)
+        )
+    }
+    let broadCachedFeed = ArxivFeedResponse(
+        date: "2026-04-23...2026-04-30",
+        count: 3,
+        papers: [
+            cachedDiscoverPaper(id: "2604.18803", listDate: "2026-04-27", categories: ["cs.CV"], title: "Vision cache hit"),
+            cachedDiscoverPaper(id: "2604.18804", listDate: "2026-04-26", categories: ["cs.CV"], title: "Outside date"),
+            cachedDiscoverPaper(id: "2604.18805", listDate: "2026-04-28", categories: ["math.OC"], title: "Outside category")
+        ]
+    )
+    let scopedFeed = broadCachedFeed.scoped(to: queryA.normalized)
+    try check(scopedFeed.date == range.cacheLabel, "scoped cached Discover feeds should use the requested range label")
+    try check(scopedFeed.papers.map(\.id) == ["2604.18803"], "scoped cached Discover feeds should filter by requested date range and categories")
 
     let enrichment = DiscoverPaperEnrichment(
         arxivID: "2604.18803",
@@ -3328,8 +3390,8 @@ func runLocalArxivClientChecks() throws {
     try check(apiURL.absoluteString.contains("sortOrder=descending"), "local arXiv API URL should sort newest papers first")
     try check(apiURL.absoluteString.contains("start=2000"), "local arXiv API URL should support paging start")
     try check(apiURL.absoluteString.contains("max_results=1000"), "local arXiv API URL should support paging size")
-    try check(defaultConfiguration.apiPageSize == 100, "local arXiv client should default to small API pages to avoid export API timeouts")
-    try check(defaultAPIURL.absoluteString.contains("max_results=100"), "local arXiv default API URL should avoid 1000-result search requests")
+    try check(defaultConfiguration.apiPageSize == 500, "local arXiv client should default to moderate API pages to reduce rate-limit pressure without using 1000-result requests")
+    try check(defaultAPIURL.absoluteString.contains("max_results=500"), "local arXiv default API URL should avoid 1000-result search requests")
 
     let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
     let clientSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexCore/LocalArxivClient.swift"))

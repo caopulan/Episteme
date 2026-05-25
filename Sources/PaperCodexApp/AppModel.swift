@@ -1263,7 +1263,7 @@ final class AppModel: ObservableObject {
             }
 
             arxivCacheProgress = ArxivCacheProgress(
-                date: "\(range.start)...\(range.end)",
+                date: range.cacheLabel,
                 title: "Searching arXiv",
                 detail: categories.joined(separator: ", "),
                 completed: 0,
@@ -3566,10 +3566,11 @@ final class AppModel: ObservableObject {
             return true
         }
 
-        guard let cachedFeed = try arxivCache.loadFeed(date: "\(query.dateRange.start)...\(query.dateRange.end)") else {
+        guard let cachedFeed = try arxivCache.loadFeed(containing: query.dateRange) else {
             return false
         }
-        let filteredFeed = filterDiscoverFeed(cachedFeed, keyword: query.keyword)
+        let scopedFeed = cachedFeed.scoped(to: query)
+        let filteredFeed = filterDiscoverFeed(scopedFeed, keyword: query.keyword)
         guard !filteredFeed.papers.isEmpty else {
             return false
         }

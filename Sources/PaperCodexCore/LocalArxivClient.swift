@@ -19,7 +19,7 @@ public struct LocalArxivClientConfiguration: Equatable, Sendable {
     public init(
         categories: [String],
         listShow: Int = 2_000,
-        apiPageSize: Int = 100,
+        apiPageSize: Int = 500,
         userAgent: String = "PaperCodex/0.1 (+https://arxiv.org)"
     ) {
         self.categories = LocalArxivClientConfiguration.normalized(categories)
@@ -146,7 +146,7 @@ public final class LocalArxivClient: Sendable {
         }
 
         let query = try Self.submittedDateSearchQuery(range: range, categories: configuration.categories)
-        let rangeLabel = "\(range.start)...\(range.end)"
+        let rangeLabel = range.cacheLabel
         let pageSize = configuration.apiPageSize
         var start = 0
         var totalResults: Int?

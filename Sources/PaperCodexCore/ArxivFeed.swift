@@ -328,6 +328,46 @@ public final class ArxivFeedCache {
         return try decoder.decode(ArxivFeedResponse.self, from: Data(contentsOf: url))
     }
 
+    public func loadFeed(containing range: DiscoverDateRange) throws -> ArxivFeedResponse? {
+        if let exactRangeFeed = try loadFeed(date: range.cacheLabel) {
+            return exactRangeFeed
+        }
+        if range.start == range.end,
+           let exactDailyFeed = try loadFeed(date: range.start) {
+            return exactDailyFeed
+        }
+
+        let feedsRoot = root.appendingPathComponent("feeds", isDirectory: true)
+        guard fileManager.fileExists(atPath: feedsRoot.path),
+              let enumerator = fileManager.enumerator(
+                at: feedsRoot,
+                includingPropertiesForKeys: [.isRegularFileKey],
+                options: [.skipsHiddenFiles]
+              ) else {
+            return nil
+        }
+
+        var bestMatch: (span: Int, label: String, feed: ArxivFeedResponse)?
+        for case let url as URL in enumerator where url.pathExtension == "json" {
+            let values = try url.resourceValues(forKeys: [.isRegularFileKey])
+            guard values.isRegularFile == true else {
+                continue
+            }
+            let feed = try decoder.decode(ArxivFeedResponse.self, from: Data(contentsOf: url))
+            let cachedRange = try DiscoverDateRange(cacheLabel: feed.date)
+            guard cachedRange.contains(range) else {
+                continue
+            }
+            let span = cachedRange.dates.count
+            if bestMatch == nil ||
+                span < bestMatch!.span ||
+                (span == bestMatch!.span && cachedRange.cacheLabel > bestMatch!.label) {
+                bestMatch = (span, cachedRange.cacheLabel, feed)
+            }
+        }
+        return bestMatch?.feed
+    }
+
     @discardableResult
     public func saveAsset(_ data: Data, path: String) throws -> URL {
         let url = try assetURL(path: path)

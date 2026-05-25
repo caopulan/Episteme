@@ -68,8 +68,27 @@ public struct DiscoverDateRange: Codable, Equatable, Sendable {
         return result
     }
 
+    public var cacheLabel: String {
+        "\(start)...\(end)"
+    }
+
+    public init(cacheLabel: String) throws {
+        let parts = cacheLabel.components(separatedBy: "...")
+        if parts.count == 1 {
+            try self.init(start: parts[0], end: parts[0])
+        } else if parts.count == 2 {
+            try self.init(start: parts[0], end: parts[1])
+        } else {
+            throw LocalDiscoverEngineError.invalidDate(cacheLabel)
+        }
+    }
+
     public func contains(_ date: String) -> Bool {
         dates.contains(date)
+    }
+
+    public func contains(_ range: DiscoverDateRange) -> Bool {
+        start <= range.start && range.end <= end
     }
 
     private static let dateFormatter: DateFormatter = {
@@ -137,6 +156,30 @@ public struct DiscoverQueryResult: Codable, Equatable, Sendable {
         self.arxivIDs = arxivIDs
         self.feed = feed
         self.generatedAt = generatedAt
+    }
+}
+
+public extension ArxivFeedResponse {
+    func scoped(to query: DiscoverQuery) -> ArxivFeedResponse {
+        scoped(to: query.dateRange, categories: query.categories, dateLabel: query.dateRange.cacheLabel)
+    }
+
+    func scoped(to dateRange: DiscoverDateRange, categories: [String], dateLabel: String? = nil) -> ArxivFeedResponse {
+        let categorySet = normalizedCategorySet(categories)
+        let scopedPapers = papers.filter { paper in
+            guard let paperDate = discoverDate(for: paper), dateRange.contains(paperDate) else {
+                return false
+            }
+            guard !categorySet.isEmpty else {
+                return true
+            }
+            return !normalizedCategorySet(paper.discoverCategoryValues).isDisjoint(with: categorySet)
+        }
+        return ArxivFeedResponse(
+            date: dateLabel ?? date,
+            count: scopedPapers.count,
+            papers: scopedPapers
+        )
     }
 }
 
@@ -630,6 +673,30 @@ private func normalizedOrdered(_ values: [String]) -> [String] {
         result.append(trimmed)
     }
     return result
+}
+
+private func normalizedCategorySet(_ values: [String]) -> Set<String> {
+    Set(normalizedOrdered(values).map { $0.lowercased() })
+}
+
+private func discoverDate(for paper: ArxivFeedPaper) -> String? {
+    let candidates = [
+        paper.listDate,
+        LocalArxivClient.isoDateFromAtomTimestamp(paper.published),
+        LocalArxivClient.isoDateFromAtomTimestamp(paper.updated)
+    ]
+    for candidate in candidates.compactMap({ $0 }) {
+        if (try? DiscoverDateRange(start: candidate, end: candidate)) != nil {
+            return candidate
+        }
+    }
+    return nil
+}
+
+private extension ArxivFeedPaper {
+    var discoverCategoryValues: [String] {
+        categories + listCategories + [primaryCategory].compactMap { $0 }
+    }
 }
 
 private let discoverDateFormatter: DateFormatter = {
