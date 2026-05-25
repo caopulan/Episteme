@@ -2,11 +2,7 @@ import Foundation
 import PaperCodexCore
 import SwiftUI
 
-struct SaveToLibraryNewCategory: Equatable, Identifiable, Sendable {
-    var id: String
-    var parentID: String?
-    var name: String
-}
+typealias SaveToLibraryNewCategory = LibraryCategoryRequest
 
 struct SaveToLibraryCategorySelection: Equatable {
     var categoryIDs: [String]

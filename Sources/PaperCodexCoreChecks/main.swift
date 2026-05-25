@@ -341,6 +341,92 @@ func runLibraryDerivedStateChecks() throws {
     try check(state.matchesSearch(paperID: "missing", query: "anything"), "missing papers should not be filtered out by an empty derived search index")
 }
 
+func runLibraryCategoryAssignmentChecks() throws {
+    let tempRoot = FileManager.default.temporaryDirectory
+        .appendingPathComponent("paper-codex-library-category-assignment-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+    let repository = try PaperRepository(databasePath: tempRoot.appendingPathComponent("store.sqlite").path)
+    try repository.migrate()
+
+    let now = Date(timeIntervalSince1970: 1_777_500_000)
+    let paper = Paper(
+        id: "paper-a",
+        filePath: "/tmp/paper-a.pdf",
+        fileHash: "hash-library-category-assignment-a",
+        title: "Grounded Vision Agents",
+        authors: ["Alice"],
+        year: 2026,
+        sourceURL: nil,
+        importedAt: now,
+        updatedAt: now
+    )
+    try repository.upsertPaper(paper)
+    try repository.upsertCategory(Category(id: "cat-existing", parentID: nil, name: "Existing", sortOrder: 1))
+    try repository.upsertCategory(Category(id: "cat-parent", parentID: nil, name: "Parent", sortOrder: 2))
+
+    var createdCategoryIDs: [String] = []
+    let assigner = LibraryCategoryAssigner(idFactory: { prefix, name in
+        var slug = ""
+        for character in name.lowercased() {
+            if character.isLetter || character.isNumber {
+                slug.append(character)
+            } else {
+                if slug.last == "-" {
+                    continue
+                }
+                slug.append("-")
+            }
+        }
+        slug = slug.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+        return "\(prefix)-\(slug)"
+    })
+    try assigner.assign(
+        paperID: paper.id,
+        existingCategoryIDs: ["cat-existing", "missing-category", "cat-existing"],
+        newCategoryNames: [" Fresh ", "fresh", ""],
+        newCategories: [
+            LibraryCategoryRequest(id: "new-parent", parentID: "cat-parent", name: " Vision "),
+            LibraryCategoryRequest(id: "new-child", parentID: "new-parent", name: "Grounding"),
+            LibraryCategoryRequest(id: "ignored-empty", parentID: nil, name: " ")
+        ],
+        repository: repository,
+        onCategoryCreated: { category in
+            createdCategoryIDs.append(category.id)
+        }
+    )
+
+    let categories = try repository.fetchCategories()
+    let categoriesByName = Dictionary(grouping: categories, by: \.name)
+    try check(categoriesByName["Fresh"]?.count == 1, "duplicate flat new category names should create one root category")
+    try check(categoriesByName["Vision"]?.first?.parentID == "cat-parent", "nested category request should keep its existing parent")
+    try check(categoriesByName["Grounding"]?.first?.parentID == categoriesByName["Vision"]?.first?.id, "nested category request should resolve new parent requests")
+    try check(Set(createdCategoryIDs) == ["cat-fresh", "cat-vision", "cat-grounding"], "created category callback should fire once for each created folder")
+
+    let assignedCategoryIDs = Set(try repository.fetchCategoryIDs(forPaperID: paper.id))
+    try check(assignedCategoryIDs.contains("cat-existing"), "valid existing category IDs should be assigned")
+    try check(!assignedCategoryIDs.contains("missing-category"), "invalid existing category IDs should be ignored")
+    try check(assignedCategoryIDs.contains("cat-fresh"), "flat new categories should be assigned to the paper")
+    try check(assignedCategoryIDs.contains("cat-vision"), "new parent category should be assigned to the paper")
+    try check(assignedCategoryIDs.contains("cat-grounding"), "new child category should be assigned to the paper")
+
+    do {
+        try assigner.assign(
+            paperID: paper.id,
+            existingCategoryIDs: [],
+            newCategoryNames: [],
+            newCategories: [
+                LibraryCategoryRequest(id: "cycle-a", parentID: "cycle-b", name: "Cycle A"),
+                LibraryCategoryRequest(id: "cycle-b", parentID: "cycle-a", name: "Cycle B")
+            ],
+            repository: repository
+        )
+        throw CheckFailure(description: "cyclic new category requests should fail")
+    } catch LibraryCategoryAssignmentError.invalidCategoryHierarchy {
+    } catch {
+        throw CheckFailure(description: "cyclic new category requests should fail with invalidCategoryHierarchy, got \(error)")
+    }
+}
+
 func runUILayoutSourceChecks() throws {
     let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
     let libraryViewURL = root.appendingPathComponent("Sources/PaperCodexApp/LibraryView.swift")
@@ -506,6 +592,7 @@ func runUILayoutSourceChecks() throws {
     let chatViewURL = root.appendingPathComponent("Sources/PaperCodexApp/ChatView.swift")
     let chatSource = try String(contentsOf: chatViewURL)
     let saveToLibrarySource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/SaveToLibrarySheet.swift"))
+    let libraryCategoryAssignmentSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexCore/LibraryCategoryAssignment.swift"))
     let arxivIDExtractorSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexCore/ArxivIDExtractor.swift"))
     try check(
         !collectionViewExists
@@ -648,8 +735,10 @@ func runUILayoutSourceChecks() throws {
     )
     try check(
         appModelSource.contains("newCategories: [SaveToLibraryNewCategory]")
-            && appModelSource.contains("ensureCategory(named name: String, parentID: String?, repository: PaperRepository)")
-            && appModelSource.contains("createdCategoryIDsByRequestID"),
+            && appModelSource.contains("LibraryCategoryAssigner().assign")
+            && appModelSource.contains("onCategoryCreated")
+            && libraryCategoryAssignmentSource.contains("createdCategoryIDsByRequestID")
+            && libraryCategoryAssignmentSource.contains("LibraryCategoryAssignmentError.invalidCategoryHierarchy"),
         "arXiv and cached-paper save paths should create new folders under their selected parent folders"
     )
     try check(
@@ -3793,6 +3882,10 @@ do {
     if selectedChecks.isEmpty || selectedChecks.contains("library-derived-state") {
         try runLibraryDerivedStateChecks()
         print("library-derived-state: pass")
+    }
+    if selectedChecks.isEmpty || selectedChecks.contains("library-category-assignment") {
+        try runLibraryCategoryAssignmentChecks()
+        print("library-category-assignment: pass")
     }
     if selectedChecks.isEmpty || selectedChecks.contains("ui-layout-source") {
         try runUILayoutSourceChecks()

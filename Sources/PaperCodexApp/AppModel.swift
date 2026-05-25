@@ -3862,26 +3862,6 @@ final class AppModel: ObservableObject {
         return result.paper
     }
 
-    private func ensureCategory(named name: String, parentID: String?, repository: PaperRepository) throws -> PaperCodexCore.Category {
-        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            throw AppModelError.emptyName
-        }
-        let existingCategories = try repository.fetchCategories()
-        if let existing = existingCategories.first(where: { $0.parentID == parentID && $0.name.localizedCaseInsensitiveCompare(trimmed) == .orderedSame }) {
-            return existing
-        }
-        let category = PaperCodexCore.Category(
-            id: makeManualID(prefix: "cat", name: trimmed),
-            parentID: parentID,
-            name: trimmed,
-            sortOrder: (existingCategories.map(\.sortOrder).max() ?? 0) + 1
-        )
-        try repository.upsertCategory(category)
-        includeCategoryInSimilarityDefaults(category.id)
-        return category
-    }
-
     private func assignCategories(
         categoryIDs: [String],
         newCategoryNames: [String],
@@ -3889,64 +3869,16 @@ final class AppModel: ObservableObject {
         to paper: Paper,
         repository: PaperRepository
     ) throws {
-        let existingCategoryIDs = Set(try repository.fetchCategories().map(\.id))
-        for categoryID in normalizedIdentifiers(categoryIDs) where existingCategoryIDs.contains(categoryID) {
-            try repository.assignPaper(paper.id, toCategory: categoryID)
-        }
-        var createdCategoryIDsByRequestID: [String: String] = [:]
-        let newCategoryRequests = normalizedNewCategoryRequests(newCategories)
-
-        func createCategory(from request: SaveToLibraryNewCategory, stack: Set<String> = []) throws -> PaperCodexCore.Category {
-            if let categoryID = createdCategoryIDsByRequestID[request.id],
-               let category = try repository.fetchCategories().first(where: { $0.id == categoryID }) {
-                return category
+        try LibraryCategoryAssigner().assign(
+            paperID: paper.id,
+            existingCategoryIDs: categoryIDs,
+            newCategoryNames: newCategoryNames,
+            newCategories: newCategories,
+            repository: repository,
+            onCategoryCreated: { category in
+                self.includeCategoryInSimilarityDefaults(category.id)
             }
-            guard !stack.contains(request.id) else {
-                throw AppModelError.invalidCategoryMove
-            }
-
-            let resolvedParentID: String?
-            if let parentID = request.parentID {
-                if existingCategoryIDs.contains(parentID) {
-                    resolvedParentID = parentID
-                } else if let parentRequest = newCategoryRequests.first(where: { $0.id == parentID }) {
-                    resolvedParentID = try createCategory(from: parentRequest, stack: stack.union([request.id])).id
-                } else {
-                    throw AppModelError.categoryNotFound(parentID)
-                }
-            } else {
-                resolvedParentID = nil
-            }
-
-            let category = try ensureCategory(named: request.name, parentID: resolvedParentID, repository: repository)
-            createdCategoryIDsByRequestID[request.id] = category.id
-            return category
-        }
-
-        for category in newCategoryRequests {
-            let created = try createCategory(from: category)
-            try repository.assignPaper(paper.id, toCategory: created.id)
-        }
-        for categoryName in normalizedNames(newCategoryNames) {
-            let category = try ensureCategory(named: categoryName, parentID: nil, repository: repository)
-            try repository.assignPaper(paper.id, toCategory: category.id)
-        }
-    }
-
-    private func normalizedNewCategoryRequests(_ values: [SaveToLibraryNewCategory]) -> [SaveToLibraryNewCategory] {
-        var result: [SaveToLibraryNewCategory] = []
-        var seenIDs: Set<String> = []
-        for value in values {
-            let id = value.id.trimmingCharacters(in: .whitespacesAndNewlines)
-            let name = value.name.trimmingCharacters(in: .whitespacesAndNewlines)
-            let parentID = value.parentID?.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !id.isEmpty, !name.isEmpty, !seenIDs.contains(id) else {
-                continue
-            }
-            seenIDs.insert(id)
-            result.append(SaveToLibraryNewCategory(id: id, parentID: parentID?.isEmpty == false ? parentID : nil, name: name))
-        }
-        return result
+        )
     }
 
     private func normalizedIdentifiers(_ values: [String]) -> [String] {
@@ -3961,24 +3893,6 @@ final class AppModel: ObservableObject {
             result.append(trimmed)
         }
         return result
-    }
-
-    private func normalizedNames(_ values: [String]) -> [String] {
-        var names: [String] = []
-        var seen: Set<String> = []
-        for value in values {
-            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else {
-                continue
-            }
-            let key = trimmed.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
-            guard !seen.contains(key) else {
-                continue
-            }
-            seen.insert(key)
-            names.append(trimmed)
-        }
-        return names
     }
 
     private func arxivStorageSubpath(for paper: ArxivFeedPaper) -> String? {
