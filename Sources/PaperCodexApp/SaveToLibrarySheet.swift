@@ -14,6 +14,26 @@ struct SaveToLibraryCategorySelection: Equatable {
 
 private let saveToLibraryRootDraftParentID = "__papercodex-save-root__"
 
+private enum SaveToLibraryLayout {
+    static let treeConnectorHeight: CGFloat = 34
+    static let treeIndentWidth: CGFloat = 22
+    static let chevronWidth: CGFloat = 16
+    static let chevronFolderSpacing: CGFloat = 4
+    static let folderButtonLeadingPadding: CGFloat = 10
+    static let folderIconWidth: CGFloat = 17
+    static let treeConnectorTargetInset: CGFloat = 7
+    static let treeConnectorLineWidth: CGFloat = 1
+    static let treeConnectorOpacity = 0.16
+
+    static var folderIconCenterX: CGFloat {
+        chevronWidth + chevronFolderSpacing + folderButtonLeadingPadding + folderIconWidth / 2
+    }
+
+    static func folderIconCenterX(depth: Int) -> CGFloat {
+        folderIconCenterX + CGFloat(depth) * treeIndentWidth
+    }
+}
+
 struct SaveToLibrarySheet: View {
     var paperTitle: String
     var detail: String?
@@ -109,7 +129,7 @@ struct SaveToLibrarySheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 6) {
                     if activeNewCategoryParentID == saveToLibraryRootDraftParentID {
-                        newCategoryInlineRow(parentID: nil, depth: 0)
+                        newCategoryInlineRow(parentID: nil, depth: 0, connectorContinuations: [])
                     }
 
                     if visibleFolderItems.isEmpty && activeNewCategoryParentID == nil {
@@ -138,7 +158,11 @@ struct SaveToLibrarySheet: View {
                                 } : nil
                             )
                             if activeNewCategoryParentID == item.node.id {
-                                newCategoryInlineRow(parentID: item.node.id, depth: item.depth + 1)
+                                newCategoryInlineRow(
+                                    parentID: item.node.id,
+                                    depth: item.depth + 1,
+                                    connectorContinuations: item.connectorContinuations + [hasChildren(item.node.id)]
+                                )
                             }
                         }
                     }
@@ -156,12 +180,13 @@ struct SaveToLibrarySheet: View {
         }
     }
 
-    private func newCategoryInlineRow(parentID: String?, depth: Int) -> some View {
+    private func newCategoryInlineRow(parentID: String?, depth: Int, connectorContinuations: [Bool]) -> some View {
         HStack(spacing: 8) {
-            SaveToLibraryDepthGuide(depth: depth)
+            Color.clear
+                .frame(width: SaveToLibraryLayout.chevronWidth, height: 24)
             Image(systemName: "folder.badge.plus")
+                .frame(width: SaveToLibraryLayout.folderIconWidth)
                 .foregroundStyle(Color.accentColor)
-                .frame(width: 18)
             TextField("New folder", text: $newCategoryName)
                 .textFieldStyle(.roundedBorder)
             Button {
@@ -180,10 +205,18 @@ struct SaveToLibrarySheet: View {
             .buttonStyle(.borderless)
             .help("Cancel")
         }
+        .padding(.leading, CGFloat(depth) * SaveToLibraryLayout.treeIndentWidth)
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
         .background(Color.accentColor.opacity(0.08))
         .clipShape(RoundedRectangle(cornerRadius: 7))
+        .background(alignment: .leading) {
+            SaveToLibraryTreeConnector(
+                depth: depth,
+                connectorContinuations: connectorContinuations
+            )
+            .allowsHitTesting(false)
+        }
     }
 
     private var actionRow: some View {
@@ -270,12 +303,25 @@ struct SaveToLibrarySheet: View {
         newCategoryName.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private func folderItems(parentID: String?, depth: Int = 0, respectingCollapse: Bool, visited: Set<String> = []) -> [SaveToLibraryFolderItem] {
-        childNodes(parentID: parentID).flatMap { node -> [SaveToLibraryFolderItem] in
+    private func folderItems(
+        parentID: String?,
+        depth: Int = 0,
+        respectingCollapse: Bool,
+        visited: Set<String> = [],
+        ancestorContinuations: [Bool] = []
+    ) -> [SaveToLibraryFolderItem] {
+        let children = childNodes(parentID: parentID)
+        return children.enumerated().flatMap { index, node -> [SaveToLibraryFolderItem] in
             guard !visited.contains(node.id) else {
                 return []
             }
-            let item = SaveToLibraryFolderItem(node: node, depth: depth)
+            let isLast = index == children.count - 1
+            let connectorContinuations = depth == 0 ? [] : ancestorContinuations + [!isLast]
+            let item = SaveToLibraryFolderItem(
+                node: node,
+                depth: depth,
+                connectorContinuations: connectorContinuations
+            )
             if respectingCollapse && collapsedCategoryIDs.contains(node.id) {
                 return [item]
             }
@@ -283,7 +329,8 @@ struct SaveToLibrarySheet: View {
                 parentID: node.id,
                 depth: depth + 1,
                 respectingCollapse: respectingCollapse,
-                visited: visited.union([node.id])
+                visited: visited.union([node.id]),
+                ancestorContinuations: connectorContinuations
             )
         }
     }
@@ -427,6 +474,7 @@ private struct SaveToLibraryFolderNode: Equatable, Identifiable {
 private struct SaveToLibraryFolderItem: Identifiable {
     var node: SaveToLibraryFolderNode
     var depth: Int
+    var connectorContinuations: [Bool] = []
 
     var id: String { node.id }
 }
@@ -575,7 +623,6 @@ private struct SaveToLibraryFolderRow: View {
 
     var body: some View {
         HStack(spacing: 4) {
-            SaveToLibraryDepthGuide(depth: item.depth)
             if hasChildren {
                 Button(action: onToggleExpanded) {
                     Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
@@ -609,7 +656,7 @@ private struct SaveToLibraryFolderRow: View {
                 .padding(.horizontal, 10)
                 .padding(.vertical, 7)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(isSelected ? Color.accentColor.opacity(0.11) : (isHovering ? Color.primary.opacity(0.045) : Color(nsColor: .controlBackgroundColor)))
+                .background(isSelected ? Color.accentColor.opacity(0.11) : (isHovering ? Color.primary.opacity(0.045) : Color.clear))
                 .clipShape(RoundedRectangle(cornerRadius: 6))
                 .overlay(
                     RoundedRectangle(cornerRadius: 6)
@@ -642,20 +689,73 @@ private struct SaveToLibraryFolderRow: View {
                 isHovering = hovering
             }
         }
+        .padding(.leading, CGFloat(item.depth) * SaveToLibraryLayout.treeIndentWidth)
+        .frame(minHeight: SaveToLibraryLayout.treeConnectorHeight)
+        .background(alignment: .leading) {
+            SaveToLibraryTreeConnector(
+                depth: item.depth,
+                connectorContinuations: item.connectorContinuations
+            )
+            .allowsHitTesting(false)
+        }
     }
 }
 
-private struct SaveToLibraryDepthGuide: View {
+private struct SaveToLibraryTreeConnector: View {
     var depth: Int
+    var connectorContinuations: [Bool]
 
     var body: some View {
-        HStack(spacing: 5) {
-            ForEach(0..<max(depth, 0), id: \.self) { level in
-                RoundedRectangle(cornerRadius: 1.5)
-                    .fill(Color.primary.opacity(level == depth - 1 ? 0.22 : 0.10))
-                    .frame(width: 2, height: 24)
-            }
+        if depth == 0 || connectorContinuations.isEmpty {
+            Color.clear
+                .frame(height: SaveToLibraryLayout.treeConnectorHeight)
+        } else {
+            SaveToLibraryTreeConnectorLevel(
+                depth: depth,
+                connectorContinuations: connectorContinuations
+            )
+            .stroke(
+                Color.primary.opacity(SaveToLibraryLayout.treeConnectorOpacity),
+                style: StrokeStyle(
+                    lineWidth: SaveToLibraryLayout.treeConnectorLineWidth,
+                    lineCap: .butt,
+                    lineJoin: .round
+                )
+            )
+            .frame(
+                width: SaveToLibraryLayout.folderIconCenterX(depth: depth) + 1,
+                height: SaveToLibraryLayout.treeConnectorHeight
+            )
         }
-        .frame(width: CGFloat(max(depth, 0)) * 14, height: 28, alignment: .trailing)
+    }
+}
+
+private struct SaveToLibraryTreeConnectorLevel: Shape {
+    var depth: Int
+    var connectorContinuations: [Bool]
+
+    func path(in rect: CGRect) -> Path {
+        Path { path in
+            let midY = rect.midY
+            let currentIconX = SaveToLibraryLayout.folderIconCenterX(depth: depth)
+            let currentTargetX = currentIconX - SaveToLibraryLayout.treeConnectorTargetInset
+            let parentIconX = SaveToLibraryLayout.folderIconCenterX(depth: depth - 1)
+            let currentBranchContinues = connectorContinuations.indices.contains(depth - 1)
+                ? connectorContinuations[depth - 1]
+                : false
+
+            if depth > 1 {
+                for level in 0..<(depth - 1) where connectorContinuations.indices.contains(level) && connectorContinuations[level] {
+                    let ancestorIconX = SaveToLibraryLayout.folderIconCenterX(depth: level)
+                    path.move(to: CGPoint(x: ancestorIconX, y: rect.minY))
+                    path.addLine(to: CGPoint(x: ancestorIconX, y: rect.maxY))
+                }
+            }
+
+            path.move(to: CGPoint(x: parentIconX, y: rect.minY))
+            path.addLine(to: CGPoint(x: parentIconX, y: currentBranchContinues ? rect.maxY : midY))
+            path.move(to: CGPoint(x: parentIconX, y: midY))
+            path.addLine(to: CGPoint(x: currentTargetX, y: midY))
+        }
     }
 }

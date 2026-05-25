@@ -763,6 +763,20 @@ func runUILayoutSourceChecks() throws {
         "save-to-library should use an expandable folder tree with selectable folders and in-tree folder creation"
     )
     try check(
+        saveToLibrarySource.contains("SaveToLibraryTreeConnector")
+            && saveToLibrarySource.contains("SaveToLibraryTreeConnectorLevel")
+            && saveToLibrarySource.contains("connectorContinuations")
+            && saveToLibrarySource.contains("treeConnectorHeight: CGFloat = 34")
+            && saveToLibrarySource.contains("treeIndentWidth")
+            && saveToLibrarySource.contains("folderIconCenterX")
+            && saveToLibrarySource.contains("treeConnectorTargetInset")
+            && saveToLibrarySource.contains("Color.primary.opacity(SaveToLibraryLayout.treeConnectorOpacity)")
+            && saveToLibrarySource.contains("lineCap: .butt")
+            && saveToLibrarySource.contains("currentTargetX")
+            && !saveToLibrarySource.contains("SaveToLibraryDepthGuide"),
+        "save-to-library folder picker should use the same continuous, lightweight folder-tree connectors as the library sidebar"
+    )
+    try check(
         appModelSource.contains("selectedCategoryIDs:")
             && appModelSource.contains("assignCategories(")
             && !appModelSource.contains("addArxivPaperToLibrary(_ arxivPaper: ArxivFeedPaper, selectedTagNames"),
