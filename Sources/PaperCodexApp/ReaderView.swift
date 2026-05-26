@@ -14,8 +14,6 @@ struct ReaderView: View {
             ChatView()
                 .frame(minWidth: 330, idealWidth: 420, maxWidth: .infinity)
         }
-        .padding(.top, PaperCodexWindowChrome.tabBarHeight)
-        .ignoresSafeArea(.container, edges: .top)
         .background(Color(nsColor: .windowBackgroundColor))
         .onChange(of: model.selectedPaper?.id) { _, _ in
             isPDFSplitVisible = false

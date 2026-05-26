@@ -31,21 +31,25 @@ struct RootView: View {
     @State private var isShowingSaveToLibrarySheet = false
 
     var body: some View {
-        persistentRoutedContent
-        .environment(\.locale, Locale(identifier: model.globalLanguageMode.appLocaleIdentifier))
-        .paperCodexTypographyScale()
-        .overlay(alignment: .top) {
+        VStack(spacing: 0) {
             PaperCodexWindowTabBar {
                 isShowingSaveToLibrarySheet = true
             }
             .environmentObject(model)
             .environmentObject(navigation)
-            .ignoresSafeArea(.container, edges: .top)
+            .zIndex(2)
+
+            persistentRoutedContent
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .ignoresSafeArea(.container, edges: .top)
+        .environment(\.locale, Locale(identifier: model.globalLanguageMode.appLocaleIdentifier))
+        .paperCodexTypographyScale()
         .overlay(alignment: .topTrailing) {
             InteractionNoticeStack(notices: model.notices) { noticeID in
                 model.dismissNotice(id: noticeID)
             }
+            .padding(.top, PaperCodexWindowChrome.tabBarHeight + 10)
         }
         .overlay(alignment: .bottom) {
             if let status = model.globalOperationStatus {

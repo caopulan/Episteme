@@ -856,13 +856,18 @@ func runUILayoutSourceChecks() throws {
             && windowTabBarSource.contains("tabBarTrafficLightLeadingInset")
             && windowTabBarSource.contains("chromeTabShape")
             && windowTabBarSource.contains("UnevenRoundedRectangle")
-            && readerViewSource.contains(".ignoresSafeArea(.container, edges: .top)")
-            && readerViewSource.contains(".padding(.top, PaperCodexWindowChrome.tabBarHeight)")
+            && appSource.contains("VStack(spacing: 0)")
+            && appSource.contains("PaperCodexWindowTabBar {\n                isShowingSaveToLibrarySheet = true\n            }")
+            && appSource.contains("persistentRoutedContent\n                .frame(maxWidth: .infinity, maxHeight: .infinity)")
+            && appSource.contains(".padding(.top, PaperCodexWindowChrome.tabBarHeight + 10)")
+            && !appSource.contains(".overlay(alignment: .top) {\n            PaperCodexWindowTabBar")
+            && !readerViewSource.contains(".ignoresSafeArea(.container, edges: .top)")
+            && !readerViewSource.contains(".padding(.top, PaperCodexWindowChrome.tabBarHeight)")
             && !readerViewSource.contains("ReaderChromeTabBar")
             && !readerViewSource.contains("ReaderChromeTabItem")
             && !readerViewSource.contains("ReaderPaperTabStrip")
             && !readerViewSource.contains("ReaderPaperTabChip"),
-        "reader top tabs should be provided by the fixed window chrome and share the traffic-light titlebar row"
+        "reader top tabs should be a fixed window chrome row in the root layout, not an overlay compensated by Reader padding"
     )
     try check(
         readerViewSource.contains("Picker(\"Paper\"")
