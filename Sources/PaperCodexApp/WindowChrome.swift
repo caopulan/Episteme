@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 enum PaperCodexWindowChrome {
-    static let sidebarTopPadding: CGFloat = 48
+    static let sidebarTopPadding: CGFloat = 28
     static let sidebarHorizontalPadding: CGFloat = 22
     static let sidebarBottomPadding: CGFloat = 22
     static let titlebarDoubleClickZoomHeight: CGFloat = 54

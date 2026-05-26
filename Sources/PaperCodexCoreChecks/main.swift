@@ -619,6 +619,7 @@ func runUILayoutSourceChecks() throws {
     let saveToLibrarySource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/SaveToLibrarySheet.swift"))
     let readerViewSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/ReaderView.swift"))
     let windowTabBarSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/WindowChromeTabBar.swift"))
+    let homeChromeSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/WindowChrome.swift"))
     let localThumbnailSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/LocalThumbnailImage.swift"))
     let libraryFeatureStoreSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/LibraryFeatureStore.swift"))
     let libraryDerivedStateSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexCore/LibraryDerivedState.swift"))
@@ -855,6 +856,8 @@ func runUILayoutSourceChecks() throws {
             && windowTabBarSource.contains("PaperCodexReaderChromeTabItem")
             && windowTabBarSource.contains("tabBarTrafficLightLeadingInset")
             && windowTabBarSource.contains("chromeTabShape")
+            && windowTabBarSource.contains("PaperCodexChromeTabStyle.divider")
+            && windowTabBarSource.contains("PaperCodexChromeTabTopOutline")
             && windowTabBarSource.contains("UnevenRoundedRectangle")
             && appSource.contains("VStack(spacing: 0)")
             && appSource.contains("PaperCodexWindowTabBar {\n                isShowingSaveToLibrarySheet = true\n            }")
@@ -868,6 +871,13 @@ func runUILayoutSourceChecks() throws {
             && !readerViewSource.contains("ReaderPaperTabStrip")
             && !readerViewSource.contains("ReaderPaperTabChip"),
         "reader top tabs should be a fixed window chrome row in the root layout, not an overlay compensated by Reader padding"
+    )
+    try check(
+        homeChromeSource.contains("static let sidebarTopPadding: CGFloat = 28")
+            && librarySource.contains("static let splitPaneTopInset: CGFloat = 0")
+            && librarySource.contains(".padding(.top, 14)")
+            && librarySource.contains(".padding(.bottom, 24)"),
+        "home library chrome should keep the Paper Codex and library titles close to the tab row without returning to the old oversized top gap"
     )
     try check(
         readerViewSource.contains("Picker(\"Paper\"")

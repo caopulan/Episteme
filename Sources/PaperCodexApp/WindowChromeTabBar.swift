@@ -12,7 +12,7 @@ struct PaperCodexWindowTabBar: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             Rectangle()
-                .fill(Color.primary.opacity(0.10))
+                .fill(PaperCodexChromeTabStyle.divider)
                 .frame(height: 1)
 
             HStack(alignment: .bottom, spacing: 0) {
@@ -63,7 +63,7 @@ struct PaperCodexWindowTabBar: View {
             .frame(height: PaperCodexWindowChrome.tabBarHeight, alignment: .bottom)
         }
         .frame(height: PaperCodexWindowChrome.tabBarHeight)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(PaperCodexChromeTabStyle.barBackground)
         .background(
             PaperCodexWindowFullscreenObserver { isFullscreen in
                 isWindowFullscreen = isFullscreen
@@ -113,13 +113,13 @@ private struct PaperCodexHomeChromeTab: View {
         .overlay(alignment: .bottom) {
             if isActive {
                 Rectangle()
-                    .fill(Color(nsColor: .textBackgroundColor))
-                    .frame(height: 2)
+                    .fill(PaperCodexChromeTabStyle.activeBackground)
+                    .frame(height: 3)
                     .offset(y: 1)
             }
         }
         .overlay(
-            chromeTabShape
+            chromeTabOutline
                 .stroke(tabBorder, lineWidth: isActive ? 1 : 0.8)
         )
         .clipShape(chromeTabShape)
@@ -134,25 +134,29 @@ private struct PaperCodexHomeChromeTab: View {
 
     private var chromeTabShape: some InsettableShape {
         UnevenRoundedRectangle(
-            topLeadingRadius: 10,
+            topLeadingRadius: PaperCodexChromeTabStyle.cornerRadius,
             bottomLeadingRadius: 0,
             bottomTrailingRadius: 0,
-            topTrailingRadius: 10
+            topTrailingRadius: PaperCodexChromeTabStyle.cornerRadius
         )
+    }
+
+    private var chromeTabOutline: some Shape {
+        PaperCodexChromeTabTopOutline(radius: PaperCodexChromeTabStyle.cornerRadius)
     }
 
     private var tabBackground: Color {
         if isActive {
-            return Color(nsColor: .textBackgroundColor)
+            return PaperCodexChromeTabStyle.activeBackground
         }
-        return isHovering ? Color(nsColor: .controlBackgroundColor).opacity(0.78) : Color(nsColor: .windowBackgroundColor)
+        return isHovering ? PaperCodexChromeTabStyle.inactiveHoverBackground : PaperCodexChromeTabStyle.inactiveBackground
     }
 
     private var tabBorder: Color {
         if isActive {
-            return Color.primary.opacity(0.14)
+            return PaperCodexChromeTabStyle.activeBorder
         }
-        return isHovering ? Color.primary.opacity(0.10) : Color.clear
+        return isHovering ? PaperCodexChromeTabStyle.inactiveBorder : Color.clear
     }
 }
 
@@ -210,13 +214,13 @@ private struct PaperCodexReaderChromeTabItem: View {
         .overlay(alignment: .bottom) {
             if isActive {
                 Rectangle()
-                    .fill(Color(nsColor: .textBackgroundColor))
-                    .frame(height: 2)
+                    .fill(PaperCodexChromeTabStyle.activeBackground)
+                    .frame(height: 3)
                     .offset(y: 1)
             }
         }
         .overlay(
-            chromeTabShape
+            chromeTabOutline
                 .stroke(tabBorder, lineWidth: isActive ? 1 : 0.8)
         )
         .clipShape(chromeTabShape)
@@ -235,25 +239,62 @@ private struct PaperCodexReaderChromeTabItem: View {
 
     private var chromeTabShape: some InsettableShape {
         UnevenRoundedRectangle(
-            topLeadingRadius: 10,
+            topLeadingRadius: PaperCodexChromeTabStyle.cornerRadius,
             bottomLeadingRadius: 0,
             bottomTrailingRadius: 0,
-            topTrailingRadius: 10
+            topTrailingRadius: PaperCodexChromeTabStyle.cornerRadius
         )
+    }
+
+    private var chromeTabOutline: some Shape {
+        PaperCodexChromeTabTopOutline(radius: PaperCodexChromeTabStyle.cornerRadius)
     }
 
     private var tabBackground: Color {
         if isActive {
-            return Color(nsColor: .textBackgroundColor)
+            return PaperCodexChromeTabStyle.activeBackground
         }
-        return isHovering ? Color(nsColor: .controlBackgroundColor).opacity(0.78) : Color(nsColor: .windowBackgroundColor)
+        return isHovering ? PaperCodexChromeTabStyle.inactiveHoverBackground : PaperCodexChromeTabStyle.inactiveBackground
     }
 
     private var tabBorder: Color {
         if isActive {
-            return Color.primary.opacity(0.14)
+            return PaperCodexChromeTabStyle.activeBorder
         }
-        return isHovering ? Color.primary.opacity(0.10) : Color.clear
+        return isHovering ? PaperCodexChromeTabStyle.inactiveBorder : Color.clear
+    }
+}
+
+private enum PaperCodexChromeTabStyle {
+    static let cornerRadius: CGFloat = 9
+    static let barBackground = Color(nsColor: .windowBackgroundColor)
+    static let activeBackground = Color(nsColor: .textBackgroundColor)
+    static let inactiveBackground = Color(nsColor: .controlBackgroundColor).opacity(0.36)
+    static let inactiveHoverBackground = Color(nsColor: .controlBackgroundColor).opacity(0.70)
+    static let divider = Color.primary.opacity(0.13)
+    static let activeBorder = Color.primary.opacity(0.16)
+    static let inactiveBorder = Color.primary.opacity(0.10)
+}
+
+private struct PaperCodexChromeTabTopOutline: Shape {
+    var radius: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        let radius = min(radius, rect.width / 2, rect.height)
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.minY + radius))
+        path.addQuadCurve(
+            to: CGPoint(x: rect.minX + radius, y: rect.minY),
+            control: CGPoint(x: rect.minX, y: rect.minY)
+        )
+        path.addLine(to: CGPoint(x: rect.maxX - radius, y: rect.minY))
+        path.addQuadCurve(
+            to: CGPoint(x: rect.maxX, y: rect.minY + radius),
+            control: CGPoint(x: rect.maxX, y: rect.minY)
+        )
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+        return path
     }
 }
 

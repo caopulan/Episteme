@@ -514,7 +514,9 @@ struct LibraryView: View {
                 }
             }
         }
-        .padding(24)
+        .padding(.horizontal, 24)
+        .padding(.top, 14)
+        .padding(.bottom, 24)
     }
 
     private var bulkActionBarOverlay: some View {
@@ -1553,7 +1555,7 @@ private struct LibraryPaperRowClick: Equatable {
 }
 
 private enum LibraryLayout {
-    static let splitPaneTopInset: CGFloat = 24
+    static let splitPaneTopInset: CGFloat = 0
     static let bulkActionBarOverlayYOffset: CGFloat = 42
     static let bulkActionBarOverlayOpacity = 0.84
     static let paperRowThumbnailLimit = 3
