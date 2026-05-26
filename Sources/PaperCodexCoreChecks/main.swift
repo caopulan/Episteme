@@ -3383,6 +3383,10 @@ func runArxivFeedChecks() throws {
     )
     let pdfSummary = try cache.pdfCacheSummary(for: response)
     try check(pdfSummary == ArxivFeedAssetCacheSummary(cached: 1, total: 1), "arXiv cache should count cached PDFs")
+    let cachedPaperByCanonicalID = try cache.loadPaper(arxivID: "2604.18586")
+    let cachedPaperByVersionedID = try cache.loadPaper(arxivID: "2604.18586v1")
+    try check(cachedPaperByCanonicalID?.id == "2604.18586", "arXiv cache should load paper metadata by canonical id")
+    try check(cachedPaperByVersionedID?.arxivIDVersioned == "2604.18586v1", "arXiv cache should load paper metadata by versioned id")
 
     let metadata = PaperImportMetadata(
         title: paper.displayTitle(language: "en"),
@@ -3704,9 +3708,17 @@ func runLocalArxivClientChecks() throws {
 
     let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
     let clientSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexCore/LocalArxivClient.swift"))
+    let appModelSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/AppModel.swift"))
     try check(clientSource.contains("isRetriableNetworkError"), "local arXiv client should retry transient network failures")
     try check(clientSource.contains("http.statusCode == 429"), "local arXiv client should handle export API rate limiting")
     try check(clientSource.contains("arXivAPIRequestDelayNanoseconds"), "local arXiv metadata batches should be throttled")
+    try check(
+        appModelSource.contains("cachedArxivPaperForLibraryImport")
+            && appModelSource.contains("arxivLibraryImportRetryDelaysNanoseconds")
+            && appModelSource.contains("isArxivRateLimitError")
+            && appModelSource.contains("Retrying arXiv Import"),
+        "library arXiv imports should reuse cached metadata and keep 429-limited placeholders queued for delayed retry"
+    )
 
     let multiDateHTML = """
     <html><body>

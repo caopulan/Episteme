@@ -368,6 +368,37 @@ public final class ArxivFeedCache {
         return bestMatch?.feed
     }
 
+    public func loadPaper(arxivID rawID: String) throws -> ArxivFeedPaper? {
+        let targetID = LocalArxivClient.normalizeArxivID(rawID)
+        let feedsRoot = root.appendingPathComponent("feeds", isDirectory: true)
+        guard fileManager.fileExists(atPath: feedsRoot.path),
+              let enumerator = fileManager.enumerator(
+                at: feedsRoot,
+                includingPropertiesForKeys: [.isRegularFileKey],
+                options: [.skipsHiddenFiles]
+              ) else {
+            return nil
+        }
+
+        var newestMatch: (date: String, paper: ArxivFeedPaper)?
+        for case let url as URL in enumerator where url.pathExtension == "json" {
+            let values = try url.resourceValues(forKeys: [.isRegularFileKey])
+            guard values.isRegularFile == true else {
+                continue
+            }
+            let feed = try decoder.decode(ArxivFeedResponse.self, from: Data(contentsOf: url))
+            guard let paper = feed.papers.first(where: { paper in
+                paper.id == targetID || paper.arxivID == targetID || paper.arxivIDVersioned.map(LocalArxivClient.normalizeArxivID) == targetID
+            }) else {
+                continue
+            }
+            if newestMatch == nil || feed.date > newestMatch!.date {
+                newestMatch = (feed.date, paper)
+            }
+        }
+        return newestMatch?.paper
+    }
+
     @discardableResult
     public func saveAsset(_ data: Data, path: String) throws -> URL {
         let url = try assetURL(path: path)

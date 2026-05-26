@@ -133,6 +133,7 @@ struct LibraryArxivImportOutcome: Equatable {
     var title: String
     var state: LibraryArxivImportOutcomeState
     var message: String
+    var isRateLimited = false
 }
 
 private enum DiscoverPaperProcessingState: Sendable {
@@ -178,6 +179,11 @@ private let quickPromptsDefaultsKey = "PaperCodexQuickPrompts"
 private let librarySidebarWidthDefaultsKey = "PaperCodexLibrarySidebarWidth"
 private let discoverScrollPositionPaperIDDefaultsKey = "PaperCodexDiscoverScrollPositionPaperID"
 private let defaultDiscoverCodexConcurrency = 10
+private let arxivLibraryImportRetryDelaysNanoseconds: [UInt64] = [
+    30_000_000_000,
+    120_000_000_000,
+    300_000_000_000
+]
 
 private func loadDiscoverCodexConcurrencyFromDefaults() -> Int {
     let stored = UserDefaults.standard.integer(forKey: discoverCodexConcurrencyDefaultsKey)
@@ -2084,11 +2090,7 @@ final class AppModel: ObservableObject {
             guard let repository else {
                 throw AppModelError.repositoryUnavailable
             }
-            let client = makeLocalArxivClient()
-            let metadataPapers = try await client.fetchPapers(ids: [versionedID])
-            guard let arxivPaper = metadataPapers.first(where: { $0.id == canonicalID }) ?? metadataPapers.first else {
-                throw AppModelError.arxivMetadataNotFound(versionedID)
-            }
+            let arxivPaper = try await cachedArxivPaperForLibraryImport(versionedID: versionedID, canonicalID: canonicalID)
 
             if let existing = libraryPaper(for: arxivPaper, includePlaceholders: false) {
                 try transferAndDeleteArxivImportPlaceholder(canonicalID: canonicalID, toPaperID: existing.id, categoryID: categoryID, repository: repository)
@@ -2115,37 +2117,89 @@ final class AppModel: ObservableObject {
                 message: categoryID == nil ? "Imported" : "Imported to folder"
             )
         } catch {
+            let isRateLimited = isArxivRateLimitError(error)
             let message = String(describing: error)
-            errorMessage = message
+            if !isRateLimited {
+                errorMessage = message
+            }
             return LibraryArxivImportOutcome(
                 requestedID: versionedID,
                 canonicalID: canonicalID,
                 title: "",
                 state: .failed,
-                message: message
+                message: message,
+                isRateLimited: isRateLimited
             )
         }
     }
 
-    private func completeQueuedArxivLibraryImports(_ versionedIDs: [String], categoryID: String?) async {
+    private func completeQueuedArxivLibraryImports(_ versionedIDs: [String], categoryID: String?, attempt: Int = 0) async {
         var readyCount = 0
+        var retryIDs: [String] = []
         for versionedID in versionedIDs {
             let outcome = await addArxivIDToLibrary(versionedID, categoryID: categoryID)
-            pendingArxivLibraryImportIDs.remove(outcome.canonicalID)
             switch outcome.state {
             case .imported:
+                pendingArxivLibraryImportIDs.remove(outcome.canonicalID)
                 failedArxivLibraryImportMessagesByID.removeValue(forKey: outcome.canonicalID)
                 readyCount += 1
             case .alreadyInLibrary:
+                pendingArxivLibraryImportIDs.remove(outcome.canonicalID)
                 failedArxivLibraryImportMessagesByID.removeValue(forKey: outcome.canonicalID)
             case .failed:
-                failedArxivLibraryImportMessagesByID[outcome.canonicalID] = outcome.message
-                postNotice(kind: .error, title: "arXiv Import Failed", message: "\(outcome.canonicalID) · \(outcome.message)", autoDismissAfter: nil)
+                if outcome.isRateLimited,
+                   attempt < arxivLibraryImportRetryDelaysNanoseconds.count {
+                    retryIDs.append(outcome.requestedID)
+                    failedArxivLibraryImportMessagesByID.removeValue(forKey: outcome.canonicalID)
+                } else {
+                    pendingArxivLibraryImportIDs.remove(outcome.canonicalID)
+                    failedArxivLibraryImportMessagesByID[outcome.canonicalID] = outcome.message
+                    postNotice(kind: .error, title: "arXiv Import Failed", message: "\(outcome.canonicalID) · \(outcome.message)", autoDismissAfter: nil)
+                }
             }
         }
         if readyCount > 0 {
             postNotice(kind: .success, title: "arXiv Import Finished", message: "\(readyCount) paper\(readyCount == 1 ? "" : "s") ready")
         }
+        guard !retryIDs.isEmpty,
+              attempt < arxivLibraryImportRetryDelaysNanoseconds.count else {
+            return
+        }
+        let delay = arxivLibraryImportRetryDelaysNanoseconds[attempt]
+        postNotice(
+            kind: .info,
+            title: "Retrying arXiv Import",
+            message: "arXiv is rate limiting. \(retryIDs.count) queued paper\(retryIDs.count == 1 ? "" : "s") will retry in \(Int(delay / 1_000_000_000))s."
+        )
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: delay)
+            guard !Task.isCancelled else {
+                return
+            }
+            await self?.completeQueuedArxivLibraryImports(retryIDs, categoryID: categoryID, attempt: attempt + 1)
+        }
+    }
+
+    private func cachedArxivPaperForLibraryImport(versionedID: String, canonicalID: String) async throws -> ArxivFeedPaper {
+        if let paper = arxivFeed?.papers.first(where: { $0.id == canonicalID }) {
+            return paper
+        }
+        if let paper = try arxivCache.loadPaper(arxivID: canonicalID) {
+            return paper
+        }
+
+        let metadataPapers = try await makeLocalArxivClient().fetchPapers(ids: [versionedID])
+        guard let arxivPaper = metadataPapers.first(where: { $0.id == canonicalID }) ?? metadataPapers.first else {
+            throw AppModelError.arxivMetadataNotFound(versionedID)
+        }
+        return arxivPaper
+    }
+
+    private func isArxivRateLimitError(_ error: Error) -> Bool {
+        if case LocalArxivClientError.badStatus(429, _) = error {
+            return true
+        }
+        return String(describing: error).contains("HTTP 429")
     }
 
     private func uniqueVersionedArxivIDs(_ versionedIDs: [String]) -> [String] {
