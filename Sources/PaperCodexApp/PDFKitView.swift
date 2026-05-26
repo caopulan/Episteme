@@ -151,6 +151,8 @@ struct PDFKitView: NSViewRepresentable {
         private var shouldFitWidthOnResize = true
         private var referenceResolver = PDFReferenceResolver(pageTexts: [:])
         private var citationPopover: NSPopover?
+        private static let manualZoomMinimumScale: CGFloat = 0.20
+        private static let manualZoomMaximumScale: CGFloat = 5.0
 
         init(
             onSelection: @escaping (PDFSelectionInfo?) -> Void,
@@ -243,13 +245,9 @@ struct PDFKitView: NSViewRepresentable {
             lastAppliedCommand = command
             switch command.kind {
             case .zoomIn:
-                shouldFitWidthOnResize = false
-                pdfView.autoScales = false
-                pdfView.scaleFactor = min(pdfView.scaleFactor * 1.18, pdfView.maxScaleFactor)
+                applyManualZoom(multiplier: 1.18)
             case .zoomOut:
-                shouldFitWidthOnResize = false
-                pdfView.autoScales = false
-                pdfView.scaleFactor = max(pdfView.scaleFactor / 1.18, pdfView.minScaleFactor)
+                applyManualZoom(multiplier: 1 / 1.18)
             case .fitWidth:
                 shouldFitWidthOnResize = true
                 refitForCurrentWidth()
@@ -271,6 +269,86 @@ struct PDFKitView: NSViewRepresentable {
             }
             scheduleViewportReport()
             reportDocumentStatus()
+        }
+
+        @MainActor
+        private func applyManualZoom(multiplier: CGFloat) {
+            guard let pdfView else {
+                return
+            }
+            let viewportCenter = currentViewportPosition()
+            let currentScale = resolvedScaleFactor()
+            shouldFitWidthOnResize = false
+            pendingWidthRefit?.cancel()
+            pdfView.autoScales = false
+            pdfView.minScaleFactor = manualZoomLowerBound()
+            pdfView.maxScaleFactor = manualZoomUpperBound()
+
+            let targetScale = clampedManualScale(currentScale * multiplier)
+            if targetScale.isFinite,
+               targetScale > 0,
+               abs(pdfView.scaleFactor - targetScale) > 0.001 {
+                pdfView.scaleFactor = targetScale
+            }
+            restoreViewportCenter(viewportCenter)
+        }
+
+        @MainActor
+        private func resolvedScaleFactor() -> CGFloat {
+            guard let pdfView else {
+                return 1
+            }
+            if pdfView.scaleFactor.isFinite, pdfView.scaleFactor > 0 {
+                return pdfView.scaleFactor
+            }
+            let fitScale = pdfView.scaleFactorForSizeToFit
+            if fitScale.isFinite, fitScale > 0 {
+                return fitScale
+            }
+            return 1
+        }
+
+        @MainActor
+        private func clampedManualScale(_ scale: CGFloat) -> CGFloat {
+            min(max(scale, manualZoomLowerBound()), manualZoomUpperBound())
+        }
+
+        @MainActor
+        private func manualZoomLowerBound() -> CGFloat {
+            guard let pdfView else {
+                return Self.manualZoomMinimumScale
+            }
+            if pdfView.minScaleFactor.isFinite, pdfView.minScaleFactor > 0 {
+                return min(pdfView.minScaleFactor, Self.manualZoomMinimumScale)
+            }
+            return Self.manualZoomMinimumScale
+        }
+
+        @MainActor
+        private func manualZoomUpperBound() -> CGFloat {
+            guard let pdfView else {
+                return Self.manualZoomMaximumScale
+            }
+            if pdfView.maxScaleFactor.isFinite, pdfView.maxScaleFactor > 0 {
+                return max(pdfView.maxScaleFactor, Self.manualZoomMaximumScale)
+            }
+            return Self.manualZoomMaximumScale
+        }
+
+        @MainActor
+        private func restoreViewportCenter(_ position: PDFViewportPosition?) {
+            guard let position,
+                  let pdfView,
+                  let document = pdfView.document,
+                  document.pageCount > 0 else {
+                return
+            }
+            let pageIndex = min(max(position.pageIndex, 0), document.pageCount - 1)
+            guard let page = document.page(at: pageIndex) else {
+                return
+            }
+            let point = NSPoint(x: position.pagePointX, y: position.pagePointY)
+            pdfView.go(to: PDFDestination(page: page, at: point))
         }
 
         @MainActor

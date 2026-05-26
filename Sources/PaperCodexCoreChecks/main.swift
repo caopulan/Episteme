@@ -1359,6 +1359,17 @@ func runUILayoutSourceChecks() throws {
         "PDFKit view should accept explicit toolbar commands"
     )
     try check(
+        pdfKitSource.contains("applyManualZoom(multiplier:")
+            && pdfKitSource.contains("resolvedScaleFactor()")
+            && pdfKitSource.contains("clampedManualScale")
+            && pdfKitSource.contains("restoreViewportCenter")
+            && pdfKitSource.contains("manualZoomMinimumScale")
+            && pdfKitSource.contains("manualZoomMaximumScale")
+            && !pdfKitSource.contains("pdfView.scaleFactor = min(pdfView.scaleFactor * 1.18")
+            && !pdfKitSource.contains("pdfView.scaleFactor = max(pdfView.scaleFactor / 1.18"),
+        "PDF zoom commands should leave auto-fit through a stable captured scale and preserve the visible center"
+    )
+    try check(
         pdfKitSource.contains("ResponsivePDFView") && pdfKitSource.contains("refitForCurrentWidth"),
         "PDFKit view should refit the document when its split-pane width changes"
     )
