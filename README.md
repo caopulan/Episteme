@@ -20,6 +20,7 @@
 </p>
 
 <p align="center">
+  <a href="#intro-video">Intro Video</a> ·
   <a href="#screenshots">Screenshots</a> ·
   <a href="#features">Features</a> ·
   <a href="#installation">Installation</a> ·
@@ -31,6 +32,10 @@
 Paper Codex is a native macOS workspace for reading, organizing, and discussing academic papers. It keeps PDFs, folders, tags, notes, arXiv caches, thumbnails, reading sessions, and generated outputs on your machine, while using the Codex CLI when you want an AI research assistant inside a paper-specific workspace.
 
 It is built for researchers who want the speed and feel of a local paper manager, plus grounded chat over the actual PDF, clickable citations back to source regions, and local arXiv discovery without a hosted product backend.
+
+## Intro Video
+
+Watch the detailed Remotion product walkthrough with animated UI focus moves: [docs/assets/videos/paper-codex-intro.mp4](docs/assets/videos/paper-codex-intro.mp4).
 
 ## Screenshots
 

@@ -2,3 +2,6 @@
 .superpowers/
 .worktrees/
 .build/
+node_modules/
+docs/video/public/
+docs/video/out/

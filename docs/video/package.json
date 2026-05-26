@@ -1,0 +1,22 @@
+{
+  "name": "paper-codex-intro-video",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "prepare-assets": "node scripts/prepare-assets.mjs",
+    "render": "npm run prepare-assets && remotion render src/index.tsx PaperCodexIntro ../assets/videos/paper-codex-intro.mp4 --codec=h264 --crf=23 --pixel-format=yuv420p",
+    "studio": "npm run prepare-assets && remotion studio src/index.tsx"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.467",
+    "react": "19.2.1",
+    "react-dom": "19.2.1",
+    "remotion": "4.0.467"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.7",
+    "@types/react-dom": "19.2.3",
+    "typescript": "5.9.3"
+  }
+}
