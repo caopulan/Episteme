@@ -618,6 +618,7 @@ func runUILayoutSourceChecks() throws {
     let chatSource = try String(contentsOf: chatViewURL)
     let saveToLibrarySource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/SaveToLibrarySheet.swift"))
     let readerViewSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/ReaderView.swift"))
+    let windowTabBarSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/WindowChromeTabBar.swift"))
     let localThumbnailSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/LocalThumbnailImage.swift"))
     let libraryFeatureStoreSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/LibraryFeatureStore.swift"))
     let libraryDerivedStateSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexCore/LibraryDerivedState.swift"))
@@ -838,9 +839,9 @@ func runUILayoutSourceChecks() throws {
             && actionButtonSource.contains("struct PaperCodexIconButton")
             && discoverSource.contains("PaperCodexToolbarButton")
             && librarySource.contains("PaperCodexToolbarButton")
-            && chatSource.contains("PaperCodexToolbarButton")
+            && (chatSource.contains("PaperCodexToolbarButton") || chatSource.contains("ReaderChatHeaderActionButton"))
             && !discoverSource.contains("private struct ToolbarActionButton"),
-        "common toolbar and icon actions should use shared Paper Codex controls instead of local duplicates"
+        "common toolbar and icon actions should use shared controls, with reader-specific compact header actions only where layout requires them"
     )
     try check(
         saveToLibrarySource.contains("SaveToLibraryDestinationHeader")
@@ -850,11 +851,34 @@ func runUILayoutSourceChecks() throws {
         "save-to-library should present folder destination selection as a clear tree picker with selected path chips"
     )
     try check(
-        readerViewSource.contains("ReaderPaperTabChip")
-            && readerViewSource.contains("ReaderPaperTabStrip")
-            && readerViewSource.contains("paperTabAccent")
-            && readerViewSource.contains("Close Paper Tab"),
-        "reader papers should render as stable tabs with clear active state and quiet close affordances"
+        windowTabBarSource.contains("PaperCodexWindowTabBar")
+            && windowTabBarSource.contains("PaperCodexReaderChromeTabItem")
+            && windowTabBarSource.contains("tabBarTrafficLightLeadingInset")
+            && windowTabBarSource.contains("chromeTabShape")
+            && windowTabBarSource.contains("UnevenRoundedRectangle")
+            && readerViewSource.contains(".ignoresSafeArea(.container, edges: .top)")
+            && readerViewSource.contains(".padding(.top, PaperCodexWindowChrome.tabBarHeight)")
+            && !readerViewSource.contains("ReaderChromeTabBar")
+            && !readerViewSource.contains("ReaderChromeTabItem")
+            && !readerViewSource.contains("ReaderPaperTabStrip")
+            && !readerViewSource.contains("ReaderPaperTabChip"),
+        "reader top tabs should be provided by the fixed window chrome and share the traffic-light titlebar row"
+    )
+    try check(
+        readerViewSource.contains("Picker(\"Paper\"")
+            && readerViewSource.contains("selectedPaperBinding")
+            && readerViewSource.contains("paperSelector")
+            && readerViewSource.contains("onAddPaper")
+            && readerViewSource.contains("onRemoveActivePaper"),
+        "reader paper switching should live in the PDF toolbar as a compact dropdown with add/remove actions"
+    )
+    try check(
+        chatSource.contains("ReaderChatHeaderActionButton")
+            && chatSource.contains("private var sessionBar: some View {\n        HStack(spacing: 8)")
+            && chatSource.contains(".padding(.vertical, 5)")
+            && chatSource.contains(".frame(height: 24)")
+            && chatSource.contains(".font(.paperCodexSystem(size: 11.5"),
+        "reader chat header should use a compact single-row control layout with smaller session actions"
     )
     try check(
         librarySource.contains("LibraryPaperList")
@@ -1006,6 +1030,20 @@ func runUILayoutSourceChecks() throws {
         "root view should install the native window chrome configurator"
     )
     try check(
+        rootViewSource.contains("PaperCodexWindowTabBar")
+            && rootViewSource.contains("isShowingSaveToLibrarySheet")
+            && rootViewSource.contains(".ignoresSafeArea(.container, edges: .top)")
+            && windowTabBarSource.contains("struct PaperCodexWindowTabBar")
+            && windowTabBarSource.contains("PaperCodexHomeChromeTab")
+            && windowTabBarSource.contains("Home (Library, Discover, Settings, Recent Conversations)")
+            && windowTabBarSource.contains("navigation.route != .reader")
+            && windowTabBarSource.contains("model.returnFromReader()")
+            && windowTabBarSource.contains("model.goToLibrary()")
+            && windowChromeSource.contains("tabBarHeight")
+            && windowChromeSource.contains("tabBarTrafficLightLeadingInset"),
+        "root chrome should keep a fixed titlebar tab strip with a persistent Home tab for library, discover, settings, and recent conversations"
+    )
+    try check(
         windowChromeSource.contains(".fullSizeContentView")
             && windowChromeSource.contains("titlebarAppearsTransparent = true")
             && windowChromeSource.contains("titleVisibility = .hidden"),
@@ -1068,9 +1106,9 @@ func runUILayoutSourceChecks() throws {
         throw CheckFailure(description: "session bar should include both the panel tabs and session picker")
     }
     try check(
-        chatSource.contains("private var sessionBar: some View {\n        HStack(spacing: 12)")
-            && chatSource.contains("Divider()\n                .frame(height: 22)"),
-        "session picker should move right within a single-row session bar"
+        chatSource.contains("private var sessionBar: some View {\n        HStack(spacing: 8)")
+            && chatSource.contains("Divider()\n                .frame(height: 18)"),
+        "session picker should stay right within a compact single-row session bar"
     )
     try check(
         chatSource.contains("model.loadPaperNotes(for: paper)")
@@ -1423,8 +1461,8 @@ func runUILayoutSourceChecks() throws {
         "PDFKit view should intercept external and internal PDF link actions"
     )
     try check(
-        readerSource.contains("model.returnFromReader()"),
-        "reader back navigation should return to the previous browsing surface instead of always resetting to Library"
+        windowTabBarSource.contains("model.returnFromReader()"),
+        "window Home tab should return from Reader to the previous browsing surface instead of always resetting to Library"
     )
     try check(
         !appModelSource.contains("readerContextCleanupTask")
@@ -1434,12 +1472,13 @@ func runUILayoutSourceChecks() throws {
         "reader navigation should preserve PDF and chat context so route switches can keep reading position"
     )
     try check(
-        readerSource.contains("ReaderPaperTabStrip")
-            && readerSource.contains("ReaderPaperTabChip")
+        readerSource.contains("ReaderPDFToolbar")
+            && readerSource.contains("Picker(\"Paper\"")
+            && readerSource.contains("paperSelector")
             && readerSource.contains("AddPaperToSessionSheet")
             && readerSource.contains("model.addPaperToCurrentSession")
             && readerSource.contains("model.removePaperFromCurrentSession"),
-        "reader should expose the current session paper set and allow papers to be added or removed while reading"
+        "reader should expose the current session paper set through the PDF toolbar and allow papers to be added or removed while reading"
     )
 
     try check(
@@ -1485,7 +1524,8 @@ func runUILayoutSourceChecks() throws {
     )
     try check(
         chatSource.contains("Label(\"Rename\", systemImage: \"pencil\")")
-            || chatSource.contains("PaperCodexToolbarButton(\n                title: \"Rename\""),
+            || chatSource.contains("PaperCodexToolbarButton(\n                title: \"Rename\"")
+            || chatSource.contains("ReaderChatHeaderActionButton(\n                title: \"Rename\""),
         "chat session rename should be exposed as a direct button after New"
     )
     try check(

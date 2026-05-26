@@ -6,6 +6,9 @@ enum PaperCodexWindowChrome {
     static let sidebarHorizontalPadding: CGFloat = 22
     static let sidebarBottomPadding: CGFloat = 22
     static let titlebarDoubleClickZoomHeight: CGFloat = 54
+    static let tabBarHeight: CGFloat = 42
+    static let tabBarTrafficLightLeadingInset: CGFloat = 76
+    static let tabBarFullscreenLeadingInset: CGFloat = 10
 }
 
 struct WindowChromeConfigurator: NSViewRepresentable {

@@ -28,11 +28,20 @@ struct RootView: View {
     @State private var mountedRoutes: Set<AppRoute> = [.library]
     @State private var routeMountTask: Task<Void, Never>?
     @State private var routeCacheWarmupTask: Task<Void, Never>?
+    @State private var isShowingSaveToLibrarySheet = false
 
     var body: some View {
         persistentRoutedContent
         .environment(\.locale, Locale(identifier: model.globalLanguageMode.appLocaleIdentifier))
         .paperCodexTypographyScale()
+        .overlay(alignment: .top) {
+            PaperCodexWindowTabBar {
+                isShowingSaveToLibrarySheet = true
+            }
+            .environmentObject(model)
+            .environmentObject(navigation)
+            .ignoresSafeArea(.container, edges: .top)
+        }
         .overlay(alignment: .topTrailing) {
             InteractionNoticeStack(notices: model.notices) { noticeID in
                 model.dismissNotice(id: noticeID)
@@ -64,6 +73,28 @@ struct RootView: View {
             routeMountTask = nil
             routeCacheWarmupTask?.cancel()
             routeCacheWarmupTask = nil
+        }
+        .sheet(isPresented: $isShowingSaveToLibrarySheet) {
+            if let paper = model.selectedPaper {
+                SaveToLibrarySheet(
+                    paperTitle: paper.title,
+                    detail: paper.authors.prefix(4).joined(separator: ", "),
+                    libraryCategories: model.categories,
+                    initialCategoryIDs: model.paperCategoryIDsByID[paper.id, default: []],
+                    onSave: { selection in
+                        isShowingSaveToLibrarySheet = false
+                        model.saveCachedPaperToLibrary(
+                            paper,
+                            selectedCategoryIDs: selection.categoryIDs,
+                            newCategoryNames: selection.newCategoryNames,
+                            newCategories: selection.newCategories
+                        )
+                    },
+                    onCancel: {
+                        isShowingSaveToLibrarySheet = false
+                    }
+                )
+            }
         }
     }
 

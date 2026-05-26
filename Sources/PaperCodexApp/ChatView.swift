@@ -160,18 +160,18 @@ struct ChatView: View {
     }
 
     private var sessionBar: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 8) {
             Picker("Session Panel", selection: $model.selectedSessionPanelTab) {
                 Label("Chat", systemImage: "text.bubble").tag(SessionPanelTab.chat)
                 Label("Notes", systemImage: "note.text").tag(SessionPanelTab.notes)
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .frame(width: 146)
+            .frame(width: 132)
             .help("Session Panel")
 
             Divider()
-                .frame(height: 22)
+                .frame(height: 18)
 
             Picker("Session", selection: Binding(
                 get: { model.selectedSession?.id ?? "" },
@@ -184,11 +184,11 @@ struct ChatView: View {
             .labelsHidden()
             .frame(minWidth: 120, maxWidth: .infinity)
 
-            PaperCodexToolbarButton(title: "New", systemImage: "plus", tint: .blue) {
+            ReaderChatHeaderActionButton(title: "New", systemImage: "plus", tint: .blue) {
                 model.newSessionButtonTapped()
             }
 
-            PaperCodexToolbarButton(
+            ReaderChatHeaderActionButton(
                 title: "Rename",
                 systemImage: "pencil",
                 tint: .gray,
@@ -200,7 +200,8 @@ struct ChatView: View {
                 }
             }
         }
-        .padding(14)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
         .controlSize(.small)
     }
 
@@ -353,6 +354,47 @@ struct ChatView: View {
         draftsByComposerKey[composerDraftKey] = ""
         Task {
             await model.sendMessage(message)
+        }
+    }
+}
+
+private struct ReaderChatHeaderActionButton: View {
+    @State private var isHovering = false
+
+    var title: String
+    var systemImage: String
+    var tint: Color
+    var disabled = false
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Label {
+                Text(LocalizedStringKey(title))
+                    .lineLimit(1)
+            } icon: {
+                Image(systemName: systemImage)
+            }
+            .font(.paperCodexSystem(size: 11.5, weight: .semibold))
+            .padding(.horizontal, 8)
+            .frame(height: 24)
+            .foregroundStyle(disabled ? Color.secondary.opacity(0.55) : (isHovering ? tint : Color.primary.opacity(0.82)))
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(disabled ? Color(nsColor: .controlBackgroundColor).opacity(0.55) : (isHovering ? tint.opacity(0.12) : Color(nsColor: .controlBackgroundColor)))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(disabled ? Color.black.opacity(0.06) : (isHovering ? tint.opacity(0.38) : Color.black.opacity(0.10)), lineWidth: 1)
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+        .help(title)
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.10)) {
+                isHovering = hovering
+            }
         }
     }
 }

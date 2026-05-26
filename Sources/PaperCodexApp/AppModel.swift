@@ -2935,6 +2935,7 @@ final class AppModel: ObservableObject {
             } else {
                 try focusPaperForReader(paper, opensReaderTab: false)
             }
+            route = .reader
         } catch {
             errorMessage = String(describing: error)
         }
