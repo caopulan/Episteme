@@ -29,7 +29,10 @@ public struct CodexAgentRuntime: AgentRuntime {
         )
 
         let workspaceURL = URL(fileURLWithPath: request.workspacePath, isDirectory: true)
-        let imageSnapshot = try GeneratedImageCollector.snapshot(in: workspaceURL)
+        let imageSnapshot = try GeneratedImageCollector.snapshot(
+            in: workspaceURL,
+            codexThreadID: request.existingSessionID
+        )
         let turnsURL = workspaceURL.appendingPathComponent("turns", isDirectory: true)
         try FileManager.default.createDirectory(at: turnsURL, withIntermediateDirectories: true)
         let outputURL = turnsURL.appendingPathComponent("\(request.outputFilePrefix)-codex.txt")
@@ -72,11 +75,16 @@ public struct CodexAgentRuntime: AgentRuntime {
             )
         }.value
         let lastMessage = (try? String(contentsOf: outputURL, encoding: .utf8)) ?? ""
-        let generatedImages = try GeneratedImageCollector.newImages(in: workspaceURL, excluding: imageSnapshot)
+        let threadID = CodexCLI.parseThreadID(from: stdout)
+        let generatedImages = try GeneratedImageCollector.newImages(
+            in: workspaceURL,
+            excluding: imageSnapshot,
+            codexThreadID: threadID ?? request.existingSessionID
+        )
         return AgentRuntimeResult(
             stdout: stdout,
             lastMessage: lastMessage,
-            threadID: CodexCLI.parseThreadID(from: stdout),
+            threadID: threadID,
             generatedImages: generatedImages,
             tokenUsage: CodexCLI.aggregateTokenUsage(from: stdout)
         )

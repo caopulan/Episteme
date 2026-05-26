@@ -2999,6 +2999,10 @@ func runCodexCLIChecks() throws {
     let toolEvent = try CodexJSONEventParser.parseLine(#"{"type":"tool_call","name":"web.search","arguments":{"query":"paper"}}"#)
     try check(toolEvent?.kind == .tool, "non-terminal tool calls should be classified as tool events")
     try check(toolEvent?.title == "web.search", "tool events should show the tool name")
+    let imageGenerationEvent = try CodexJSONEventParser.parseLine(#"{"type":"image_generation_call","id":"ig_test","status":"completed","result":"base64-payload"}"#)
+    try check(imageGenerationEvent?.kind == .tool, "image generation events should be classified as compact tool events")
+    try check(imageGenerationEvent?.title == "Image generation", "image generation events should have a readable title")
+    try check(imageGenerationEvent?.detail == "completed · ig_test", "image generation events should omit raw image payloads from the UI stream")
     let usageEvent = try CodexJSONEventParser.parseLine(#"{"type":"turn.completed","usage":{"input_tokens":24111,"cached_input_tokens":2432,"output_tokens":424,"reasoning_output_tokens":247}}"#)
     try check(usageEvent?.kind == .usage, "turn completion usage should be classified as a usage event")
     try check(usageEvent?.tokenUsage?.inputTokens == 24_111, "usage events should preserve input token counts")
@@ -3129,6 +3133,36 @@ func runGeneratedImageChecks() throws {
     let markdown = GeneratedImageCollector.markdown(for: generated)
     try check(markdown.contains("![Generated image](\(newImage.path))"), "generated image markdown should include absolute image paths")
     try check(!markdown.contains(oldImage.path), "generated image markdown should not include previous images")
+
+    let codexHome = FileManager.default.temporaryDirectory
+        .appendingPathComponent("paper-codex-generated-images-home-\(UUID().uuidString)", isDirectory: true)
+    let threadDir = codexHome
+        .appendingPathComponent("generated_images", isDirectory: true)
+        .appendingPathComponent("thread-a", isDirectory: true)
+    try FileManager.default.createDirectory(at: threadDir, withIntermediateDirectories: true)
+    let externalOldImage = threadDir.appendingPathComponent("ig_old_external.png")
+    let externalNewImage = threadDir.appendingPathComponent("ig_new_external.png")
+    try Data([0x89, 0x50, 0x4e, 0x47]).write(to: externalOldImage)
+
+    let codexBefore = try GeneratedImageCollector.snapshot(
+        in: root,
+        codexThreadID: "thread-a",
+        codexHome: codexHome
+    )
+    try Data([0x89, 0x50, 0x4e, 0x47]).write(to: externalNewImage)
+    let generatedWithCodexDefault = try GeneratedImageCollector.newImages(
+        in: root,
+        excluding: codexBefore,
+        codexThreadID: "thread-a",
+        codexHome: codexHome
+    )
+    let copiedExternalNewImage = root
+        .appendingPathComponent("generated-images", isDirectory: true)
+        .appendingPathComponent("ig_new_external.png")
+    try check(FileManager.default.fileExists(atPath: copiedExternalNewImage.path), "generated image collector should copy Codex default images into the session workspace")
+    try check(generatedWithCodexDefault.map(\.standardizedFileURL.path).contains(copiedExternalNewImage.standardizedFileURL.path), "generated image collector should return the copied workspace image path")
+    try check(!generatedWithCodexDefault.map(\.standardizedFileURL.path).contains(externalOldImage.standardizedFileURL.path), "generated image collector should ignore old Codex default images")
+    try check(!generatedWithCodexDefault.map(\.standardizedFileURL.path).contains(externalNewImage.standardizedFileURL.path), "generated image collector should not expose hidden Codex default paths directly")
 }
 
 func runImageRequestChecks() throws {

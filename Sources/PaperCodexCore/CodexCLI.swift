@@ -276,6 +276,13 @@ public enum CodexJSONEventParser {
             }
             return CodexRunEvent(kind: .terminal, title: "Command output", detail: output ?? compactJSONString(effective) ?? type)
         }
+        if lowerType.contains("image_generation") {
+            let status = stringValue(named: "status", in: effective) ?? "completed"
+            let callID = stringValue(named: "id", in: effective)
+                ?? stringValue(named: "call_id", in: effective)
+            let detail = [status, callID].compactMap { $0 }.joined(separator: " · ")
+            return CodexRunEvent(kind: .tool, title: "Image generation", detail: detail)
+        }
         if lowerType.contains("tool") || lowerType.contains("function_call") {
             let name = stringValue(named: "name", in: effective)
                 ?? stringValue(named: "tool_name", in: effective)
