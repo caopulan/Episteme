@@ -18,6 +18,7 @@ struct ChatView: View {
     @State private var composerResizeStartHeight: CGFloat?
     @State private var sessionPendingRename: PaperSession?
     @State private var renameSessionTitle = ""
+    @State private var selectedGeneratedImageURL: URL?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -43,6 +44,9 @@ struct ChatView: View {
                 return
             }
             model.loadPaperNotes(for: paper)
+        }
+        .onChange(of: model.selectedSession?.id) { _, _ in
+            selectedGeneratedImageURL = nil
         }
     }
 
@@ -83,6 +87,9 @@ struct ChatView: View {
                                     },
                                     onNewSession: {
                                         model.startFreshSessionFromCurrentPaperSet()
+                                    },
+                                    onGeneratedImagePreview: { url in
+                                        selectedGeneratedImageURL = url
                                     }
                                 )
                                 .id(message.id)
@@ -109,6 +116,14 @@ struct ChatView: View {
                 }
             }
             composer
+        }
+        .overlay {
+            if let selectedGeneratedImageURL {
+                GeneratedImagePreviewOverlay(imageURL: selectedGeneratedImageURL) {
+                    self.selectedGeneratedImageURL = nil
+                }
+                .zIndex(10)
+            }
         }
     }
 
@@ -1164,6 +1179,7 @@ private struct MessageBubble: View {
     var onCitation: (String) -> Void
     var onRetryFailure: (String) -> Void
     var onNewSession: () -> Void
+    var onGeneratedImagePreview: (URL) -> Void
 
     private var isUser: Bool {
         message.role == .user
@@ -1213,7 +1229,7 @@ private struct MessageBubble: View {
                 }
                 let imageURLs = generatedImageURLs(in: message.content)
                 if !imageURLs.isEmpty {
-                    GeneratedImageGallery(urls: imageURLs)
+                    GeneratedImageGallery(urls: imageURLs, onPreview: onGeneratedImagePreview)
                 }
                 if failureNotice != nil {
                     HStack(spacing: 8) {
@@ -1279,27 +1295,32 @@ private func generatedImageURLs(in markdown: String) -> [URL] {
 
 private struct GeneratedImageGallery: View {
     var urls: [URL]
+    var onPreview: (URL) -> Void
 
     var body: some View {
         ScrollView(.horizontal) {
             HStack(spacing: 8) {
                 ForEach(urls, id: \.path) { url in
                     Button {
-                        NSWorkspace.shared.open(url)
+                        onPreview(url)
                     } label: {
                         VStack(alignment: .leading, spacing: 5) {
-                            if let image = NSImage(contentsOf: url) {
-                                Image(nsImage: image)
-                                    .resizable()
-                                    .scaledToFill()
-                                    .frame(width: 126, height: 86)
-                                    .clipped()
-                                    .clipShape(RoundedRectangle(cornerRadius: 7))
-                            } else {
-                                Image(systemName: "photo")
-                                    .frame(width: 126, height: 86)
-                                    .background(Color(nsColor: .controlBackgroundColor))
-                                    .clipShape(RoundedRectangle(cornerRadius: 7))
+                            ZStack(alignment: .topTrailing) {
+                                LocalThumbnailImage(url: url, maxPixelSize: 260, contentMode: .fill) {
+                                    Image(systemName: "photo")
+                                        .frame(width: 126, height: 86)
+                                        .background(Color(nsColor: .controlBackgroundColor))
+                                }
+                                .frame(width: 126, height: 86)
+                                .clipped()
+                                .clipShape(RoundedRectangle(cornerRadius: 7))
+
+                                Image(systemName: "arrow.up.left.and.arrow.down.right")
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(.white)
+                                    .padding(5)
+                                    .background(.black.opacity(0.46), in: Circle())
+                                    .padding(5)
                             }
                             Text(url.lastPathComponent)
                                 .font(.caption2)
@@ -1311,11 +1332,68 @@ private struct GeneratedImageGallery: View {
                         .clipShape(RoundedRectangle(cornerRadius: 8))
                     }
                     .buttonStyle(.plain)
-                    .help("Open generated image")
+                    .help("Preview generated image")
                 }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct GeneratedImagePreviewOverlay: View {
+    var imageURL: URL
+    var onDismiss: () -> Void
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.56)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    onDismiss()
+                }
+            VStack(spacing: 0) {
+                HStack(spacing: 10) {
+                    Image(systemName: "photo")
+                        .foregroundStyle(.white.opacity(0.76))
+                    Text(imageURL.lastPathComponent)
+                        .font(.callout.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Spacer(minLength: 12)
+                    Button {
+                        onDismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.callout.weight(.semibold))
+                            .frame(width: 28, height: 28)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.white.opacity(0.82))
+                    .help("Close preview")
+                }
+                .padding(.horizontal, 14)
+                .frame(height: 44)
+                .background(Color.black.opacity(0.88))
+
+                ZoomableImageScrollView(imageURL: imageURL) {
+                    onDismiss()
+                }
+            }
+            .background(Color.black)
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(Color.white.opacity(0.10), lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.45), radius: 24, y: 16)
+            .padding(24)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .transition(.opacity)
+        .onExitCommand {
+            onDismiss()
+        }
     }
 }
 

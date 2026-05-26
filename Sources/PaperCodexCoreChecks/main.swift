@@ -1536,6 +1536,18 @@ func runUILayoutSourceChecks() throws {
         chatSource.contains("GeneratedImageGallery"),
         "chat should render generated local images as an explicit gallery"
     )
+    if let galleryStart = chatSource.range(of: "private struct GeneratedImageGallery"),
+       let galleryEnd = chatSource.range(of: "private struct CurrentSelectionReplyCard", range: galleryStart.upperBound..<chatSource.endIndex) {
+        let gallerySource = String(chatSource[galleryStart.lowerBound..<galleryEnd.lowerBound])
+        try check(
+            gallerySource.contains("ZoomableImageScrollView")
+                && gallerySource.contains("GeneratedImagePreviewOverlay")
+                && !gallerySource.contains("NSWorkspace.shared.open"),
+            "generated image gallery should preview and zoom images inside Paper Codex instead of opening external image files"
+        )
+    } else {
+        throw CheckFailure(description: "generated image gallery source section should be present")
+    }
     try check(
         chatSource.contains("hasMarkedText()"),
         "chat composer should let IME marked text handle Return before submitting"
