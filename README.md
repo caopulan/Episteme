@@ -9,6 +9,10 @@
 </p>
 
 <p align="center">
+  <strong>English</strong> · <a href="README.zh-CN.md">简体中文</a>
+</p>
+
+<p align="center">
   <a href="https://swift.org"><img alt="Swift" src="https://img.shields.io/badge/Swift-6.2-orange"></a>
   <img alt="Platform" src="https://img.shields.io/badge/macOS-14%2B-blue">
   <img alt="Status" src="https://img.shields.io/badge/status-active%20development-2ea44f">
@@ -16,6 +20,7 @@
 </p>
 
 <p align="center">
+  <a href="#screenshots">Screenshots</a> ·
   <a href="#features">Features</a> ·
   <a href="#installation">Installation</a> ·
   <a href="#quick-start">Quick Start</a> ·
@@ -27,17 +32,42 @@ Paper Codex is a native macOS workspace for reading, organizing, and discussing 
 
 It is built for researchers who want the speed and feel of a local paper manager, plus grounded chat over the actual PDF, clickable citations back to source regions, and local arXiv discovery without a hosted product backend.
 
+## Screenshots
+
+<p align="center">
+  <img src="docs/assets/screenshots/reader-chat.png" alt="Reader view with a PDF and Codex chat side by side">
+  <br>
+  <sub>Read a PDF, keep paper tabs open, and ask Codex questions with source-grounded context.</sub>
+</p>
+
+<table>
+  <tr>
+    <td width="50%">
+      <img src="docs/assets/screenshots/library.png" alt="Paper library with folder tree, search, tags, and details">
+    </td>
+    <td width="50%">
+      <img src="docs/assets/screenshots/discover.png" alt="arXiv Discover view with paper cards, thumbnails, tags, and local similarity scores">
+    </td>
+  </tr>
+  <tr>
+    <td><sub>Organize a local paper library with nested folders, tags, thumbnails, and paper details.</sub></td>
+    <td><sub>Browse arXiv results with local caching, thumbnails, Chinese summaries, and save/open actions.</sub></td>
+  </tr>
+</table>
+
+See the full visual tour in [docs/showcase.md](docs/showcase.md).
+
 ## Features
 
-- **Local paper library** — import PDFs, organize them into nested folders, add tags, and keep durable metadata in SQLite.
-- **Native PDF reader** — read with PDFKit, switch paper tabs, zoom smoothly, and preserve reader context.
-- **Source-grounded chat** — select text in the PDF, ask Codex, and keep citations tied to original page regions.
-- **Codex session workspaces** — each chat session writes a local workspace with PDFs, metadata, anchors, extracted text, and turn logs.
-- **Generated image support** — image-generation requests can surface directly in the chat, with in-app zoomable previews.
-- **Local arXiv Discover** — browse arXiv metadata directly, cache feeds/PDFs/thumbnails, and save papers into the local library.
-- **Codex enrichment** — process Discover results for Chinese titles, summaries, contribution notes, tags, and useful links.
-- **Similarity ranking** — optionally rank arXiv results against local folders or tags using an OpenAI-compatible embedding provider.
-- **Local-first storage** — no Paper Codex account, cloud sync, or product API is required for the current version.
+- **Local paper library** - import PDFs, organize them into nested folders, add tags, and keep durable metadata in SQLite.
+- **Native PDF reader** - read with PDFKit, switch paper tabs, zoom smoothly, and preserve reader context.
+- **Source-grounded chat** - select text in the PDF, ask Codex, and keep citations tied to original page regions.
+- **Codex session workspaces** - each chat session writes a local workspace with PDFs, metadata, anchors, extracted text, and turn logs.
+- **Generated image support** - image-generation requests can surface directly in the chat, with in-app zoomable previews.
+- **Local arXiv Discover** - browse arXiv metadata directly, cache feeds/PDFs/thumbnails, and save papers into the local library.
+- **Codex enrichment** - process Discover results for Chinese titles, summaries, contribution notes, tags, and useful links.
+- **Similarity ranking** - optionally rank arXiv results against local folders or tags using an OpenAI-compatible embedding provider.
+- **Local-first storage** - no Paper Codex account, cloud sync, or product API is required for the current version.
 
 ## Installation
 
@@ -88,15 +118,15 @@ open "$PWD/build/PaperCodex.app"
 Example prompts that work well:
 
 ```text
-这篇论文的核心贡献是什么？请引用原文位置。
+What is the central contribution of this paper? Please cite the source location.
 ```
 
 ```text
-对比这篇论文和当前 session 里的其他论文，哪些假设不一样？
+Compare this paper with the other papers in the current session. Which assumptions differ?
 ```
 
 ```text
-用 imagegen 生成一张图，解释这篇论文的训练流程。
+Use imagegen to create a figure that explains this paper's training pipeline.
 ```
 
 When image generation succeeds, Paper Codex copies the generated asset into the session workspace and renders it in the chat. Click the thumbnail to open an in-app zoomable preview instead of leaving the reader.
