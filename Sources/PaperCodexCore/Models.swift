@@ -289,11 +289,24 @@ public struct Anchor: Codable, Equatable, Identifiable, Sendable {
     }
 }
 
+public struct AgentRuntimeSessionLink: Codable, Equatable, Sendable {
+    public var runtimeID: String
+    public var sessionID: String
+
+    public init(runtimeID: String, sessionID: String) {
+        self.runtimeID = runtimeID
+        self.sessionID = sessionID
+    }
+}
+
 public struct PaperSession: Codable, Equatable, Identifiable, Sendable {
     public var id: String
     public var title: String
     public var paperIDs: [String]
     public var codexSessionID: String?
+    public var defaultRuntimeID: String?
+    public var runtimeSessionLinks: [AgentRuntimeSessionLink]
+    public var workspaceMaterializationMode: WorkspaceMaterializationMode
     public var workspacePath: String
     public var createdAt: Date
     public var updatedAt: Date
@@ -303,6 +316,9 @@ public struct PaperSession: Codable, Equatable, Identifiable, Sendable {
         title: String,
         paperIDs: [String],
         codexSessionID: String?,
+        defaultRuntimeID: String? = nil,
+        runtimeSessionLinks: [AgentRuntimeSessionLink] = [],
+        workspaceMaterializationMode: WorkspaceMaterializationMode = .copyPDF,
         workspacePath: String,
         createdAt: Date,
         updatedAt: Date
@@ -311,9 +327,103 @@ public struct PaperSession: Codable, Equatable, Identifiable, Sendable {
         self.title = title
         self.paperIDs = paperIDs
         self.codexSessionID = codexSessionID
+        self.defaultRuntimeID = defaultRuntimeID ?? (codexSessionID == nil ? nil : "codex")
+        self.runtimeSessionLinks = Self.normalizedRuntimeSessionLinks(
+            runtimeSessionLinks,
+            codexSessionID: codexSessionID
+        )
+        self.workspaceMaterializationMode = workspaceMaterializationMode
         self.workspacePath = workspacePath
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+    }
+
+    public func runtimeSessionID(for runtimeID: String) -> String? {
+        runtimeSessionLinks.first { $0.runtimeID == runtimeID }?.sessionID
+            ?? (runtimeID == "codex" ? codexSessionID : nil)
+    }
+
+    public mutating func setRuntimeSessionID(_ sessionID: String?, for runtimeID: String) {
+        runtimeSessionLinks.removeAll { $0.runtimeID == runtimeID }
+        let trimmed = sessionID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !trimmed.isEmpty {
+            runtimeSessionLinks.append(AgentRuntimeSessionLink(runtimeID: runtimeID, sessionID: trimmed))
+        }
+        if runtimeID == "codex" {
+            codexSessionID = trimmed.isEmpty ? nil : trimmed
+        }
+        runtimeSessionLinks = Self.normalizedRuntimeSessionLinks(
+            runtimeSessionLinks,
+            codexSessionID: codexSessionID
+        )
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case title
+        case paperIDs
+        case codexSessionID
+        case defaultRuntimeID
+        case runtimeSessionLinks
+        case workspaceMaterializationMode
+        case workspacePath
+        case createdAt
+        case updatedAt
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        title = try container.decode(String.self, forKey: .title)
+        paperIDs = try container.decode([String].self, forKey: .paperIDs)
+        codexSessionID = try container.decodeIfPresent(String.self, forKey: .codexSessionID)
+        defaultRuntimeID = try container.decodeIfPresent(String.self, forKey: .defaultRuntimeID)
+            ?? (codexSessionID == nil ? nil : "codex")
+        runtimeSessionLinks = Self.normalizedRuntimeSessionLinks(
+            try container.decodeIfPresent([AgentRuntimeSessionLink].self, forKey: .runtimeSessionLinks) ?? [],
+            codexSessionID: codexSessionID
+        )
+        workspaceMaterializationMode = try container.decodeIfPresent(
+            WorkspaceMaterializationMode.self,
+            forKey: .workspaceMaterializationMode
+        ) ?? .copyPDF
+        workspacePath = try container.decode(String.self, forKey: .workspacePath)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        updatedAt = try container.decode(Date.self, forKey: .updatedAt)
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(title, forKey: .title)
+        try container.encode(paperIDs, forKey: .paperIDs)
+        try container.encodeIfPresent(codexSessionID, forKey: .codexSessionID)
+        try container.encodeIfPresent(defaultRuntimeID, forKey: .defaultRuntimeID)
+        try container.encode(runtimeSessionLinks, forKey: .runtimeSessionLinks)
+        try container.encode(workspaceMaterializationMode, forKey: .workspaceMaterializationMode)
+        try container.encode(workspacePath, forKey: .workspacePath)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(updatedAt, forKey: .updatedAt)
+    }
+
+    private static func normalizedRuntimeSessionLinks(
+        _ links: [AgentRuntimeSessionLink],
+        codexSessionID: String?
+    ) -> [AgentRuntimeSessionLink] {
+        var linksByRuntimeID: [String: AgentRuntimeSessionLink] = [:]
+        for link in links {
+            let runtimeID = link.runtimeID.trimmingCharacters(in: .whitespacesAndNewlines)
+            let sessionID = link.sessionID.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !runtimeID.isEmpty, !sessionID.isEmpty else {
+                continue
+            }
+            linksByRuntimeID[runtimeID] = AgentRuntimeSessionLink(runtimeID: runtimeID, sessionID: sessionID)
+        }
+        if let codexSessionID = codexSessionID?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !codexSessionID.isEmpty {
+            linksByRuntimeID["codex"] = AgentRuntimeSessionLink(runtimeID: "codex", sessionID: codexSessionID)
+        }
+        return linksByRuntimeID.keys.sorted().compactMap { linksByRuntimeID[$0] }
     }
 }
 

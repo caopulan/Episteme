@@ -111,6 +111,9 @@ public final class PaperRepository {
           id TEXT PRIMARY KEY,
           title TEXT NOT NULL,
           codex_session_id TEXT,
+          default_runtime_id TEXT,
+          runtime_session_links_json TEXT,
+          workspace_materialization_mode TEXT NOT NULL DEFAULT 'copy-pdf',
           workspace_path TEXT NOT NULL,
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL
@@ -170,7 +173,46 @@ public final class PaperRepository {
         if !categoryColumns.contains("is_pinned") {
             try database.execute("ALTER TABLE categories ADD COLUMN is_pinned INTEGER NOT NULL DEFAULT 0;")
         }
+        let sessionColumns = try database.tableColumns("sessions")
+        if !sessionColumns.contains("default_runtime_id") {
+            try database.execute("ALTER TABLE sessions ADD COLUMN default_runtime_id TEXT;")
+        }
+        if !sessionColumns.contains("runtime_session_links_json") {
+            try database.execute("ALTER TABLE sessions ADD COLUMN runtime_session_links_json TEXT;")
+        }
+        if !sessionColumns.contains("workspace_materialization_mode") {
+            try database.execute("ALTER TABLE sessions ADD COLUMN workspace_materialization_mode TEXT NOT NULL DEFAULT 'copy-pdf';")
+        }
+        try backfillRuntimeSessionLinksFromCodex()
         try LocalStoreV2Migrator.migrate(database: database)
+    }
+
+    private func backfillRuntimeSessionLinksFromCodex() throws {
+        let rows = try database.query("""
+        SELECT id, codex_session_id
+        FROM sessions
+        WHERE codex_session_id IS NOT NULL
+          AND TRIM(codex_session_id) != ''
+          AND (runtime_session_links_json IS NULL OR TRIM(runtime_session_links_json) = '');
+        """) { row in
+            (
+                id: try row.text(0),
+                codexSessionID: try row.text(1)
+            )
+        }
+        for row in rows {
+            let links = [AgentRuntimeSessionLink(runtimeID: "codex", sessionID: row.codexSessionID)]
+            try database.run("""
+            UPDATE sessions
+            SET default_runtime_id = COALESCE(default_runtime_id, 'codex'),
+                runtime_session_links_json = ?,
+                workspace_materialization_mode = COALESCE(workspace_materialization_mode, 'copy-pdf')
+            WHERE id = ?;
+            """, bindings: [
+                .text(try jsonString(links)),
+                .text(row.id)
+            ])
+        }
     }
 
     public func upsertPaper(_ paper: Paper) throws {
@@ -620,34 +662,59 @@ public final class PaperRepository {
         }.first
     }
 
+    private func normalizedSessionForStorage(_ session: PaperSession) -> PaperSession {
+        var normalized = session
+        if let codexRuntimeSessionID = normalized.runtimeSessionID(for: "codex") {
+            normalized.codexSessionID = codexRuntimeSessionID
+        }
+        if normalized.defaultRuntimeID == nil, normalized.codexSessionID != nil {
+            normalized.defaultRuntimeID = "codex"
+        }
+        normalized.setRuntimeSessionID(normalized.codexSessionID, for: "codex")
+        return normalized
+    }
+
     public func upsertSession(_ session: PaperSession) throws {
+        let normalizedSession = normalizedSessionForStorage(session)
         try database.run("""
-        INSERT INTO sessions (id, title, codex_session_id, workspace_path, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO sessions (
+          id, title, codex_session_id, default_runtime_id, runtime_session_links_json,
+          workspace_materialization_mode, workspace_path, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
           title = excluded.title,
           codex_session_id = excluded.codex_session_id,
+          default_runtime_id = excluded.default_runtime_id,
+          runtime_session_links_json = excluded.runtime_session_links_json,
+          workspace_materialization_mode = excluded.workspace_materialization_mode,
           workspace_path = excluded.workspace_path,
           updated_at = excluded.updated_at;
         """, bindings: [
-            .text(session.id),
-            .text(session.title),
-            session.codexSessionID.map(SQLiteValue.text) ?? .null,
-            .text(session.workspacePath),
-            .text(dates.string(from: session.createdAt)),
-            .text(dates.string(from: session.updatedAt))
+            .text(normalizedSession.id),
+            .text(normalizedSession.title),
+            normalizedSession.codexSessionID.map(SQLiteValue.text) ?? .null,
+            normalizedSession.defaultRuntimeID.map(SQLiteValue.text) ?? .null,
+            .text(try jsonString(normalizedSession.runtimeSessionLinks)),
+            .text(normalizedSession.workspaceMaterializationMode.rawValue),
+            .text(normalizedSession.workspacePath),
+            .text(dates.string(from: normalizedSession.createdAt)),
+            .text(dates.string(from: normalizedSession.updatedAt))
         ])
         try database.run("DELETE FROM session_papers WHERE session_id = ?;", bindings: [.text(session.id)])
-        for (index, paperID) in session.paperIDs.enumerated() {
+        for (index, paperID) in normalizedSession.paperIDs.enumerated() {
             try database.run("""
             INSERT INTO session_papers (session_id, paper_id, sort_order) VALUES (?, ?, ?);
-            """, bindings: [.text(session.id), .text(paperID), .int(index)])
+            """, bindings: [.text(normalizedSession.id), .text(paperID), .int(index)])
         }
     }
 
     public func fetchSessions(paperID: String) throws -> [PaperSession] {
         let sessions = try database.query("""
-        SELECT DISTINCT sessions.id, sessions.title, sessions.codex_session_id, sessions.workspace_path, sessions.created_at, sessions.updated_at
+        SELECT DISTINCT
+          sessions.id, sessions.title, sessions.codex_session_id, sessions.default_runtime_id,
+          sessions.runtime_session_links_json, sessions.workspace_materialization_mode,
+          sessions.workspace_path, sessions.created_at, sessions.updated_at
         FROM sessions
         JOIN session_papers ON session_papers.session_id = sessions.id
         WHERE session_papers.paper_id = ?
@@ -661,7 +728,7 @@ public final class PaperRepository {
     public func fetchRecentSessions(limit: Int) throws -> [PaperSession] {
         let safeLimit = max(1, limit)
         let sessions = try database.query("""
-        SELECT id, title, codex_session_id, workspace_path, created_at, updated_at
+        SELECT id, title, codex_session_id, default_runtime_id, runtime_session_links_json, workspace_materialization_mode, workspace_path, created_at, updated_at
         FROM sessions
         ORDER BY updated_at DESC, id DESC
         LIMIT ?;
@@ -689,7 +756,7 @@ public final class PaperRepository {
 
     public func fetchSession(id: String) throws -> PaperSession? {
         let sessions = try database.query("""
-        SELECT id, title, codex_session_id, workspace_path, created_at, updated_at
+        SELECT id, title, codex_session_id, default_runtime_id, runtime_session_links_json, workspace_materialization_mode, workspace_path, created_at, updated_at
         FROM sessions WHERE id = ? LIMIT 1;
         """, bindings: [.text(id)]) { row in
             try session(from: row)
@@ -916,9 +983,14 @@ public final class PaperRepository {
             title: try row.text(1),
             paperIDs: [],
             codexSessionID: row.optionalText(2),
-            workspacePath: try row.text(3),
-            createdAt: try date(from: try row.text(4)),
-            updatedAt: try date(from: try row.text(5))
+            defaultRuntimeID: row.optionalText(3),
+            runtimeSessionLinks: try row.optionalText(4)
+                .map { try decode([AgentRuntimeSessionLink].self, from: $0) } ?? [],
+            workspaceMaterializationMode: row.optionalText(5)
+                .flatMap(WorkspaceMaterializationMode.init(rawValue:)) ?? .copyPDF,
+            workspacePath: try row.text(6),
+            createdAt: try date(from: try row.text(7)),
+            updatedAt: try date(from: try row.text(8))
         )
     }
 

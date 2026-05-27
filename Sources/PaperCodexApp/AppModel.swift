@@ -720,13 +720,13 @@ final class AppModel: ObservableObject {
     private let readerStore = ReaderFeatureStore()
     private let discoverStore: DiscoverFeatureStore
     private let agentRuntimeStore = AgentRuntimeStore()
+    private let agentRunCoordinator = AgentRunCoordinator()
     private var repository: PaperRepository?
     private let supportRoot: URL
     private let arxivCache: ArxivFeedCache
     private let localDiscoverCache: LocalDiscoverCache
     private let thumbnailCache: PDFThumbnailCache
     private let workspaceManager = SessionWorkspaceManager()
-    private let agentRuntime: any AgentRuntime = CodexAgentRuntime()
     private var watchedFolderAutoScanTask: Task<Void, Never>?
     private var watchedFolderScanTask: Task<Void, Never>?
     private var activeDiscoverSearchTask: Task<Void, Never>?
@@ -1991,7 +1991,9 @@ final class AppModel: ObservableObject {
         guard !visiblePapers.isEmpty, !actions.isEmpty else {
             return
         }
-        let selectedModelOverride = modelOverride?.trimmingCharacters(in: .whitespacesAndNewlines) ?? effectiveDiscoverCodexModelOverride()
+        let enrichmentRuntimeProfile = agentRuntimeStore.selectedEnrichmentRuntime
+        let selectedModelOverride = modelOverride?.trimmingCharacters(in: .whitespacesAndNewlines)
+            ?? effectiveDiscoverModelOverride(for: enrichmentRuntimeProfile)
         let selectedReasoningEffort = reasoningEffort ?? discoverCodexReasoningEffort
         isProcessingDiscoverResults = true
         isCancellingDiscoverProcessing = false
@@ -2031,7 +2033,13 @@ final class AppModel: ObservableObject {
                     let paper = visiblePapers[nextIndex]
                     nextIndex += 1
                     group.addTask {
-                        await self.processDiscoverPaperForEnrichment(paper, actions: actions, modelOverride: selectedModelOverride, reasoningEffort: selectedReasoningEffort)
+                        await self.processDiscoverPaperForEnrichment(
+                            paper,
+                            actions: actions,
+                            runtimeProfile: enrichmentRuntimeProfile,
+                            modelOverride: selectedModelOverride,
+                            reasoningEffort: selectedReasoningEffort
+                        )
                     }
                 }
 
@@ -2069,7 +2077,13 @@ final class AppModel: ObservableObject {
                         let paper = visiblePapers[nextIndex]
                         nextIndex += 1
                         group.addTask {
-                            await self.processDiscoverPaperForEnrichment(paper, actions: actions, modelOverride: selectedModelOverride, reasoningEffort: selectedReasoningEffort)
+                            await self.processDiscoverPaperForEnrichment(
+                                paper,
+                                actions: actions,
+                                runtimeProfile: enrichmentRuntimeProfile,
+                                modelOverride: selectedModelOverride,
+                                reasoningEffort: selectedReasoningEffort
+                            )
                         }
                     }
                 }
@@ -2155,6 +2169,7 @@ final class AppModel: ObservableObject {
     private func processDiscoverPaperForEnrichment(
         _ paper: ArxivFeedPaper,
         actions: Set<DiscoverProcessAction>,
+        runtimeProfile: AgentRuntimeProfile,
         modelOverride: String,
         reasoningEffort: CodexReasoningEffort
     ) async -> DiscoverPaperProcessingResult {
@@ -2173,7 +2188,14 @@ final class AppModel: ObservableObject {
 
         do {
             discoverPaperInteractionStateByID[paper.id] = .processing
-            let runResult = try await runDiscoverCodexEnrichment(for: paper, actions: actions, existing: existing, modelOverride: modelOverride, reasoningEffort: reasoningEffort)
+            let runResult = try await runDiscoverAgentEnrichment(
+                for: paper,
+                actions: actions,
+                runtimeProfile: runtimeProfile,
+                existing: existing,
+                modelOverride: modelOverride,
+                reasoningEffort: reasoningEffort
+            )
             try localDiscoverCache.saveEnrichment(runResult.enrichment)
             discoverEnrichmentsByID[paper.id] = runResult.enrichment
             discoverPaperInteractionStateByID[paper.id] = .processed
@@ -2187,7 +2209,7 @@ final class AppModel: ObservableObject {
                 arxivID: paper.id,
                 processorVersion: DiscoverPaperEnrichment.currentProcessorVersion,
                 promptVersion: DiscoverPaperEnrichment.currentPromptVersion,
-                modelIdentity: "codex",
+                modelIdentity: discoverModelIdentity(runtimeProfile: runtimeProfile, modelOverride: modelOverride, reasoningEffort: reasoningEffort),
                 titleZH: "",
                 summaryZH: "",
                 contribution: "",
@@ -4170,7 +4192,7 @@ final class AppModel: ObservableObject {
             try refreshVisibleSessionState(session: session, paperID: paper.id, repository: repository)
             try refreshRecentSessions(repository: repository)
 
-            let updatedSession = try await runCodexTurn(
+            let updatedSession = try await runAgentTurn(
                 content: content,
                 session: session,
                 fallbackPaper: paper,
@@ -4222,7 +4244,7 @@ final class AppModel: ObservableObject {
             }
 
             let fallbackPaper = try fallbackPaper(for: session, repository: repository)
-            let updatedSession = try await runCodexTurn(
+            let updatedSession = try await runAgentTurn(
                 content: userMessage.content,
                 session: session,
                 fallbackPaper: fallbackPaper,
@@ -5259,56 +5281,46 @@ final class AppModel: ObservableObject {
         )
     }
 
-    private func runDiscoverCodexEnrichment(
+    private func runDiscoverAgentEnrichment(
         for paper: ArxivFeedPaper,
         actions: Set<DiscoverProcessAction>,
+        runtimeProfile: AgentRuntimeProfile,
         existing: DiscoverPaperEnrichment?,
         modelOverride: String,
         reasoningEffort: CodexReasoningEffort
     ) async throws -> (enrichment: DiscoverPaperEnrichment, tokenUsage: CodexTokenUsage?) {
-        let executable = try CodexCLI.findCodexExecutable(preferWorkspaceImageOutput: false)
-        let cli = CodexCLI(executablePath: executable)
         let workspaceURL = supportRoot
             .appendingPathComponent("discover-processing", isDirectory: true)
             .appendingPathComponent("\(makeSlug(from: paper.id))-\(UUID().uuidString.lowercased())", isDirectory: true)
-        try FileManager.default.createDirectory(at: workspaceURL, withIntermediateDirectories: true)
         let outputURL = workspaceURL.appendingPathComponent("last-message.json")
         let eventLogURL = workspaceURL.appendingPathComponent("events.jsonl")
         let normalizedModelOverride = modelOverride.trimmingCharacters(in: .whitespacesAndNewlines)
-        let modelIdentity = discoverCodexModelIdentity(
-            modelOverride: normalizedModelOverride,
-            reasoningEffort: reasoningEffort
-        )
         let prompt = discoverEnrichmentPrompt(for: paper, actions: actions)
-        let arguments = cli.startArguments(
-            prompt: prompt,
-            workspacePath: workspaceURL.path,
-            outputLastMessagePath: outputURL.path,
-            modelOverride: normalizedModelOverride,
-            reasoningEffort: reasoningEffort
-        )
         let runHandle = CodexRunHandle()
         activeDiscoverCodexRunHandles.append(runHandle)
         defer {
             activeDiscoverCodexRunHandles.removeAll { $0 === runHandle }
         }
-        let stdout = try await Task.detached(priority: .userInitiated) {
-            try cli.runStreaming(
-                arguments: arguments,
+        let result = try await agentRunCoordinator.runDiscoverEnrichment(
+            AgentDiscoverEnrichmentRequest(
+                prompt: prompt,
+                arxivID: paper.id,
+                workspaceURL: workspaceURL,
+                outputURL: outputURL,
                 eventLogURL: eventLogURL,
-                currentDirectoryURL: workspaceURL,
+                runtimeProfile: runtimeProfile,
+                modelOverride: normalizedModelOverride,
+                providerOverride: agentRuntimeStore.providerOverride(for: runtimeProfile.id),
+                reasoningEffort: reasoningEffort,
+                modelIdentity: discoverModelIdentity(
+                    runtimeProfile: runtimeProfile,
+                    modelOverride: normalizedModelOverride,
+                    reasoningEffort: reasoningEffort
+                ),
                 runHandle: runHandle
-            ) { _ in }
-        }.value
-        let lastMessage = try String(contentsOf: outputURL, encoding: .utf8)
-        let tokenUsage = CodexCLI.aggregateTokenUsage(from: stdout)
-        let parsed = try DiscoverEnrichmentParser.parse(
-            lastMessage,
-            arxivID: paper.id,
-            modelIdentity: modelIdentity,
-            generatedAt: Date()
+            )
         )
-        return (mergeDiscoverEnrichment(parsed, existing: existing, actions: actions), tokenUsage)
+        return (mergeDiscoverEnrichment(result.enrichment, existing: existing, actions: actions), result.tokenUsage)
     }
 
     private func mergeDiscoverEnrichment(
@@ -5455,58 +5467,6 @@ final class AppModel: ObservableObject {
         scanWatchedFolders()
     }
 
-    private func runCodex(
-        prompt: String,
-        session: PaperSession,
-        runID: String,
-        prefersWorkspaceImageOutput: Bool
-    ) async throws -> (stdout: String, lastMessage: String, threadID: String?, generatedImages: [URL], tokenUsage: CodexTokenUsage?) {
-        let reasoningEffort = codexReasoningEffort
-        let modelOverride = effectiveModelOverride(prefersWorkspaceImageOutput: prefersWorkspaceImageOutput)
-        let eventSink: @Sendable (CodexRunEvent) -> Void = { [weak self] event in
-            Task { @MainActor in
-                self?.appendCodexRunEvent(event, runID: runID)
-            }
-        }
-        let runHandle = CodexRunHandle()
-        activeCodexRunHandlesBySessionID[session.id] = runHandle
-        let result = try await agentRuntime.runTurn(
-            AgentRunRequest(
-                prompt: prompt,
-                workspacePath: session.workspacePath,
-                existingSessionID: session.codexSessionID,
-                modelOverride: modelOverride,
-                reasoningEffort: reasoningEffort,
-                prefersWorkspaceImageOutput: prefersWorkspaceImageOutput,
-                runModeDescription: codexRunModeDescription(
-                    reasoningEffort: reasoningEffort,
-                    modelOverride: modelOverride,
-                    prefersWorkspaceImageOutput: prefersWorkspaceImageOutput
-                ),
-                mcpServers: inAppCodexMCPServers()
-            ),
-            runHandle: runHandle,
-            onEvent: eventSink
-        )
-        if !result.generatedImages.isEmpty {
-            appendCodexRunEvent(
-                CodexRunEvent(
-                    kind: .answer,
-                    title: "Image",
-                    detail: "Generated \(result.generatedImages.count) image\(result.generatedImages.count == 1 ? "" : "s")"
-                ),
-                runID: runID
-            )
-        }
-        return (
-            stdout: result.stdout,
-            lastMessage: result.lastMessage,
-            threadID: result.threadID,
-            generatedImages: result.generatedImages,
-            tokenUsage: result.tokenUsage
-        )
-    }
-
     private func inAppCodexMCPServers() -> [CodexMCPServerConfig] {
         guard inAppCodexMCPEnabled, let endpoint = mcpEndpoint else {
             return []
@@ -5532,107 +5492,76 @@ final class AppModel: ObservableObject {
         return trimmed
     }
 
-    private func effectiveDiscoverCodexModelOverride() -> String {
-        discoverCodexModelOverride.trimmingCharacters(in: .whitespacesAndNewlines)
+    private func effectiveDiscoverModelOverride(for runtimeProfile: AgentRuntimeProfile) -> String {
+        if runtimeProfile.id == "codex" {
+            return discoverCodexModelOverride.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return agentRuntimeStore.modelOverride(for: runtimeProfile.id)
     }
 
-    private func discoverCodexModelIdentity(
+    private func discoverModelIdentity(
+        runtimeProfile: AgentRuntimeProfile,
         modelOverride: String,
         reasoningEffort: CodexReasoningEffort
     ) -> String {
         let trimmedModel = modelOverride.trimmingCharacters(in: .whitespacesAndNewlines)
-        var identity = trimmedModel.isEmpty ? "codex" : "codex:\(trimmedModel)"
-        if reasoningEffort != .default {
+        var identity = trimmedModel.isEmpty ? runtimeProfile.id : "\(runtimeProfile.id):\(trimmedModel)"
+        if runtimeProfile.id == "codex", reasoningEffort != .default {
             identity += ":think-\(reasoningEffort.rawValue)"
         }
         return identity
     }
 
-    private func codexRunModeDescription(
-        reasoningEffort: CodexReasoningEffort,
-        modelOverride: String,
-        prefersWorkspaceImageOutput: Bool
-    ) -> String {
-        var parts: [String] = []
-        if prefersWorkspaceImageOutput {
-            parts.append("Image generation enabled")
-        }
-        let trimmedModel = modelOverride.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmedModel.isEmpty {
-            parts.append("Model \(trimmedModel)")
-        }
-        parts.append(reasoningEffort == .default ? "default thinking" : "\(reasoningEffort.displayName) thinking")
-        return parts.joined(separator: " · ")
-    }
-
-    private func runCodexTurn(
+    private func runAgentTurn(
         content: String,
         session: PaperSession,
         fallbackPaper: Paper,
         repository: PaperRepository
     ) async throws -> PaperSession {
-        let runID = beginCodexRun(sessionID: session.id, title: "Codex is working")
+        let prefersWorkspaceImageOutput = ImageGenerationRequestDetector.isImageRequest(content)
+        let runtimeProfile = prefersWorkspaceImageOutput
+            ? (AgentRuntimeProfile.defaultProfile(id: "codex") ?? agentRuntimeStore.selectedChatRuntime)
+            : agentRuntimeStore.selectedChatRuntime
+        let runID = beginCodexRun(sessionID: session.id, title: "\(runtimeProfile.displayName) is working")
         let context = try loadSessionPaperContext(session: session, fallbackPaper: fallbackPaper, repository: repository)
         let selectedAnchors = anchorsReferenced(in: content, context: context)
-        appendCodexRunEvent(
-            CodexRunEvent(kind: .status, title: "Context", detail: "Loaded \(context.papers.count) paper(s), \(context.spans.count) indexed span(s), \(selectedAnchors.count) selected source anchor(s)"),
-            runID: runID
-        )
-        try workspaceManager.writeWorkspace(
-            session: session,
-            papers: context.papers,
-            pagesByPaperID: context.pagesByPaperID,
-            spansByPaperID: context.spansByPaperID,
-            anchorsByPaperID: context.anchorsByPaperID,
-            mcpEndpoint: mcpEndpoint
-        )
-        appendCodexRunEvent(
-            CodexRunEvent(kind: .status, title: "Workspace", detail: "Wrote session workspace at \(session.workspacePath)"),
-            runID: runID
-        )
-
-        let prompt = PromptBuilder().buildPrompt(
-            request: PromptRequest(
-                userMessage: content,
-                workspacePath: session.workspacePath,
-                papers: context.papers,
-                selectedAnchors: selectedAnchors,
-                relevantSpans: [],
-                systemPromptTemplate: codexSystemPrompt,
-                languageMode: globalLanguageMode
-            )
-        )
-        appendCodexRunEvent(
-            CodexRunEvent(kind: .status, title: "Prompt", detail: "Built grounded prompt and started Codex"),
-            runID: runID
-        )
-        let prefersWorkspaceImageOutput = ImageGenerationRequestDetector.isImageRequest(content)
-        let codexReply = try await runCodex(
-            prompt: prompt,
-            session: session,
-            runID: runID,
-            prefersWorkspaceImageOutput: prefersWorkspaceImageOutput
-        )
-        var updatedSession = session
-        if let threadID = codexReply.threadID, !prefersWorkspaceImageOutput {
-            updatedSession.codexSessionID = threadID
+        let runHandle = CodexRunHandle()
+        activeCodexRunHandlesBySessionID[session.id] = runHandle
+        let eventSink: @Sendable (CodexRunEvent) -> Void = { [weak self] event in
+            Task { @MainActor in
+                self?.appendCodexRunEvent(event, runID: runID)
+            }
         }
-        updatedSession.updatedAt = Date()
-        try repository.upsertSession(updatedSession)
-
-        let codexMessage = ChatMessage(
-            id: UUID().uuidString.lowercased(),
-            sessionID: session.id,
-            role: .codex,
-            content: codexMessageContent(
-                lastMessage: codexReply.lastMessage,
-                stdout: codexReply.stdout,
-                generatedImages: codexReply.generatedImages
+        let modelOverride = runtimeProfile.id == "codex"
+            ? effectiveModelOverride(prefersWorkspaceImageOutput: prefersWorkspaceImageOutput)
+            : agentRuntimeStore.modelOverride(for: runtimeProfile.id)
+        let result = try await agentRunCoordinator.runChatTurn(
+            AgentChatTurnRequest(
+                content: content,
+                session: session,
+                context: AgentChatTurnContext(
+                    papers: context.papers,
+                    pagesByPaperID: context.pagesByPaperID,
+                    spansByPaperID: context.spansByPaperID,
+                    anchorsByPaperID: context.anchorsByPaperID,
+                    selectedAnchors: selectedAnchors
+                ),
+                runtimeProfile: runtimeProfile,
+                codexSystemPrompt: codexSystemPrompt,
+                languageMode: globalLanguageMode,
+                mcpEndpoint: mcpEndpoint,
+                mcpServers: inAppCodexMCPServers(),
+                modelOverride: modelOverride,
+                providerOverride: agentRuntimeStore.providerOverride(for: runtimeProfile.id),
+                reasoningEffort: codexReasoningEffort,
+                prefersWorkspaceImageOutput: prefersWorkspaceImageOutput
             ),
-            createdAt: Date()
+            runHandle: runHandle,
+            onEvent: eventSink
         )
-        try repository.appendMessage(codexMessage)
-        if let tokenUsage = codexReply.tokenUsage {
+        try repository.upsertSession(result.updatedSession)
+        try repository.appendMessage(result.message)
+        if let tokenUsage = result.tokenUsage {
             postNotice(
                 kind: .info,
                 title: "Chat Tokens",
@@ -5640,7 +5569,7 @@ final class AppModel: ObservableObject {
                 autoDismissAfter: 8
             )
         }
-        return updatedSession
+        return result.updatedSession
     }
 
     private func codexMessageContent(lastMessage: String, stdout: String, generatedImages: [URL]) -> String {

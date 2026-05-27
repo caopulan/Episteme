@@ -978,6 +978,7 @@ func runUILayoutSourceChecks() throws {
     let agentRuntimeSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexCore/AgentRuntime.swift"))
     let codexAgentRuntimeSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexCore/CodexAgentRuntime.swift"))
     let agentRuntimeStoreSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/AgentRuntimeStore.swift"))
+    let coordinatorSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/AgentRunCoordinator.swift"))
     let arxivIDExtractorSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexCore/ArxivIDExtractor.swift"))
     let interactionFeedbackSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/InteractionFeedback.swift"))
     let localArxivClientSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexCore/LocalArxivClient.swift"))
@@ -1231,8 +1232,8 @@ func runUILayoutSourceChecks() throws {
             && codexAgentRuntimeSource.contains("mcpServers: request.mcpServers")
             && codexAgentRuntimeSource.contains("environmentOverrides: request.mcpEnvironmentOverrides")
             && codexAgentRuntimeSource.contains("GeneratedImageCollector.newImages")
-            && appModelSource.contains("private let agentRuntime: any AgentRuntime")
-            && appModelSource.contains("agentRuntime.runTurn"),
+            && appModelSource.contains("private let agentRunCoordinator = AgentRunCoordinator()")
+            && appModelSource.contains("agentRunCoordinator.runChatTurn"),
         "Codex CLI streaming should sit behind an AgentRuntime boundary and carry app-local MCP settings"
     )
     try check(
@@ -1419,7 +1420,8 @@ func runUILayoutSourceChecks() throws {
         "AppModel should persist the configurable Codex system prompt"
     )
     try check(
-        appModelSource.contains("systemPromptTemplate: codexSystemPrompt"),
+        appModelSource.contains("codexSystemPrompt: codexSystemPrompt")
+            && coordinatorSource.contains("systemPromptTemplate: request.codexSystemPrompt"),
         "AppModel should pass the configured Codex system prompt into prompt building"
     )
     try check(
@@ -2168,8 +2170,8 @@ func runUILayoutSourceChecks() throws {
         appModelSource.contains("discoverCodexReasoningEffort")
             && appModelSource.contains("discoverCodexReasoningEffortDefaultsKey")
             && appModelSource.contains("processCurrentDiscoverResults(_ papers: [ArxivFeedPaper], actions: Set<DiscoverProcessAction> = Set(DiscoverProcessAction.allCases), modelOverride: String? = nil, reasoningEffort: CodexReasoningEffort? = nil)")
-            && appModelSource.contains("runDiscoverCodexEnrichment(for: paper, actions: actions, existing: existing, modelOverride: modelOverride, reasoningEffort: reasoningEffort)")
-            && !appModelSource.contains("reasoningEffort: codexReasoningEffort"),
+            && appModelSource.contains("runDiscoverAgentEnrichment(")
+            && appModelSource.contains("reasoningEffort: selectedReasoningEffort"),
         "Discover processing should carry process-specific model and thinking settings instead of reusing chat reasoning"
     )
     try check(
@@ -2188,7 +2190,8 @@ func runUILayoutSourceChecks() throws {
         "Settings should expose the default Discover processing thinking effort next to the default model"
     )
     try check(
-        appModelSource.contains("processDiscoverPaperForEnrichment(paper, actions: actions, modelOverride: selectedModelOverride, reasoningEffort: selectedReasoningEffort)")
+        appModelSource.contains("processDiscoverPaperForEnrichment(")
+            && appModelSource.contains("runtimeProfile: enrichmentRuntimeProfile")
             && appModelSource.contains("discoverEnrichment(existing, satisfies: actions)")
             && appModelSource.contains("discoverEnrichmentPrompt(for: paper, actions: actions)"),
         "Discover translation and summarization actions should use action-aware enrichment prompts and cache completeness checks"
@@ -3940,6 +3943,91 @@ func runAgentCommandBuilderChecks() throws {
     )
 }
 
+func runAgentSessionMigrationChecks() throws {
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent("paper-codex-agent-session-migration-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    let databaseURL = root.appendingPathComponent("store.sqlite")
+    let legacyDatabase = try SQLiteDatabase(path: databaseURL.path)
+    try legacyDatabase.execute("""
+    CREATE TABLE sessions (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      codex_session_id TEXT,
+      workspace_path TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE session_papers (
+      session_id TEXT NOT NULL,
+      paper_id TEXT NOT NULL,
+      sort_order INTEGER NOT NULL,
+      PRIMARY KEY (session_id, paper_id)
+    );
+    """)
+    try legacyDatabase.run("""
+    INSERT INTO sessions (id, title, codex_session_id, workspace_path, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?);
+    """, bindings: [
+        .text("legacy-session"),
+        .text("Legacy Notes"),
+        .text("codex-thread-legacy"),
+        .text(root.appendingPathComponent("legacy-session", isDirectory: true).path),
+        .text("2026-05-27T01:02:03Z"),
+        .text("2026-05-27T01:02:03Z")
+    ])
+    try legacyDatabase.run("""
+    INSERT INTO session_papers (session_id, paper_id, sort_order) VALUES (?, ?, ?);
+    """, bindings: [.text("legacy-session"), .text("paper-a"), .int(0)])
+
+    let repository = try PaperRepository(databasePath: databaseURL.path)
+    try repository.migrate()
+    let legacySession = try repository.fetchSession(id: "legacy-session")
+    try check(legacySession?.codexSessionID == "codex-thread-legacy", "legacy codex_session_id should remain readable")
+    try check(legacySession?.runtimeSessionID(for: "codex") == "codex-thread-legacy", "legacy codex_session_id should migrate into a codex runtime link")
+    try check(legacySession?.defaultRuntimeID == "codex", "legacy codex sessions should default to the codex runtime")
+    try check(legacySession?.workspaceMaterializationMode == .copyPDF, "legacy sessions should default to copied PDFs")
+
+    var genericSession = PaperSession(
+        id: "generic-session",
+        title: "Generic Agent Notes",
+        paperIDs: ["paper-a"],
+        codexSessionID: nil,
+        defaultRuntimeID: "claude-code",
+        runtimeSessionLinks: [
+            AgentRuntimeSessionLink(runtimeID: "claude-code", sessionID: "claude-thread-a"),
+            AgentRuntimeSessionLink(runtimeID: "openclaw-kimi", sessionID: "kimi-thread-a")
+        ],
+        workspaceMaterializationMode: .symlinkPDF,
+        workspacePath: root.appendingPathComponent("generic-session", isDirectory: true).path,
+        createdAt: Date(timeIntervalSince1970: 1_777_220_300),
+        updatedAt: Date(timeIntervalSince1970: 1_777_220_300)
+    )
+    genericSession.setRuntimeSessionID("codex-thread-a", for: "codex")
+    try repository.upsertSession(genericSession)
+    let fetchedGenericSession = try repository.fetchSession(id: "generic-session")
+    try check(fetchedGenericSession == genericSession, "generic runtime session links should round-trip through SQLite")
+    try check(fetchedGenericSession?.codexSessionID == "codex-thread-a", "codex runtime link should stay mirrored to codexSessionID")
+    try check(fetchedGenericSession?.runtimeSessionID(for: "openclaw-kimi") == "kimi-thread-a", "non-Codex runtime links should be queryable by runtime id")
+
+    let sourceRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+    let appModelSource = try String(contentsOf: sourceRoot.appendingPathComponent("Sources/PaperCodexApp/AppModel.swift"))
+    let coordinatorSource = try String(contentsOf: sourceRoot.appendingPathComponent("Sources/PaperCodexApp/AgentRunCoordinator.swift"))
+    try check(
+        coordinatorSource.contains("final class AgentRunCoordinator")
+            && coordinatorSource.contains("func runChatTurn")
+            && coordinatorSource.contains("func runDiscoverEnrichment")
+            && coordinatorSource.contains("runtimeProfile")
+            && coordinatorSource.contains("prefersWorkspaceImageOutput")
+            && appModelSource.contains("private let agentRunCoordinator")
+            && appModelSource.contains("agentRunCoordinator.runChatTurn")
+            && appModelSource.contains("agentRunCoordinator.runDiscoverEnrichment")
+            && !appModelSource.contains("private func runCodex(")
+            && !appModelSource.contains("private func runCodexTurn("),
+        "AppModel chat and discover execution should move behind AgentRunCoordinator"
+    )
+}
+
 private func requiredProfile(
     _ id: String,
     in profilesByID: [String: AgentRuntimeProfile]
@@ -5090,6 +5178,10 @@ do {
     if selectedChecks.isEmpty || selectedChecks.contains("agent-command-builders") {
         try runAgentCommandBuilderChecks()
         print("agent-command-builders: pass")
+    }
+    if selectedChecks.isEmpty || selectedChecks.contains("agent-session-migration") {
+        try runAgentSessionMigrationChecks()
+        print("agent-session-migration: pass")
     }
     if selectedChecks.isEmpty || selectedChecks.contains("pdf") {
         try runPDFChecks()
