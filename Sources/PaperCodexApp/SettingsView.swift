@@ -411,6 +411,31 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
                 Spacer()
             }
+
+            Divider()
+
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Codex Plugin")
+                        .font(.paperCodexSystem(size: 13, weight: .semibold))
+                    Text(model.codexPluginInstallationStatus?.detail ?? "Not checked")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle((model.codexPluginInstallationStatus?.current ?? false) ? .green : .secondary)
+                }
+
+                Spacer()
+
+                Button {
+                    Task {
+                        await model.installOrUpdateCodexPlugin()
+                    }
+                } label: {
+                    Label(model.isInstallingCodexPlugin ? "Installing" : "Install / Update", systemImage: "puzzlepiece.extension")
+                }
+                .buttonStyle(.bordered)
+                .disabled(model.isInstallingCodexPlugin || !model.paperCodexMCPServerReady)
+                .help("Install or update the Paper Codex plugin in local Codex")
+            }
         }
     }
 

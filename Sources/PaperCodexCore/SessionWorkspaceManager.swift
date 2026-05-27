@@ -46,6 +46,15 @@ public final class SessionWorkspaceManager {
             atomically: true,
             encoding: .utf8
         )
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent("skills/papercodex-agent-workspace", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try CodexPluginInstaller.agentWorkspaceSkillMarkdown.write(
+            to: root.appendingPathComponent("skills/papercodex-agent-workspace/SKILL.md"),
+            atomically: true,
+            encoding: .utf8
+        )
 
         let papersRoot = root.appendingPathComponent("papers", isDirectory: true)
         try FileManager.default.createDirectory(at: papersRoot, withIntermediateDirectories: true)

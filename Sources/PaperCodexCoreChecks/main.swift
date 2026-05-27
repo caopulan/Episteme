@@ -3424,6 +3424,7 @@ func runWorkspaceChecks() throws {
     try check(FileManager.default.fileExists(atPath: workspaceRoot.appendingPathComponent("agent_instructions.md").path), "workspace should contain runtime-neutral agent instructions")
     try check(FileManager.default.fileExists(atPath: workspaceRoot.appendingPathComponent("AGENTS.md").path), "workspace should contain AGENTS.md for local agents")
     try check(FileManager.default.fileExists(atPath: workspaceRoot.appendingPathComponent("CLAUDE.md").path), "workspace should contain CLAUDE.md for Claude Code")
+    try check(FileManager.default.fileExists(atPath: workspaceRoot.appendingPathComponent("skills/papercodex-agent-workspace/SKILL.md").path), "workspace should contain the Paper Codex agent workspace skill")
     try check(FileManager.default.fileExists(atPath: workspaceRoot.appendingPathComponent("mcp.json").path), "workspace should contain an MCP config when endpoint metadata is available")
     try check(FileManager.default.fileExists(atPath: workspaceRoot.appendingPathComponent("workspace_manifest.json").path), "workspace should contain an agent workspace manifest")
     try check(FileManager.default.fileExists(atPath: workspaceRoot.appendingPathComponent("turns", isDirectory: true).path), "workspace should contain turns directory")
@@ -3453,6 +3454,9 @@ func runWorkspaceChecks() throws {
     let instructions = try String(contentsOf: workspaceRoot.appendingPathComponent("agent_instructions.md"), encoding: .utf8)
     try check(instructions.contains("Use Paper Codex MCP for library, tag, folder, note, and app navigation actions."), "agent instructions should route app operations through MCP")
     try check(instructions.contains("[[cite:paper:{paper_id}:p{page}:b{block_index}]]"), "agent instructions should include the citation contract")
+    let workspaceSkill = try String(contentsOf: workspaceRoot.appendingPathComponent("skills/papercodex-agent-workspace/SKILL.md"), encoding: .utf8)
+    try check(workspaceSkill.contains("Use MCP tools for app state changes"), "workspace skill should route app mutations through MCP")
+    try check(workspaceSkill.contains("[[cite:paper:{paper_id}:p{page}:b{block_index}]]"), "workspace skill should include exact citation markers")
 
     let mcpConfigData = try Data(contentsOf: workspaceRoot.appendingPathComponent("mcp.json"))
     guard let mcpConfig = try JSONSerialization.jsonObject(with: mcpConfigData) as? [String: Any],
@@ -3463,6 +3467,77 @@ func runWorkspaceChecks() throws {
     }
     try check(paperCodexServer["url"] as? String == mcpEndpoint.url, "workspace MCP config should include the local endpoint URL")
     try check(headers["Authorization"] as? String == mcpEndpoint.authorizationHeader, "workspace MCP config should include the authorization header")
+}
+
+func runCodexPluginInstallerChecks() throws {
+    let tempRoot = FileManager.default.temporaryDirectory
+        .appendingPathComponent("paper-codex-plugin-\(UUID().uuidString)", isDirectory: true)
+    let codexHome = tempRoot.appendingPathComponent("codex-home", isDirectory: true)
+    let supportRoot = tempRoot.appendingPathComponent("support", isDirectory: true)
+    try FileManager.default.createDirectory(at: codexHome, withIntermediateDirectories: true)
+    let configURL = codexHome.appendingPathComponent("config.toml")
+    try """
+    model_reasoning_effort = "low"
+
+    [features]
+    multi_agent = true
+
+    [plugins."browser@openai-bundled"]
+    enabled = true
+    """.write(to: configURL, atomically: true, encoding: .utf8)
+
+    let endpoint = PaperCodexMCPEndpoint(
+        url: "http://127.0.0.1:39427/mcp",
+        healthURL: "http://127.0.0.1:39427/health",
+        host: "127.0.0.1",
+        port: 39427,
+        token: "secret-token",
+        authorizationHeader: "Bearer secret-token",
+        metadataPath: "/tmp/PaperCodex/mcp/server.json"
+    )
+    let installer = CodexPluginInstaller(codexHome: codexHome, supportRoot: supportRoot)
+    let status = try installer.installOrUpdate(endpoint: endpoint, appVersion: "0.1.0")
+    try check(status.installed, "Codex plugin installer should report installed status")
+    try check(status.current, "Codex plugin installer should report current endpoint")
+
+    let sourcePluginRoot = supportRoot.appendingPathComponent("codex-plugin-marketplace/plugins/paper-codex", isDirectory: true)
+    let cachedPluginRoot = codexHome.appendingPathComponent("plugins/cache/paper-codex-local/paper-codex/local", isDirectory: true)
+    try check(FileManager.default.fileExists(atPath: sourcePluginRoot.appendingPathComponent(".codex-plugin/plugin.json").path), "installer should write source plugin manifest")
+    try check(FileManager.default.fileExists(atPath: cachedPluginRoot.appendingPathComponent(".codex-plugin/plugin.json").path), "installer should write active Codex plugin cache")
+    try check(FileManager.default.fileExists(atPath: supportRoot.appendingPathComponent("codex-plugin-marketplace/.agents/plugins/marketplace.json").path), "installer should write marketplace manifest")
+
+    let config = try String(contentsOf: configURL, encoding: .utf8)
+    try check(config.contains("[features]"), "installer should preserve features table")
+    try check(config.contains("multi_agent = true"), "installer should preserve unrelated feature settings")
+    try check(config.contains("plugins = true"), "installer should enable Codex plugins")
+    try check(config.contains("[marketplaces.paper-codex-local]"), "installer should register the Paper Codex marketplace")
+    try check(config.contains("[plugins.\"paper-codex@paper-codex-local\"]"), "installer should enable the Paper Codex plugin")
+    try check(config.contains("[plugins.\"browser@openai-bundled\"]"), "installer should preserve existing plugin settings")
+
+    let mcpConfig = try String(contentsOf: cachedPluginRoot.appendingPathComponent(".mcp.json"), encoding: .utf8)
+    try check(mcpConfig.contains(endpoint.url), "cached plugin MCP config should include the current endpoint")
+    try check(mcpConfig.contains("http_headers"), "cached plugin MCP config should use Codex HTTP header format")
+    try check(mcpConfig.contains(endpoint.authorizationHeader), "cached plugin MCP config should include the current auth header")
+
+    let mcpSkill = try String(contentsOf: cachedPluginRoot.appendingPathComponent("skills/papercodex-mcp/SKILL.md"), encoding: .utf8)
+    let workspaceSkill = try String(contentsOf: cachedPluginRoot.appendingPathComponent("skills/papercodex-agent-workspace/SKILL.md"), encoding: .utf8)
+    try check(mcpSkill.contains("papercodex://sessions/{session_id}/workspace-manifest"), "cached plugin should include MCP skill resources")
+    try check(workspaceSkill.contains("Use MCP tools for app state changes"), "cached plugin should include workspace skill")
+
+    let rotatedEndpoint = PaperCodexMCPEndpoint(
+        url: "http://127.0.0.1:39428/mcp",
+        healthURL: "http://127.0.0.1:39428/health",
+        host: "127.0.0.1",
+        port: 39428,
+        token: "rotated-token",
+        authorizationHeader: "Bearer rotated-token",
+        metadataPath: "/tmp/PaperCodex/mcp/server.json"
+    )
+    let refreshed = try installer.refreshIfInstalled(endpoint: rotatedEndpoint, appVersion: "0.1.1")
+    try check(refreshed.current, "installed plugin refresh should update dynamic endpoint metadata")
+    let refreshedMCPConfig = try String(contentsOf: cachedPluginRoot.appendingPathComponent(".mcp.json"), encoding: .utf8)
+    try check(refreshedMCPConfig.contains(rotatedEndpoint.url), "refreshed plugin should include rotated endpoint")
+    try check(refreshedMCPConfig.contains(rotatedEndpoint.authorizationHeader), "refreshed plugin should include rotated auth header")
 }
 
 func runPDFChecks() throws {
@@ -5400,6 +5475,10 @@ do {
     if selectedChecks.isEmpty || selectedChecks.contains("workspace") {
         try runWorkspaceChecks()
         print("workspace: pass")
+    }
+    if selectedChecks.isEmpty || selectedChecks.contains("codex-plugin-installer") {
+        try runCodexPluginInstallerChecks()
+        print("codex-plugin-installer: pass")
     }
     if selectedChecks.isEmpty || selectedChecks.contains("agent-runtime-profiles") {
         try runAgentRuntimeProfileChecks()

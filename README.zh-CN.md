@@ -238,6 +238,8 @@ scripts/agent-runtime-smoke.sh --codex --claude --kimi-openclaw
 scripts/agent-runtime-smoke.sh --hermes-kimi
 ```
 
+如果要让 Paper Codex 作为本机 Codex 的插件出现，打开 Settings -> Paper Codex MCP，点击 **Install / Update**。app 会写入本地 Codex marketplace、plugin cache、MCP endpoint 配置和 Paper Codex skills。后续 app 端口变化或插件/skill 内容更新时，仍然通过同一个按钮刷新；已安装的插件也会在 Paper Codex 启动时自动刷新。
+
 构建可打开的本地 app bundle：
 
 ```bash

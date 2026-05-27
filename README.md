@@ -238,6 +238,8 @@ If OpenClaw Kimi is blocked by local account or membership state, use the config
 scripts/agent-runtime-smoke.sh --hermes-kimi
 ```
 
+To expose Paper Codex to local Codex outside the in-app session, open Settings -> Paper Codex MCP and click **Install / Update**. The app writes a local Codex marketplace, plugin cache entry, MCP endpoint config, and Paper Codex skills. If the app moves ports or ships newer plugin/skill content, the same button refreshes the installed plugin; an already-installed plugin is also refreshed on Paper Codex startup.
+
 Build the distributable local app bundle:
 
 ```bash

@@ -480,6 +480,8 @@ final class AppModel: ObservableObject {
     @Published var codexReasoningEffort: CodexReasoningEffort = loadCodexReasoningEffortFromDefaults(key: codexReasoningEffortDefaultsKey)
     @Published var codexSystemPrompt: String = PromptBuilder.defaultSystemPrompt
     @Published var inAppCodexMCPEnabled: Bool = loadInAppCodexMCPEnabledFromDefaults()
+    @Published var codexPluginInstallationStatus: CodexPluginInstallationStatus?
+    @Published var isInstallingCodexPlugin = false
     @Published var globalLanguageMode: PaperCodexLanguageMode = .automatic
     @Published var activeCodexRunsBySessionID: [String: ActiveCodexRun] = [:]
     @Published var agentTerminalState: AgentTerminalState?
@@ -806,6 +808,10 @@ final class AppModel: ObservableObject {
         return "Enabled · \(endpoint.host):\(endpoint.port)"
     }
 
+    var paperCodexMCPServerReady: Bool {
+        mcpEndpoint != nil
+    }
+
     private var arxivSearchQueryPreview: String {
         do {
             let fromYear = try LocalArxivClient.normalizedSearchYear(arxivSearchFromYear)
@@ -1047,6 +1053,7 @@ final class AppModel: ObservableObject {
             mcpEndpoint = try server.start()
             mcpService = service
             mcpServer = server
+            refreshInstalledCodexPluginIfNeeded()
             startMCPCommandPolling()
         } catch {
             errorMessage = "Paper Codex MCP server failed to start: \(String(describing: error))"
@@ -4043,6 +4050,55 @@ final class AppModel: ObservableObject {
             title: enabled ? "Paper Codex MCP Enabled" : "Paper Codex MCP Disabled",
             message: inAppCodexMCPStatusText
         )
+    }
+
+    func installOrUpdateCodexPlugin() async {
+        guard let endpoint = mcpEndpoint else {
+            errorMessage = "Paper Codex MCP server is still starting."
+            return
+        }
+        isInstallingCodexPlugin = true
+        defer { isInstallingCodexPlugin = false }
+        do {
+            let status = try codexPluginInstaller().installOrUpdate(
+                endpoint: endpoint,
+                appVersion: appVersionForPluginManifest()
+            )
+            codexPluginInstallationStatus = status
+            postNotice(kind: .success, title: "Codex Plugin Installed", message: status.detail)
+        } catch {
+            errorMessage = "Codex plugin installation failed: \(String(describing: error))"
+        }
+    }
+
+    private func refreshInstalledCodexPluginIfNeeded() {
+        guard let endpoint = mcpEndpoint else {
+            codexPluginInstallationStatus = codexPluginInstaller().status(currentEndpoint: nil)
+            return
+        }
+        let installer = codexPluginInstaller()
+        do {
+            codexPluginInstallationStatus = try installer.refreshIfInstalled(
+                endpoint: endpoint,
+                appVersion: appVersionForPluginManifest()
+            )
+        } catch {
+            codexPluginInstallationStatus = installer.status(currentEndpoint: endpoint)
+            errorMessage = "Codex plugin refresh failed: \(String(describing: error))"
+        }
+    }
+
+    private func codexPluginInstaller() -> CodexPluginInstaller {
+        CodexPluginInstaller(
+            codexHome: CodexPluginInstaller.defaultCodexHome(),
+            supportRoot: supportRoot
+        )
+    }
+
+    private func appVersionForPluginManifest() -> String {
+        let shortVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        let version = shortVersion?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return version.isEmpty ? "0.1.0" : version
     }
 
     func cancelActiveCodexRun() {
