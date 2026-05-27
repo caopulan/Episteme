@@ -2732,7 +2732,8 @@ final class AppModel: ObservableObject {
                     papers: context.papers,
                     pagesByPaperID: context.pagesByPaperID,
                     spansByPaperID: context.spansByPaperID,
-                    anchorsByPaperID: context.anchorsByPaperID
+                    anchorsByPaperID: context.anchorsByPaperID,
+                    mcpEndpoint: mcpEndpoint
                 )
             }
         } catch {
@@ -3608,7 +3609,8 @@ final class AppModel: ObservableObject {
             papers: context.papers,
             pagesByPaperID: context.pagesByPaperID,
             spansByPaperID: context.spansByPaperID,
-            anchorsByPaperID: context.anchorsByPaperID
+            anchorsByPaperID: context.anchorsByPaperID,
+            mcpEndpoint: mcpEndpoint
         )
         sessions = try sessionsForPaperSet(paperIDs: sessionPaperIDs, repository: repository)
         selectedSession = session
@@ -3735,7 +3737,8 @@ final class AppModel: ObservableObject {
             papers: context.papers,
             pagesByPaperID: context.pagesByPaperID,
             spansByPaperID: context.spansByPaperID,
-            anchorsByPaperID: context.anchorsByPaperID
+            anchorsByPaperID: context.anchorsByPaperID,
+            mcpEndpoint: mcpEndpoint
         )
         openOrUpdateReaderTab(paper)
         selectedSession = session
@@ -3784,7 +3787,8 @@ final class AppModel: ObservableObject {
             papers: context.papers,
             pagesByPaperID: context.pagesByPaperID,
             spansByPaperID: context.spansByPaperID,
-            anchorsByPaperID: context.anchorsByPaperID
+            anchorsByPaperID: context.anchorsByPaperID,
+            mcpEndpoint: mcpEndpoint
         )
         var tabState = readerTabState
         _ = tabState.close(paperID)
@@ -5471,7 +5475,8 @@ final class AppModel: ObservableObject {
             papers: context.papers,
             pagesByPaperID: context.pagesByPaperID,
             spansByPaperID: context.spansByPaperID,
-            anchorsByPaperID: context.anchorsByPaperID
+            anchorsByPaperID: context.anchorsByPaperID,
+            mcpEndpoint: mcpEndpoint
         )
         appendCodexRunEvent(
             CodexRunEvent(kind: .status, title: "Workspace", detail: "Wrote session workspace at \(session.workspacePath)"),

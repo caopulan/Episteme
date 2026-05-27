@@ -3275,17 +3275,33 @@ func runWorkspaceChecks() throws {
         confidence: 0.95
     )
 
+    let mcpEndpoint = PaperCodexMCPEndpoint(
+        url: "http://127.0.0.1:39427/mcp",
+        healthURL: "http://127.0.0.1:39427/health",
+        host: "127.0.0.1",
+        port: 39427,
+        token: "secret-token",
+        authorizationHeader: "Bearer secret-token",
+        metadataPath: "/tmp/PaperCodex/mcp/server.json"
+    )
     try SessionWorkspaceManager().writeWorkspace(
         session: session,
         papers: [paper],
         pagesByPaperID: ["paper-a": [page]],
         spansByPaperID: ["paper-a": [span, wrappedSpan]],
-        anchorsByPaperID: ["paper-a": [anchor]]
+        anchorsByPaperID: ["paper-a": [anchor]],
+        mcpEndpoint: mcpEndpoint,
+        materializationMode: .copyPDF
     )
 
     let paperDir = workspaceRoot.appendingPathComponent("papers/paper-a", isDirectory: true)
     try check(FileManager.default.fileExists(atPath: workspaceRoot.appendingPathComponent("session.json").path), "workspace should contain session.json")
     try check(FileManager.default.fileExists(atPath: workspaceRoot.appendingPathComponent("prompt_contract.md").path), "workspace should contain prompt contract")
+    try check(FileManager.default.fileExists(atPath: workspaceRoot.appendingPathComponent("agent_instructions.md").path), "workspace should contain runtime-neutral agent instructions")
+    try check(FileManager.default.fileExists(atPath: workspaceRoot.appendingPathComponent("AGENTS.md").path), "workspace should contain AGENTS.md for local agents")
+    try check(FileManager.default.fileExists(atPath: workspaceRoot.appendingPathComponent("CLAUDE.md").path), "workspace should contain CLAUDE.md for Claude Code")
+    try check(FileManager.default.fileExists(atPath: workspaceRoot.appendingPathComponent("mcp.json").path), "workspace should contain an MCP config when endpoint metadata is available")
+    try check(FileManager.default.fileExists(atPath: workspaceRoot.appendingPathComponent("workspace_manifest.json").path), "workspace should contain an agent workspace manifest")
     try check(FileManager.default.fileExists(atPath: workspaceRoot.appendingPathComponent("turns", isDirectory: true).path), "workspace should contain turns directory")
     try check(FileManager.default.fileExists(atPath: paperDir.appendingPathComponent("metadata.json").path), "workspace should contain paper metadata")
     try check(FileManager.default.fileExists(atPath: paperDir.appendingPathComponent("original.pdf").path), "workspace should contain a readable copy of the original PDF")
@@ -3301,6 +3317,28 @@ func runWorkspaceChecks() throws {
     let fullText = try String(contentsOf: paperDir.appendingPathComponent("full_text.txt"), encoding: .utf8)
     try check(fullText.contains("original_pdf: \(paperDir.appendingPathComponent("original.pdf").path)"), "full text should point to the local workspace PDF copy")
     try check(fullText.contains("[[cite:paper:paper-a:p1:b1]] Page text continues onto the next visual line."), "full text should include compacted extracted spans with exact citation markers")
+
+    let manifestData = try Data(contentsOf: workspaceRoot.appendingPathComponent("workspace_manifest.json"))
+    let manifest = try JSONDecoder().decode(AgentWorkspaceManifest.self, from: manifestData)
+    try check(manifest.sessionID == session.id, "workspace manifest should record the session id")
+    try check(manifest.materializationMode == .copyPDF, "workspace manifest should record copy materialization by default")
+    try check(manifest.mcpConfigPath == workspaceRoot.appendingPathComponent("mcp.json").path, "workspace manifest should link to the MCP config")
+    try check(manifest.papers.first?.paperID == paper.id, "workspace manifest should list the paper")
+    try check(manifest.papers.first?.fullTextPath == paperDir.appendingPathComponent("full_text.txt").path, "workspace manifest should link to full text")
+
+    let instructions = try String(contentsOf: workspaceRoot.appendingPathComponent("agent_instructions.md"), encoding: .utf8)
+    try check(instructions.contains("Use Paper Codex MCP for library, tag, folder, note, and app navigation actions."), "agent instructions should route app operations through MCP")
+    try check(instructions.contains("[[cite:paper:{paper_id}:p{page}:b{block_index}]]"), "agent instructions should include the citation contract")
+
+    let mcpConfigData = try Data(contentsOf: workspaceRoot.appendingPathComponent("mcp.json"))
+    guard let mcpConfig = try JSONSerialization.jsonObject(with: mcpConfigData) as? [String: Any],
+          let mcpServers = mcpConfig["mcpServers"] as? [String: Any],
+          let paperCodexServer = mcpServers["paper-codex"] as? [String: Any],
+          let headers = paperCodexServer["headers"] as? [String: Any] else {
+        throw CheckFailure(description: "workspace MCP config should include a Paper Codex server object")
+    }
+    try check(paperCodexServer["url"] as? String == mcpEndpoint.url, "workspace MCP config should include the local endpoint URL")
+    try check(headers["Authorization"] as? String == mcpEndpoint.authorizationHeader, "workspace MCP config should include the authorization header")
 }
 
 func runPDFChecks() throws {

@@ -18,7 +18,9 @@ public final class SessionWorkspaceManager {
         papers: [Paper],
         pagesByPaperID: [String: [PageIndex]],
         spansByPaperID: [String: [Span]],
-        anchorsByPaperID: [String: [Anchor]]
+        anchorsByPaperID: [String: [Anchor]],
+        mcpEndpoint: PaperCodexMCPEndpoint? = nil,
+        materializationMode: WorkspaceMaterializationMode = .copyPDF
     ) throws {
         let root = URL(fileURLWithPath: session.workspacePath, isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -29,29 +31,78 @@ public final class SessionWorkspaceManager {
             atomically: true,
             encoding: .utf8
         )
+        try Self.agentInstructions.write(
+            to: root.appendingPathComponent("agent_instructions.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try Self.agentInstructions.write(
+            to: root.appendingPathComponent("AGENTS.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try Self.agentInstructions.write(
+            to: root.appendingPathComponent("CLAUDE.md"),
+            atomically: true,
+            encoding: .utf8
+        )
 
         let papersRoot = root.appendingPathComponent("papers", isDirectory: true)
         try FileManager.default.createDirectory(at: papersRoot, withIntermediateDirectories: true)
 
+        var manifestPapers: [AgentWorkspacePaper] = []
         for paper in papers {
             let paperRoot = papersRoot.appendingPathComponent(paper.id, isDirectory: true)
             try FileManager.default.createDirectory(at: paperRoot, withIntermediateDirectories: true)
             let originalPDFURL = paperRoot.appendingPathComponent("original.pdf")
+            let metadataURL = paperRoot.appendingPathComponent("metadata.json")
+            let fullTextURL = paperRoot.appendingPathComponent("full_text.txt")
+            let pagesURL = paperRoot.appendingPathComponent("pages.jsonl")
+            let spansURL = paperRoot.appendingPathComponent("spans.jsonl")
+            let anchorsURL = paperRoot.appendingPathComponent("anchors.jsonl")
             let pages = pagesByPaperID[paper.id] ?? []
             let spans = SpanCompactor.compact(sortedSpans(spansByPaperID[paper.id] ?? []))
-            try writeJSON(paper, to: paperRoot.appendingPathComponent("metadata.json"))
-            try copyOriginalPDF(from: URL(fileURLWithPath: paper.filePath), to: originalPDFURL)
+            try writeJSON(paper, to: metadataURL)
+            try materializeOriginalPDF(
+                from: URL(fileURLWithPath: paper.filePath),
+                to: originalPDFURL,
+                mode: materializationMode
+            )
             try writeFullText(
                 paper: paper,
                 originalPDFURL: originalPDFURL,
                 pages: pages,
                 spans: spans,
-                to: paperRoot.appendingPathComponent("full_text.txt")
+                to: fullTextURL
             )
-            try writeJSONLines(pages, to: paperRoot.appendingPathComponent("pages.jsonl"))
-            try writeJSONLines(spans, to: paperRoot.appendingPathComponent("spans.jsonl"))
-            try writeJSONLines(anchorsByPaperID[paper.id] ?? [], to: paperRoot.appendingPathComponent("anchors.jsonl"))
+            try writeJSONLines(pages, to: pagesURL)
+            try writeJSONLines(spans, to: spansURL)
+            try writeJSONLines(anchorsByPaperID[paper.id] ?? [], to: anchorsURL)
+            manifestPapers.append(
+                AgentWorkspacePaper(
+                    paperID: paper.id,
+                    title: paper.title,
+                    originalPDFPath: originalPDFURL.path,
+                    fullTextPath: fullTextURL.path,
+                    pagesJSONLPath: pagesURL.path,
+                    spansJSONLPath: spansURL.path,
+                    anchorsJSONLPath: anchorsURL.path,
+                    metadataJSONPath: metadataURL.path
+                )
+            )
         }
+
+        let mcpConfigURL = try writeMCPConfig(endpoint: mcpEndpoint, root: root)
+        let manifest = AgentWorkspaceManifest(
+            sessionID: session.id,
+            workspacePath: root.path,
+            materializationMode: materializationMode,
+            mcpConfigPath: mcpConfigURL?.path,
+            promptContractPath: root.appendingPathComponent("prompt_contract.md").path,
+            agentInstructionsPath: root.appendingPathComponent("agent_instructions.md").path,
+            papers: manifestPapers
+        )
+        try writeJSON(manifest, to: root.appendingPathComponent("workspace_manifest.json"))
     }
 
     private func writeJSON<T: Encodable>(_ value: T, to url: URL) throws {
@@ -67,15 +118,46 @@ public final class SessionWorkspaceManager {
         try body.write(to: url, atomically: true, encoding: .utf8)
     }
 
-    private func copyOriginalPDF(from source: URL, to destination: URL) throws {
+    private func materializeOriginalPDF(
+        from source: URL,
+        to destination: URL,
+        mode: WorkspaceMaterializationMode
+    ) throws {
         let sourceURL = source.standardizedFileURL
         let destinationURL = destination.standardizedFileURL
         if sourceURL == destinationURL {
             return
         }
         if !FileManager.default.fileExists(atPath: destinationURL.path) {
-            try FileManager.default.copyItem(at: sourceURL, to: destinationURL)
+            switch mode {
+            case .copyPDF:
+                try FileManager.default.copyItem(at: sourceURL, to: destinationURL)
+            case .symlinkPDF:
+                try FileManager.default.createSymbolicLink(at: destinationURL, withDestinationURL: sourceURL)
+            }
         }
+    }
+
+    private func writeMCPConfig(endpoint: PaperCodexMCPEndpoint?, root: URL) throws -> URL? {
+        guard let endpoint else {
+            return nil
+        }
+        let configURL = root.appendingPathComponent("mcp.json")
+        let config: [String: Any] = [
+            "mcpServers": [
+                "paper-codex": [
+                    "type": "http",
+                    "url": endpoint.url,
+                    "headers": [
+                        "Authorization": endpoint.authorizationHeader
+                    ],
+                    "metadataPath": endpoint.metadataPath
+                ]
+            ]
+        ]
+        let data = try JSONSerialization.data(withJSONObject: config, options: [.prettyPrinted, .sortedKeys])
+        try data.write(to: configURL, options: [.atomic])
+        return configURL
     }
 
     private func writeFullText(
@@ -157,5 +239,21 @@ public final class SessionWorkspaceManager {
     - [[cite:paper:{paper_id}:p{page}:a{anchor_suffix}]]
 
     If evidence is insufficient, say so clearly. Do not invent source positions.
+    """
+
+    public static let agentInstructions = """
+    # Paper Codex Agent Workspace
+
+    You are running inside a Paper Codex session workspace.
+
+    Use Paper Codex MCP for library, tag, folder, note, and app navigation actions.
+    Use the workspace files for reading paper source content.
+
+    The citation contract is strict:
+
+    - [[cite:paper:{paper_id}:p{page}:b{block_index}]]
+    - [[cite:paper:{paper_id}:p{page}:a{anchor_suffix}]]
+
+    Never invent source positions. If evidence is missing, say so clearly.
     """
 }
