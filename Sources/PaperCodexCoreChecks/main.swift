@@ -461,14 +461,25 @@ func runUILayoutSourceChecks() throws {
     )
     try check(
         librarySource.contains("private var folderIconName: String")
-            && librarySource.contains("private func primaryCategoryRowAction()")
-            && librarySource.contains("if hasChildren {\n            onToggle()\n        }")
+            && librarySource.contains("private var folderIconHelp: String")
+            && librarySource.contains("Button(action: toggleFolderExpansion)")
+            && librarySource.contains("Button(action: onSelect)")
+            && librarySource.contains("private func toggleFolderExpansion()")
             && librarySource.contains("hasChildren ? (isExpanded ? \"folder.fill\" : \"folder\") : systemImage")
             && !librarySource.contains("\"chevron.down\"")
             && !librarySource.contains("\"chevron.right\"")
             && !librarySource.contains("categoryTreeChevronWidth")
             && !librarySource.contains("categoryTreeChevronIconSpacing"),
         "library folder rows should use the folder icon itself for expanded/collapsed state and remove chevron expand controls"
+    )
+    try check(
+        librarySource.contains("SidebarSplitLayout(minContentWidth: LibraryLayout.libraryContentMinimumWidth)")
+            && librarySource.contains("static let libraryContentMinimumWidth: CGFloat = 560")
+            && librarySource.contains("static let libraryPrimaryPaneMinimumWidth: CGFloat = 330")
+            && librarySource.contains("static let libraryInspectorMinimumWidth: CGFloat = 220")
+            && librarySource.contains(".frame(minWidth: LibraryLayout.libraryPrimaryPaneMinimumWidth)")
+            && librarySource.contains("minWidth: LibraryLayout.libraryInspectorMinimumWidth"),
+        "library split panes should use compact shared minimum widths so the middle pane is not clipped by side columns in narrow windows"
     )
     try check(
         librarySource.contains("LibraryRootFolderRow")

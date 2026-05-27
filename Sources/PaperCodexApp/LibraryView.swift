@@ -128,7 +128,7 @@ struct LibraryView: View {
     }
 
     var body: some View {
-        SidebarSplitLayout(minContentWidth: 840) {
+        SidebarSplitLayout(minContentWidth: LibraryLayout.libraryContentMinimumWidth) {
             sidebar
         } content: {
             contentPane
@@ -403,10 +403,14 @@ struct LibraryView: View {
         HSplitView {
             primaryContentPane
                 .padding(.top, LibraryLayout.splitPaneTopInset)
-                .frame(minWidth: 500)
+                .frame(minWidth: LibraryLayout.libraryPrimaryPaneMinimumWidth)
             secondaryContentPane
                 .padding(.top, LibraryLayout.splitPaneTopInset)
-                .frame(minWidth: 300, idealWidth: 340, maxWidth: 420)
+                .frame(
+                    minWidth: LibraryLayout.libraryInspectorMinimumWidth,
+                    idealWidth: LibraryLayout.libraryInspectorIdealWidth,
+                    maxWidth: LibraryLayout.libraryInspectorMaximumWidth
+                )
         }
     }
 
@@ -1555,6 +1559,11 @@ private struct LibraryPaperRowClick: Equatable {
 }
 
 private enum LibraryLayout {
+    static let libraryContentMinimumWidth: CGFloat = 560
+    static let libraryPrimaryPaneMinimumWidth: CGFloat = 330
+    static let libraryInspectorMinimumWidth: CGFloat = 220
+    static let libraryInspectorIdealWidth: CGFloat = 300
+    static let libraryInspectorMaximumWidth: CGFloat = 380
     static let splitPaneTopInset: CGFloat = 0
     static let bulkActionBarOverlayYOffset: CGFloat = 42
     static let bulkActionBarOverlayOpacity = 0.84
@@ -2401,28 +2410,38 @@ private struct CategorySidebarRow: View {
 
     var body: some View {
         ZStack(alignment: .trailing) {
-            Button(action: primaryCategoryRowAction) {
-                HStack(spacing: 8) {
+            HStack(spacing: 8) {
+                Button(action: toggleFolderExpansion) {
                     Image(systemName: folderIconName)
                         .frame(width: 17)
                         .foregroundStyle(isSelected || isExpanded ? Color.accentColor : Color.secondary)
-                    Text(title)
-                        .font(.paperCodexSystem(size: 13, weight: isSelected ? .semibold : .medium))
-                        .lineLimit(1)
-                    Spacer(minLength: 58)
                 }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 7)
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(isSelected ? Color.accentColor.opacity(0.13) : (isHovering ? Color.primary.opacity(0.045) : Color.clear))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(isSelected ? Color.accentColor.opacity(0.22) : Color.clear, lineWidth: 1)
-                )
+                .buttonStyle(.plain)
+                .help(folderIconHelp)
+
+                Button(action: onSelect) {
+                    HStack(spacing: 0) {
+                        Text(title)
+                            .font(.paperCodexSystem(size: 13, weight: isSelected ? .semibold : .medium))
+                            .lineLimit(1)
+                        Spacer(minLength: 58)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+                .help(title)
             }
-            .buttonStyle(.plain)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 7)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(isSelected ? Color.accentColor.opacity(0.13) : (isHovering ? Color.primary.opacity(0.045) : Color.clear))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(isSelected ? Color.accentColor.opacity(0.22) : Color.clear, lineWidth: 1)
+            )
             .padding(.leading, CGFloat(depth) * LibraryLayout.categoryTreeIndentWidth)
             .frame(minHeight: LibraryLayout.categoryTreeConnectorHeight)
             .background(alignment: .leading) {
@@ -2432,7 +2451,6 @@ private struct CategorySidebarRow: View {
                 )
                 .allowsHitTesting(false)
             }
-            .help(rowHelpText)
 
             if isDropActive {
                 Label("Drop", systemImage: "arrow.down.doc")
@@ -2507,18 +2525,19 @@ private struct CategorySidebarRow: View {
         hasChildren ? (isExpanded ? "folder.fill" : "folder") : systemImage
     }
 
-    private var rowHelpText: String {
+    private var folderIconHelp: String {
         guard hasChildren else {
             return title
         }
         return isExpanded ? "Collapse \(title)" : "Expand \(title)"
     }
 
-    private func primaryCategoryRowAction() {
+    private func toggleFolderExpansion() {
         if hasChildren {
             onToggle()
+        } else {
+            onSelect()
         }
-        onSelect()
     }
 
     private func loadDroppedItems(from providers: [NSItemProvider]) -> Bool {
