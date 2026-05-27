@@ -3941,6 +3941,49 @@ func runAgentCommandBuilderChecks() throws {
         ],
         "pi adapter should build a JSON print command with session storage and prompt files"
     )
+
+    let codexTerminal = CodexRuntimeAdapter(executablePath: "/usr/local/bin/codex").terminalCommand(
+        workspacePath: "/tmp/session-a",
+        modelOverride: "gpt-5.4",
+        reasoningEffort: .high,
+        mcpServers: [mcpServer]
+    )
+    try check(codexTerminal.launchMode == .pty, "Codex terminal command should launch in PTY mode")
+    try check(codexTerminal.arguments.contains("-C") && codexTerminal.arguments.contains("/tmp/session-a"), "Codex terminal command should start inside the paper workspace")
+    try check(codexTerminal.environmentOverrides["PAPER_CODEX_MCP_TOKEN"] == "secret-token", "Codex terminal command should preserve MCP token environment")
+
+    let claudeTerminal = ClaudeCodeRuntimeAdapter(executablePath: "/usr/local/bin/claude").terminalCommand(
+        workspacePath: "/tmp/session-a",
+        mcpConfigPath: "/tmp/session-a/mcp.json"
+    )
+    try check(claudeTerminal.launchMode == .pty, "Claude terminal command should launch in PTY mode")
+    try check(claudeTerminal.arguments == ["--add-dir", "/tmp/session-a", "--mcp-config", "/tmp/session-a/mcp.json"], "Claude terminal command should pass workspace and MCP config")
+
+    let hermesTerminal = HermesRuntimeAdapter(executablePath: "/usr/local/bin/hermes").terminalCommand(
+        workspacePath: "/tmp/session-a",
+        provider: "kimi",
+        model: "kimi-k2",
+        skillsPath: "/tmp/session-a/skills/papercodex-agent-workspace"
+    )
+    try check(hermesTerminal.launchMode == .pty, "Hermes terminal command should launch in PTY mode")
+    try check(hermesTerminal.arguments.contains("--tui") && hermesTerminal.arguments.contains("--skills"), "Hermes terminal command should use TUI mode with Paper Codex skills")
+
+    let openClawTerminal = OpenClawRuntimeAdapter(executablePath: "/opt/homebrew/bin/openclaw").terminalCommand(
+        workspacePath: "/tmp/session-a",
+        sessionID: "paper-session",
+        modelID: "kimi-coding/k2p5"
+    )
+    try check(openClawTerminal.launchMode == .pty, "OpenClaw Kimi terminal command should launch in PTY mode")
+    try check(openClawTerminal.arguments.first == "tui", "OpenClaw Kimi terminal command should enter the TUI")
+    try check(openClawTerminal.environmentOverrides["OPENCLAW_MODEL"] == "kimi-coding/k2p5", "OpenClaw Kimi terminal command should carry model selection")
+
+    let piTerminal = PiRuntimeAdapter(executablePath: "/Users/chunqiu/.local/bin/pi").terminalCommand(
+        workspacePath: "/tmp/session-a",
+        systemPrompt: "Use Paper Codex citations.",
+        agentInstructionsPath: "/tmp/session-a/agent_instructions.md"
+    )
+    try check(piTerminal.launchMode == .pty, "pi terminal command should launch in PTY mode")
+    try check(piTerminal.arguments.contains("--session-dir") && piTerminal.arguments.contains("--append-system-prompt"), "pi terminal command should keep session storage and prompt files")
 }
 
 func runAgentSessionMigrationChecks() throws {
@@ -4025,6 +4068,101 @@ func runAgentSessionMigrationChecks() throws {
             && !appModelSource.contains("private func runCodex(")
             && !appModelSource.contains("private func runCodexTurn("),
         "AppModel chat and discover execution should move behind AgentRunCoordinator"
+    )
+}
+
+private final class AgentRuntimeSourceOutputBuffer: @unchecked Sendable {
+    private let lock = NSLock()
+    private var data = Data()
+
+    func append(_ chunk: Data) {
+        lock.lock()
+        data.append(chunk)
+        lock.unlock()
+    }
+
+    func text() -> String {
+        lock.lock()
+        defer { lock.unlock() }
+        return String(decoding: data, as: UTF8.self)
+    }
+}
+
+func runAgentRuntimeSourceChecks() throws {
+    let tempRoot = FileManager.default.temporaryDirectory
+        .appendingPathComponent("paper-codex-agent-terminal-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+    let process = LocalPTYProcess(
+        configuration: LocalPTYProcessConfiguration(
+            executablePath: "/bin/sh",
+            arguments: [
+                "-lc",
+                #"printf 'READY\n'; IFS= read line; printf 'GOT:%s\n' "$line""#
+            ],
+            workingDirectoryPath: tempRoot.path,
+            environment: ["TERM": "xterm-256color"],
+            columns: 80,
+            rows: 24
+        )
+    )
+    let output = AgentRuntimeSourceOutputBuffer()
+    try process.start { data in
+        output.append(data)
+    }
+    try process.resize(columns: 100, rows: 30)
+    try process.write("paper-terminal\n")
+    let status = process.waitUntilExit()
+    let outputText = output.text()
+    try check(status == 0, "local PTY shell process should exit cleanly")
+    try check(outputText.contains("READY"), "local PTY process should stream child output")
+    try check(outputText.contains("GOT:paper-terminal"), "local PTY process should forward user input")
+
+    let sourceRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+    let ptySource = try String(contentsOf: sourceRoot.appendingPathComponent("Sources/PaperCodexCore/LocalPTYProcess.swift"))
+    let terminalViewSource = try String(contentsOf: sourceRoot.appendingPathComponent("Sources/PaperCodexApp/AgentTerminalView.swift"))
+    let chatViewSource = try String(contentsOf: sourceRoot.appendingPathComponent("Sources/PaperCodexApp/ChatView.swift"))
+    let appModelSource = try String(contentsOf: sourceRoot.appendingPathComponent("Sources/PaperCodexApp/AppModel.swift"))
+
+    try check(
+        ptySource.contains("final class LocalPTYProcess")
+            && ptySource.contains("openpty")
+            && ptySource.contains("write(_ text")
+            && ptySource.contains("resize(columns:")
+            && ptySource.contains("rows:")
+            && ptySource.contains("terminate()")
+            && ptySource.contains("waitUntilExit"),
+        "LocalPTYProcess should expose PTY start, input, resize, terminate, and wait primitives"
+    )
+    try check(
+        terminalViewSource.contains("struct AgentTerminalView")
+            && terminalViewSource.contains("AgentTerminalOutputView")
+            && terminalViewSource.contains("terminalInputDraft")
+            && terminalViewSource.contains("startAgentTerminal")
+            && terminalViewSource.contains("sendAgentTerminalInput")
+            && terminalViewSource.contains("resizeAgentTerminal")
+            && terminalViewSource.contains("stopAgentTerminal"),
+        "AgentTerminalView should expose launch, input, resize, output, and stop controls"
+    )
+    try check(
+        chatViewSource.contains("case terminal")
+            && chatViewSource.contains("AgentTerminalView()")
+            && chatViewSource.contains("Label(\"Terminal\", systemImage: \"terminal\")"),
+        "ChatView should add a Terminal session panel tab"
+    )
+    try check(
+        appModelSource.contains("@Published var agentTerminalState")
+            && appModelSource.contains("activeAgentTerminalProcess")
+            && appModelSource.contains("func startAgentTerminal")
+            && appModelSource.contains("func sendAgentTerminalInput")
+            && appModelSource.contains("func resizeAgentTerminal")
+            && appModelSource.contains("func stopAgentTerminal")
+            && appModelSource.contains("workspacePath.appendingPathComponent(\"turns\"")
+            && appModelSource.contains("CodexRuntimeAdapter")
+            && appModelSource.contains("ClaudeCodeRuntimeAdapter")
+            && appModelSource.contains("HermesRuntimeAdapter")
+            && appModelSource.contains("OpenClawRuntimeAdapter")
+            && appModelSource.contains("PiRuntimeAdapter"),
+        "AppModel should own Terminal state, log output under turns, and launch every PTY-capable runtime"
     )
 }
 
@@ -5182,6 +5320,10 @@ do {
     if selectedChecks.isEmpty || selectedChecks.contains("agent-session-migration") {
         try runAgentSessionMigrationChecks()
         print("agent-session-migration: pass")
+    }
+    if selectedChecks.isEmpty || selectedChecks.contains("agent-runtime-source") {
+        try runAgentRuntimeSourceChecks()
+        print("agent-runtime-source: pass")
     }
     if selectedChecks.isEmpty || selectedChecks.contains("pdf") {
         try runPDFChecks()

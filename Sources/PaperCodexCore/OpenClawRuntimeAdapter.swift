@@ -52,6 +52,30 @@ public struct OpenClawRuntimeAdapter: Sendable {
         )
     }
 
+    public func terminalCommand(
+        workspacePath: String,
+        sessionID: String?,
+        modelID: String?
+    ) -> AgentRuntimeCommand {
+        var arguments = ["tui"]
+        if let sessionID = normalized(sessionID) {
+            arguments += ["--session-id", sessionID]
+        }
+
+        var environmentOverrides: [String: String] = [:]
+        if let modelID = normalized(modelID) {
+            environmentOverrides["OPENCLAW_MODEL"] = modelID
+        }
+
+        return AgentRuntimeCommand(
+            executablePath: executablePath,
+            arguments: arguments,
+            currentDirectoryPath: workspacePath,
+            environmentOverrides: environmentOverrides,
+            launchMode: .pty
+        )
+    }
+
     private func normalized(_ value: String?) -> String? {
         let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return trimmed.isEmpty ? nil : trimmed

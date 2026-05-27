@@ -45,6 +45,24 @@ public struct ClaudeCodeRuntimeAdapter: Sendable {
         )
     }
 
+    public func terminalCommand(
+        workspacePath: String,
+        mcpConfigPath: String?
+    ) -> AgentRuntimeCommand {
+        var arguments = [
+            "--add-dir", workspacePath
+        ]
+        if let mcpConfigPath = normalized(mcpConfigPath) {
+            arguments += ["--mcp-config", mcpConfigPath]
+        }
+        return AgentRuntimeCommand(
+            executablePath: executablePath,
+            arguments: arguments,
+            currentDirectoryPath: workspacePath,
+            launchMode: .pty
+        )
+    }
+
     private func normalized(_ value: String?) -> String? {
         let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return trimmed.isEmpty ? nil : trimmed

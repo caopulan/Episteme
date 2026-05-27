@@ -7,6 +7,7 @@ private let chatComposerTextHeightDefaultsKey = "PaperCodexChatComposerTextHeigh
 
 enum SessionPanelTab: Hashable {
     case chat
+    case terminal
     case notes
 }
 
@@ -56,6 +57,8 @@ struct ChatView: View {
         switch model.selectedSessionPanelTab {
         case .chat:
             chatPanel
+        case .terminal:
+            AgentTerminalView()
         case .notes:
             SessionNotesPanel()
         }
@@ -179,11 +182,12 @@ struct ChatView: View {
         HStack(spacing: 8) {
             Picker("Session Panel", selection: $model.selectedSessionPanelTab) {
                 Label("Chat", systemImage: "text.bubble").tag(SessionPanelTab.chat)
+                Label("Terminal", systemImage: "terminal").tag(SessionPanelTab.terminal)
                 Label("Notes", systemImage: "note.text").tag(SessionPanelTab.notes)
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .frame(width: 132)
+            .frame(width: 220)
             .help("Session Panel")
 
             Divider()

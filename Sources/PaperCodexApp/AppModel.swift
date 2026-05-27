@@ -130,6 +130,20 @@ struct ActiveCodexRun: Identifiable, Equatable {
     var events: [CodexRunEvent]
 }
 
+struct AgentTerminalState: Identifiable, Equatable {
+    var id: String
+    var sessionID: String
+    var runtimeID: String
+    var runtimeName: String
+    var workspacePath: String
+    var logPath: String
+    var output: String
+    var isRunning: Bool
+    var startedAt: Date
+    var columns: Int
+    var rows: Int
+}
+
 struct ArxivCacheProgress: Equatable, Sendable {
     var date: String
     var title: String
@@ -468,6 +482,7 @@ final class AppModel: ObservableObject {
     @Published var inAppCodexMCPEnabled: Bool = loadInAppCodexMCPEnabledFromDefaults()
     @Published var globalLanguageMode: PaperCodexLanguageMode = .automatic
     @Published var activeCodexRunsBySessionID: [String: ActiveCodexRun] = [:]
+    @Published var agentTerminalState: AgentTerminalState?
     @Published var errorMessage: String?
     @Published var notices: [InteractionNotice] = []
     @Published var discoverCodexModelOverride: String = UserDefaults.standard.string(forKey: discoverCodexModelOverrideDefaultsKey) ?? ""
@@ -748,6 +763,7 @@ final class AppModel: ObservableObject {
     private var cachedEmbeddingProviderAPIKey: String?
     private var activeCodexRunHandlesBySessionID: [String: CodexRunHandle] = [:]
     private var activeDiscoverCodexRunHandles: [CodexRunHandle] = []
+    private var activeAgentTerminalProcess: LocalPTYProcess?
     private var cancellingCodexRunSessionIDs: Set<String> = []
     private var loadedPaperNotesPaperIDs: Set<String> = []
     private var isCancellingDiscoverProcessing = false
@@ -755,6 +771,13 @@ final class AppModel: ObservableObject {
 
     var activeCodexRun: ActiveCodexRun? {
         activeCodexRun(for: selectedSession?.id)
+    }
+
+    func agentTerminalState(for sessionID: String?) -> AgentTerminalState? {
+        guard let sessionID, agentTerminalState?.sessionID == sessionID else {
+            return nil
+        }
+        return agentTerminalState
     }
 
     var isSending: Bool {
@@ -874,6 +897,10 @@ final class AppModel: ObservableObject {
 
     var selectedChatRuntimeDisplayName: String {
         agentRuntimeStore.selectedChatRuntime.displayName
+    }
+
+    var selectedChatRuntimeSupportsPTY: Bool {
+        agentRuntimeStore.selectedChatRuntime.supportsPTY
     }
 
     var selectedChatRuntimeDiagnostic: AgentRuntimeDiagnostic? {
@@ -4029,6 +4056,124 @@ final class AppModel: ObservableObject {
         postNotice(kind: .info, title: "Stopping Codex", message: run.title)
     }
 
+    func startAgentTerminal(columns: Int = 120, rows: Int = 32) async {
+        do {
+            guard let repository else {
+                throw AppModelError.repositoryUnavailable
+            }
+            guard let session = selectedSession else {
+                throw AppModelError.noSelectedSession
+            }
+            let fallbackPaper = try fallbackPaper(for: session, repository: repository)
+            let runtimeProfile = agentRuntimeStore.selectedChatRuntime
+            guard runtimeProfile.supportsPTY else {
+                throw AppModelError.runtimeDoesNotSupportTerminal(runtimeProfile.displayName)
+            }
+
+            stopAgentTerminal()
+            let context = try loadSessionPaperContext(session: session, fallbackPaper: fallbackPaper, repository: repository)
+            try workspaceManager.writeWorkspace(
+                session: session,
+                papers: context.papers,
+                pagesByPaperID: context.pagesByPaperID,
+                spansByPaperID: context.spansByPaperID,
+                anchorsByPaperID: context.anchorsByPaperID,
+                mcpEndpoint: mcpEndpoint,
+                materializationMode: session.workspaceMaterializationMode
+            )
+
+            let workspacePath = URL(fileURLWithPath: session.workspacePath, isDirectory: true)
+            let turnsURL = workspacePath.appendingPathComponent("turns", isDirectory: true)
+            try FileManager.default.createDirectory(at: turnsURL, withIntermediateDirectories: true)
+            let logURL = turnsURL.appendingPathComponent("\(UUID().uuidString.lowercased())-\(runtimeProfile.id).terminal.log")
+            FileManager.default.createFile(atPath: logURL.path, contents: nil)
+
+            let command = try agentTerminalCommand(
+                for: runtimeProfile,
+                session: session,
+                workspacePath: workspacePath
+            )
+            let terminalID = UUID().uuidString.lowercased()
+            let process = LocalPTYProcess(
+                configuration: LocalPTYProcessConfiguration(
+                    executablePath: command.executablePath,
+                    arguments: command.arguments,
+                    workingDirectoryPath: command.currentDirectoryPath ?? session.workspacePath,
+                    environment: command.environmentOverrides,
+                    columns: columns,
+                    rows: rows
+                )
+            )
+            agentTerminalState = AgentTerminalState(
+                id: terminalID,
+                sessionID: session.id,
+                runtimeID: runtimeProfile.id,
+                runtimeName: runtimeProfile.displayName,
+                workspacePath: session.workspacePath,
+                logPath: logURL.path,
+                output: "",
+                isRunning: true,
+                startedAt: Date(),
+                columns: columns,
+                rows: rows
+            )
+            try process.start { [weak self, terminalID, logURL] data in
+                Task { @MainActor in
+                    self?.appendAgentTerminalOutput(data: data, terminalID: terminalID, logURL: logURL)
+                }
+            }
+            activeAgentTerminalProcess = process
+            DispatchQueue.global(qos: .utility).async { [weak self, process, terminalID] in
+                let status = process.waitUntilExit()
+                DispatchQueue.main.async {
+                    self?.finishAgentTerminal(terminalID: terminalID, status: status)
+                }
+            }
+            postNotice(kind: .success, title: "Terminal Started", message: runtimeProfile.displayName)
+        } catch {
+            agentTerminalState = nil
+            activeAgentTerminalProcess = nil
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func sendAgentTerminalInput(_ text: String) {
+        do {
+            guard let activeAgentTerminalProcess else {
+                throw AppModelError.noActiveAgentTerminal
+            }
+            let payload = text.hasSuffix("\n") ? text : "\(text)\n"
+            try activeAgentTerminalProcess.write(payload)
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func resizeAgentTerminal(columns: Int, rows: Int) {
+        do {
+            guard let activeAgentTerminalProcess else {
+                return
+            }
+            try activeAgentTerminalProcess.resize(columns: columns, rows: rows)
+            if var state = agentTerminalState {
+                state.columns = columns
+                state.rows = rows
+                agentTerminalState = state
+            }
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func stopAgentTerminal() {
+        activeAgentTerminalProcess?.terminate()
+        activeAgentTerminalProcess = nil
+        if var state = agentTerminalState {
+            state.isRunning = false
+            agentTerminalState = state
+        }
+    }
+
     func jumpToCitation(_ citationID: String) {
         do {
             guard let repository else {
@@ -5481,6 +5626,94 @@ final class AppModel: ObservableObject {
         ]
     }
 
+    private func agentTerminalCommand(
+        for runtimeProfile: AgentRuntimeProfile,
+        session: PaperSession,
+        workspacePath: URL
+    ) throws -> AgentRuntimeCommand {
+        let mcpConfigPath = workspacePath.appendingPathComponent("mcp.json").path
+        let agentInstructionsPath = workspacePath.appendingPathComponent("agent_instructions.md").path
+        let skillsPath = workspacePath
+            .appendingPathComponent("skills", isDirectory: true)
+            .appendingPathComponent("papercodex-agent-workspace", isDirectory: true)
+            .path
+        let modelID = agentRuntimeStore.modelOverride(for: runtimeProfile.id)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let providerID = agentRuntimeStore.providerOverride(for: runtimeProfile.id)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        switch runtimeProfile.backend {
+        case .codex:
+            let executable = try CodexRuntimeAdapter.findExecutable()
+            return CodexRuntimeAdapter(executablePath: executable).terminalCommand(
+                workspacePath: session.workspacePath,
+                modelOverride: effectiveModelOverride(prefersWorkspaceImageOutput: false),
+                reasoningEffort: codexReasoningEffort,
+                mcpServers: inAppCodexMCPServers()
+            )
+        case .claudeCode:
+            let executable = try ClaudeCodeRuntimeAdapter.findExecutable()
+            return ClaudeCodeRuntimeAdapter(executablePath: executable).terminalCommand(
+                workspacePath: session.workspacePath,
+                mcpConfigPath: FileManager.default.fileExists(atPath: mcpConfigPath) ? mcpConfigPath : nil
+            )
+        case .hermes:
+            let executable = try HermesRuntimeAdapter.findExecutable()
+            return HermesRuntimeAdapter(executablePath: executable).terminalCommand(
+                workspacePath: session.workspacePath,
+                provider: providerID.isEmpty ? nil : providerID,
+                model: modelID.isEmpty ? runtimeProfile.defaultModelID : modelID,
+                skillsPath: FileManager.default.fileExists(atPath: skillsPath) ? skillsPath : nil
+            )
+        case .openClawKimi:
+            let executable = try OpenClawRuntimeAdapter.findExecutable()
+            return OpenClawRuntimeAdapter(executablePath: executable).terminalCommand(
+                workspacePath: session.workspacePath,
+                sessionID: session.runtimeSessionID(for: runtimeProfile.id) ?? session.id,
+                modelID: modelID.isEmpty ? runtimeProfile.defaultModelID : modelID
+            )
+        case .pi:
+            let executable = try PiRuntimeAdapter.findExecutable()
+            return PiRuntimeAdapter(executablePath: executable).terminalCommand(
+                workspacePath: session.workspacePath,
+                systemPrompt: "Use Paper Codex citations.",
+                agentInstructionsPath: FileManager.default.fileExists(atPath: agentInstructionsPath) ? agentInstructionsPath : nil
+            )
+        }
+    }
+
+    private func appendAgentTerminalOutput(data: Data, terminalID: String, logURL: URL) {
+        guard var state = agentTerminalState, state.id == terminalID else {
+            return
+        }
+        do {
+            let handle = try FileHandle(forWritingTo: logURL)
+            try handle.seekToEnd()
+            try handle.write(contentsOf: data)
+            try handle.close()
+        } catch {
+            errorMessage = "Terminal log write failed: \(error)"
+        }
+        state.output += String(decoding: data, as: UTF8.self)
+        if state.output.count > 80_000 {
+            state.output = String(state.output.suffix(80_000))
+        }
+        agentTerminalState = state
+    }
+
+    private func finishAgentTerminal(terminalID: String, status: Int32) {
+        guard var state = agentTerminalState, state.id == terminalID else {
+            return
+        }
+        state.isRunning = false
+        if !state.output.hasSuffix("\n") {
+            state.output += "\n"
+        }
+        state.output += "[process exited: \(status)]\n"
+        agentTerminalState = state
+        activeAgentTerminalProcess = nil
+    }
+
     private func effectiveModelOverride(prefersWorkspaceImageOutput: Bool) -> String {
         let trimmed = codexModelOverride.trimmingCharacters(in: .whitespacesAndNewlines)
         guard prefersWorkspaceImageOutput else {
@@ -5663,6 +5896,8 @@ enum AppModelError: Error, CustomStringConvertible {
     case invalidCategoryMove
     case paperNotFound(String)
     case missingMCPCommandArgument(String)
+    case runtimeDoesNotSupportTerminal(String)
+    case noActiveAgentTerminal
 
     var description: String {
         switch self {
@@ -5694,6 +5929,10 @@ enum AppModelError: Error, CustomStringConvertible {
             "No paper was found for \(paperID)."
         case let .missingMCPCommandArgument(name):
             "MCP command is missing \(name)."
+        case let .runtimeDoesNotSupportTerminal(runtimeName):
+            "\(runtimeName) does not support Terminal mode."
+        case .noActiveAgentTerminal:
+            "No agent terminal is running."
         }
     }
 }

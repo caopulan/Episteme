@@ -51,6 +51,31 @@ public struct PiRuntimeAdapter: Sendable {
         )
     }
 
+    public func terminalCommand(
+        workspacePath: String,
+        systemPrompt: String?,
+        agentInstructionsPath: String?
+    ) -> AgentRuntimeCommand {
+        var arguments = [
+            "--session-dir", URL(fileURLWithPath: workspacePath, isDirectory: true)
+                .appendingPathComponent("agent-sessions", isDirectory: true)
+                .appendingPathComponent("pi", isDirectory: true)
+                .path
+        ]
+        if let systemPrompt = normalized(systemPrompt) {
+            arguments += ["--system-prompt", systemPrompt]
+        }
+        if let agentInstructionsPath = normalized(agentInstructionsPath) {
+            arguments += ["--append-system-prompt", agentInstructionsPath]
+        }
+        return AgentRuntimeCommand(
+            executablePath: executablePath,
+            arguments: arguments,
+            currentDirectoryPath: workspacePath,
+            launchMode: .pty
+        )
+    }
+
     private func normalized(_ value: String?) -> String? {
         let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return trimmed.isEmpty ? nil : trimmed
