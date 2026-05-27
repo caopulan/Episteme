@@ -3633,6 +3633,26 @@ final class AppModel: ObservableObject {
         }
     }
 
+    var canOpenSelectedLibraryPaper: Bool {
+        selectedLibraryPaper?.isArxivImportPlaceholder == false
+    }
+
+    func openSelectedLibraryPaperForReading() {
+        guard canOpenSelectedLibraryPaper,
+              let paperID = selectedLibraryPaper?.id else {
+            return
+        }
+        openPapersForReading([paperID])
+    }
+
+    func openSelectedLibraryPaperForChat() {
+        guard canOpenSelectedLibraryPaper,
+              let paperID = selectedLibraryPaper?.id else {
+            return
+        }
+        openPapersForChat([paperID])
+    }
+
     func openRecentSession(_ session: PaperSession) {
         do {
             guard let repository else {

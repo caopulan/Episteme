@@ -324,6 +324,18 @@ struct PaperCodexCommands: Commands {
             }
             .keyboardShortcut("f", modifiers: [.command])
 
+            Button("Read Selected Paper") {
+                model.openSelectedLibraryPaperForReading()
+            }
+            .keyboardShortcut(.return, modifiers: [.command])
+            .disabled(!canUseSelectedLibraryPaperCommand)
+
+            Button("Chat With Selected Paper") {
+                model.openSelectedLibraryPaperForChat()
+            }
+            .keyboardShortcut(.return, modifiers: [.command, .shift])
+            .disabled(!canUseSelectedLibraryPaperCommand)
+
             Divider()
 
             Button("Settings") {
@@ -331,5 +343,11 @@ struct PaperCodexCommands: Commands {
             }
             .keyboardShortcut(",", modifiers: [.command])
         }
+    }
+
+    private var canUseSelectedLibraryPaperCommand: Bool {
+        navigation.route == .library
+            && model.selectedLibrarySurface == .papers
+            && model.canOpenSelectedLibraryPaper
     }
 }

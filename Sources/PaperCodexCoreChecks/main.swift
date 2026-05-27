@@ -1752,6 +1752,17 @@ func runUILayoutSourceChecks() throws {
         "Cmd-F should focus the active page search field across Library, Explore, and Search"
     )
     try check(
+        rootViewSource.contains("Button(\"Read Selected Paper\")")
+            && rootViewSource.contains(".keyboardShortcut(.return, modifiers: [.command])")
+            && rootViewSource.contains("Button(\"Chat With Selected Paper\")")
+            && rootViewSource.contains(".keyboardShortcut(.return, modifiers: [.command, .shift])")
+            && rootViewSource.contains("canUseSelectedLibraryPaperCommand")
+            && appModelSource.contains("func openSelectedLibraryPaperForReading()")
+            && appModelSource.contains("func openSelectedLibraryPaperForChat()")
+            && appModelSource.contains("selectedLibraryPaper?.isArxivImportPlaceholder == false"),
+        "Library focused papers should have direct keyboard commands for reading and chat"
+    )
+    try check(
         rootViewSource.contains("GlobalOperationStatusView"),
         "the root view should show the current long-running operation"
     )
