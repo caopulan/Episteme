@@ -1217,17 +1217,21 @@ func runUILayoutSourceChecks() throws {
     )
     try check(
         agentRuntimeSource.contains("protocol AgentRuntime")
-            && agentRuntimeSource.contains("struct AgentRuntimeRequest")
-            && agentRuntimeSource.contains("struct AgentRuntimeResult")
+            && agentRuntimeSource.contains("struct AgentRunRequest")
+            && agentRuntimeSource.contains("struct AgentRunResult")
+            && agentRuntimeSource.contains("func runTurn(")
+            && agentRuntimeSource.contains("typealias AgentRuntimeRequest = AgentRunRequest")
+            && agentRuntimeSource.contains("typealias AgentRuntimeResult = AgentRunResult")
             && agentRuntimeSource.contains("public var mcpServers: [CodexMCPServerConfig]")
             && agentRuntimeSource.contains("public var mcpEnvironmentOverrides: [String: String]")
             && codexAgentRuntimeSource.contains("struct CodexAgentRuntime")
+            && codexAgentRuntimeSource.contains("func runTurn(")
             && codexAgentRuntimeSource.contains("CodexCLI")
             && codexAgentRuntimeSource.contains("mcpServers: request.mcpServers")
             && codexAgentRuntimeSource.contains("environmentOverrides: request.mcpEnvironmentOverrides")
             && codexAgentRuntimeSource.contains("GeneratedImageCollector.newImages")
             && appModelSource.contains("private let agentRuntime: any AgentRuntime")
-            && appModelSource.contains("agentRuntime.runCodexTurn"),
+            && appModelSource.contains("agentRuntime.runTurn"),
         "Codex CLI streaming should sit behind an AgentRuntime boundary and carry app-local MCP settings"
     )
     try check(
@@ -3739,6 +3743,159 @@ func runAgentWorkspaceManifestChecks() throws {
     try check(decoded == manifest, "workspace manifest should JSON round-trip")
 }
 
+func runAgentCommandBuilderChecks() throws {
+    let mcpServer = CodexMCPServerConfig(
+        name: "paper-codex",
+        url: "http://127.0.0.1:39427/mcp",
+        bearerTokenEnvironmentVariable: "PAPER_CODEX_MCP_TOKEN",
+        bearerToken: "secret-token"
+    )
+    let executableRoot = FileManager.default.temporaryDirectory
+        .appendingPathComponent("paper-codex-agent-executables-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: executableRoot, withIntermediateDirectories: true)
+    func makeExecutable(_ name: String) throws -> String {
+        let url = executableRoot.appendingPathComponent(name)
+        try "#!/bin/sh\nexit 0\n".write(to: url, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
+        return url.path
+    }
+    let claudeExecutable = try makeExecutable("claude")
+    let hermesExecutable = try makeExecutable("hermes")
+    let openClawExecutable = try makeExecutable("openclaw")
+    let piExecutable = try makeExecutable("pi")
+    let pathEnvironment = ["PATH": executableRoot.path, "HOME": executableRoot.path]
+    let discoveredClaudeExecutable = try ClaudeCodeRuntimeAdapter.findExecutable(environment: pathEnvironment)
+    let discoveredHermesExecutable = try HermesRuntimeAdapter.findExecutable(environment: pathEnvironment)
+    let discoveredOpenClawExecutable = try OpenClawRuntimeAdapter.findExecutable(environment: pathEnvironment)
+    let discoveredPiExecutable = try PiRuntimeAdapter.findExecutable(environment: pathEnvironment)
+    try check(
+        discoveredClaudeExecutable == claudeExecutable,
+        "Claude Code adapter should discover claude from PATH"
+    )
+    try check(
+        discoveredHermesExecutable == hermesExecutable,
+        "Hermes adapter should discover hermes from PATH"
+    )
+    try check(
+        discoveredOpenClawExecutable == openClawExecutable,
+        "OpenClaw adapter should discover openclaw from PATH"
+    )
+    try check(
+        discoveredPiExecutable == piExecutable,
+        "pi adapter should discover pi from PATH"
+    )
+
+    let codexStart = CodexRuntimeAdapter(executablePath: "/usr/local/bin/codex").startCommand(
+        prompt: "Summarize",
+        workspacePath: "/tmp/session-a",
+        outputLastMessagePath: "/tmp/session-a/turns/last.txt",
+        modelOverride: "gpt-5.4",
+        reasoningEffort: .high,
+        mcpServers: [mcpServer]
+    )
+    try check(codexStart.executablePath == "/usr/local/bin/codex", "Codex adapter should keep the selected executable path")
+    try check(
+        codexStart.arguments == [
+            "exec", "--skip-git-repo-check", "--json", "--enable", "image_generation",
+            "--model", "gpt-5.4",
+            "-c", "model_reasoning_effort=\"high\"",
+            "-c", "mcp_servers.paper-codex.url=\"http://127.0.0.1:39427/mcp\"",
+            "-c", "mcp_servers.paper-codex.bearer_token_env_var=\"PAPER_CODEX_MCP_TOKEN\"",
+            "-C", "/tmp/session-a",
+            "--output-last-message", "/tmp/session-a/turns/last.txt",
+            "Summarize"
+        ],
+        "Codex adapter should preserve current codex exec behavior and MCP config overrides"
+    )
+    try check(codexStart.environmentOverrides["PAPER_CODEX_MCP_TOKEN"] == "secret-token", "Codex adapter should pass MCP bearer tokens through the environment")
+    try check(codexStart.currentDirectoryPath == "/tmp/session-a", "Codex adapter should run from the session workspace")
+
+    let codexResume = CodexRuntimeAdapter(executablePath: "/usr/local/bin/codex").resumeCommand(
+        sessionID: "codex-session",
+        prompt: "Continue",
+        workspacePath: "/tmp/session-a",
+        outputLastMessagePath: nil,
+        modelOverride: nil,
+        reasoningEffort: .default,
+        mcpServers: [mcpServer]
+    )
+    try check(codexResume.arguments.prefix(5) == ["exec", "resume", "--skip-git-repo-check", "--json", "--enable"], "Codex resume adapter should use codex exec resume")
+    try check(codexResume.arguments.suffix(2) == ["codex-session", "Continue"], "Codex resume adapter should append runtime session id and prompt")
+
+    let claude = ClaudeCodeRuntimeAdapter(executablePath: "/usr/local/bin/claude").nonInteractiveCommand(
+        prompt: "Summarize",
+        workspacePath: "/tmp/session-a",
+        systemPrompt: "Use the Paper Codex citation contract.",
+        mcpConfigPath: "/tmp/session-a/mcp.json"
+    )
+    try check(
+        claude.arguments == [
+            "--print",
+            "--output-format", "stream-json",
+            "--system-prompt", "Use the Paper Codex citation contract.",
+            "--add-dir", "/tmp/session-a",
+            "--mcp-config", "/tmp/session-a/mcp.json",
+            "Summarize"
+        ],
+        "Claude Code adapter should inject system prompt, workspace, and MCP config"
+    )
+
+    let hermes = HermesRuntimeAdapter(executablePath: "/usr/local/bin/hermes").nonInteractiveCommand(
+        prompt: "Summarize",
+        workspacePath: "/tmp/session-a",
+        provider: "kimi",
+        model: "kimi-k2",
+        skillsPath: "/tmp/session-a/skills/papercodex-agent-workspace"
+    )
+    try check(
+        hermes.arguments == [
+            "chat",
+            "--query", "Summarize",
+            "--provider", "kimi",
+            "--model", "kimi-k2",
+            "--skills", "/tmp/session-a/skills/papercodex-agent-workspace",
+            "--source", "papercodex"
+        ],
+        "Hermes adapter should build a provider/model/skills query command"
+    )
+
+    let openClaw = OpenClawRuntimeAdapter(executablePath: "/opt/homebrew/bin/openclaw").nonInteractiveCommand(
+        prompt: "Summarize",
+        workspacePath: "/tmp/session-a",
+        sessionID: "paper-session",
+        modelID: "kimi-coding/k2p5"
+    )
+    try check(
+        openClaw.arguments == [
+            "agent",
+            "--local",
+            "--json",
+            "--session-id", "paper-session",
+            "--message", "Summarize"
+        ],
+        "OpenClaw Kimi adapter should build a local JSON agent command"
+    )
+    try check(openClaw.environmentOverrides["OPENCLAW_MODEL"] == "kimi-coding/k2p5", "OpenClaw Kimi adapter should carry explicit model selection through the environment")
+
+    let pi = PiRuntimeAdapter(executablePath: "/Users/chunqiu/.local/bin/pi").nonInteractiveCommand(
+        prompt: "Summarize",
+        workspacePath: "/tmp/session-a",
+        systemPrompt: "Use Paper Codex citations.",
+        agentInstructionsPath: "/tmp/session-a/agent_instructions.md"
+    )
+    try check(
+        pi.arguments == [
+            "-p",
+            "--mode", "json",
+            "--session-dir", "/tmp/session-a/agent-sessions/pi",
+            "--system-prompt", "Use Paper Codex citations.",
+            "--append-system-prompt", "/tmp/session-a/agent_instructions.md",
+            "Summarize"
+        ],
+        "pi adapter should build a JSON print command with session storage and prompt files"
+    )
+}
+
 private func requiredProfile(
     _ id: String,
     in profilesByID: [String: AgentRuntimeProfile]
@@ -4885,6 +5042,10 @@ do {
     if selectedChecks.isEmpty || selectedChecks.contains("agent-workspace-manifest") {
         try runAgentWorkspaceManifestChecks()
         print("agent-workspace-manifest: pass")
+    }
+    if selectedChecks.isEmpty || selectedChecks.contains("agent-command-builders") {
+        try runAgentCommandBuilderChecks()
+        print("agent-command-builders: pass")
     }
     if selectedChecks.isEmpty || selectedChecks.contains("pdf") {
         try runPDFChecks()

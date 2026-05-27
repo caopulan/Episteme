@@ -1,6 +1,12 @@
 import Foundation
 
-public struct AgentRuntimeRequest: Sendable {
+public typealias AgentRunEvent = CodexRunEvent
+public typealias AgentRunHandle = CodexRunHandle
+public typealias AgentRuntimeRequest = AgentRunRequest
+public typealias AgentRuntimeResult = AgentRunResult
+
+public struct AgentRunRequest: Sendable {
+    public var runtimeProfileID: String
     public var prompt: String
     public var workspacePath: String
     public var existingSessionID: String?
@@ -12,6 +18,7 @@ public struct AgentRuntimeRequest: Sendable {
     public var mcpServers: [CodexMCPServerConfig]
 
     public init(
+        runtimeProfileID: String = "codex",
         prompt: String,
         workspacePath: String,
         existingSessionID: String?,
@@ -22,6 +29,7 @@ public struct AgentRuntimeRequest: Sendable {
         runModeDescription: String,
         mcpServers: [CodexMCPServerConfig] = []
     ) {
+        self.runtimeProfileID = runtimeProfileID
         self.prompt = prompt
         self.workspacePath = workspacePath
         self.existingSessionID = existingSessionID
@@ -42,7 +50,7 @@ public struct AgentRuntimeRequest: Sendable {
     }
 }
 
-public struct AgentRuntimeResult: Sendable {
+public struct AgentRunResult: Sendable {
     public var stdout: String
     public var lastMessage: String
     public var threadID: String?
@@ -65,9 +73,19 @@ public struct AgentRuntimeResult: Sendable {
 }
 
 public protocol AgentRuntime: Sendable {
+    func runTurn(
+        _ request: AgentRunRequest,
+        runHandle: AgentRunHandle,
+        onEvent: @escaping @Sendable (AgentRunEvent) -> Void
+    ) async throws -> AgentRunResult
+}
+
+public extension AgentRuntime {
     func runCodexTurn(
-        _ request: AgentRuntimeRequest,
-        runHandle: CodexRunHandle,
-        onEvent: @escaping @Sendable (CodexRunEvent) -> Void
-    ) async throws -> AgentRuntimeResult
+        _ request: AgentRunRequest,
+        runHandle: AgentRunHandle,
+        onEvent: @escaping @Sendable (AgentRunEvent) -> Void
+    ) async throws -> AgentRunResult {
+        try await runTurn(request, runHandle: runHandle, onEvent: onEvent)
+    }
 }

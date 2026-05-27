@@ -571,13 +571,11 @@ public struct CodexCLI: Sendable {
         baseEnvironment: [String: String] = ProcessInfo.processInfo.environment,
         environmentOverrides: [String: String] = [:]
     ) -> [String: String] {
-        var environment = baseEnvironment
-        environment["PWD"] = workingDirectoryURL.standardizedFileURL.path
-        environment.removeValue(forKey: "OLDPWD")
-        for (key, value) in environmentOverrides {
-            environment[key] = value
-        }
-        return environment
+        CommandAgentRuntime.sanitizedProcessEnvironment(
+            workingDirectoryURL: workingDirectoryURL,
+            baseEnvironment: baseEnvironment,
+            environmentOverrides: environmentOverrides
+        )
     }
 
     public static func findCodexExecutable(
@@ -972,63 +970,22 @@ public struct CodexCLI: Sendable {
         runHandle: CodexRunHandle? = nil,
         onEvent: @escaping @Sendable (CodexRunEvent) -> Void
     ) throws -> String {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: executablePath)
-        process.arguments = arguments
-        configureProcessDirectory(process, currentDirectoryURL: currentDirectoryURL, environmentOverrides: environmentOverrides)
-
-        let output = Pipe()
-        let error = Pipe()
-        process.standardOutput = output
-        process.standardError = error
-
         let streamBuffer = CodexStreamBuffer()
-
-        let group = DispatchGroup()
-        group.enter()
-        DispatchQueue.global(qos: .userInitiated).async {
-            while true {
-                let data = output.fileHandleForReading.availableData
-                if data.isEmpty {
-                    break
-                }
-                for event in streamBuffer.appendStdout(data) {
-                    onEvent(event)
-                }
-            }
-            group.leave()
-        }
-        group.enter()
-        DispatchQueue.global(qos: .userInitiated).async {
-            while true {
-                let data = error.fileHandleForReading.availableData
-                if data.isEmpty {
-                    break
-                }
-                for event in streamBuffer.appendStderr(data) {
-                    onEvent(event)
-                }
-            }
-            group.leave()
-        }
-
-        try process.run()
-        runHandle?.setProcess(process)
-        process.waitUntilExit()
-        runHandle?.clearProcess(process)
-        group.wait()
-
-        let result = streamBuffer.finish()
-        for event in result.events {
-            onEvent(event)
-        }
-        if let eventLogURL {
-            try result.stdout.write(to: eventLogURL, atomically: true, encoding: .utf8)
-        }
-        if process.terminationStatus != 0 {
-            throw CodexCLIError.processFailed(status: process.terminationStatus, stderr: result.stderr)
-        }
-        return result.stdout
+        let command = AgentRuntimeCommand(
+            executablePath: executablePath,
+            arguments: arguments,
+            currentDirectoryPath: currentDirectoryURL?.path,
+            environmentOverrides: environmentOverrides
+        )
+        return try CommandAgentRuntime().runStreaming(
+            command: command,
+            eventLogURL: eventLogURL,
+            runHandle: runHandle,
+            onStdoutData: { streamBuffer.appendStdout($0) },
+            onStderrData: { streamBuffer.appendStderr($0) },
+            finish: { streamBuffer.finish() },
+            onEvent: onEvent
+        )
     }
 
     private func configureProcessDirectory(_ process: Process, currentDirectoryURL: URL?, environmentOverrides: [String: String] = [:]) {

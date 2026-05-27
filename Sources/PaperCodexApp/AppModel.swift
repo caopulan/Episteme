@@ -5362,8 +5362,8 @@ final class AppModel: ObservableObject {
         }
         let runHandle = CodexRunHandle()
         activeCodexRunHandlesBySessionID[session.id] = runHandle
-        let result = try await agentRuntime.runCodexTurn(
-            AgentRuntimeRequest(
+        let result = try await agentRuntime.runTurn(
+            AgentRunRequest(
                 prompt: prompt,
                 workspacePath: session.workspacePath,
                 existingSessionID: session.codexSessionID,

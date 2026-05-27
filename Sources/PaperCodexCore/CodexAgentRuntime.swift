@@ -13,11 +13,11 @@ public struct CodexAgentRuntime: AgentRuntime {
         self.executableResolver = executableResolver
     }
 
-    public func runCodexTurn(
-        _ request: AgentRuntimeRequest,
-        runHandle: CodexRunHandle,
-        onEvent: @escaping @Sendable (CodexRunEvent) -> Void
-    ) async throws -> AgentRuntimeResult {
+    public func runTurn(
+        _ request: AgentRunRequest,
+        runHandle: AgentRunHandle,
+        onEvent: @escaping @Sendable (AgentRunEvent) -> Void
+    ) async throws -> AgentRunResult {
         let executable = try executableResolver(request.prefersWorkspaceImageOutput)
         let cli = CodexCLI(executablePath: executable)
         onEvent(
@@ -84,7 +84,7 @@ public struct CodexAgentRuntime: AgentRuntime {
             excluding: imageSnapshot,
             codexThreadID: threadID ?? request.existingSessionID
         )
-        return AgentRuntimeResult(
+        return AgentRunResult(
             stdout: stdout,
             lastMessage: lastMessage,
             threadID: threadID,
