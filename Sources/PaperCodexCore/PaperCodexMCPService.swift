@@ -207,6 +207,14 @@ public final class PaperCodexMCPService: @unchecked Sendable {
                 resource(uri: "papercodex://papers/\(paper.id)/full-text", name: "\(paper.title) full text", description: "Extracted paper text.")
             ]
         }
+        let sessions = try withRepository { try repository.fetchRecentSessions(limit: 20) }
+        resources += sessions.flatMap { session in
+            [
+                resource(uri: "papercodex://sessions/\(session.id)/workspace-manifest", name: "\(session.title) workspace manifest", description: "Session agent workspace manifest."),
+                resource(uri: "papercodex://sessions/\(session.id)/agent-runtime", name: "\(session.title) agent runtime", description: "Session runtime profile and runtime session links."),
+                resource(uri: "papercodex://sessions/\(session.id)/prompt-contract", name: "\(session.title) prompt contract", description: "Session citation and output contract.")
+            ]
+        }
         return resources
     }
 
@@ -228,6 +236,9 @@ public final class PaperCodexMCPService: @unchecked Sendable {
             resourceTemplate(uri: "papercodex://sessions/{session_id}", name: "Session", description: "Reading session metadata."),
             resourceTemplate(uri: "papercodex://sessions/{session_id}/messages", name: "Session messages", description: "Chat messages in a reading session."),
             resourceTemplate(uri: "papercodex://sessions/{session_id}/workspace", name: "Session workspace", description: "Workspace path and expected files for a reading session."),
+            resourceTemplate(uri: "papercodex://sessions/{session_id}/workspace-manifest", name: "Session workspace manifest", description: "Runtime-neutral workspace manifest for an agent session."),
+            resourceTemplate(uri: "papercodex://sessions/{session_id}/agent-runtime", name: "Session agent runtime", description: "Selected runtime and runtime session links."),
+            resourceTemplate(uri: "papercodex://sessions/{session_id}/prompt-contract", name: "Session prompt contract", description: "Citation and output contract for the workspace."),
             resourceTemplate(uri: "papercodex://settings/prompt-templates/{template_id}", name: "Prompt template", description: "A typed prompt template."),
             resourceTemplate(uri: "papercodex://app/active-context", name: "Active app context", description: "Current app context snapshot.")
         ]
@@ -384,9 +395,17 @@ public final class PaperCodexMCPService: @unchecked Sendable {
             return try jsonText([
                 "session_id": sessionID,
                 "workspace_path": session.workspacePath,
+                "workspace_manifest_path": sessionWorkspaceURL(session).appendingPathComponent("workspace_manifest.json").path,
+                "prompt_contract_path": sessionWorkspaceURL(session).appendingPathComponent("prompt_contract.md").path,
+                "agent_instructions_path": sessionWorkspaceURL(session).appendingPathComponent("agent_instructions.md").path,
+                "mcp_config_path": sessionWorkspaceURL(session).appendingPathComponent("mcp.json").path,
                 "expected_files": [
                     "session.json",
+                    "workspace_manifest.json",
                     "prompt_contract.md",
+                    "agent_instructions.md",
+                    "AGENTS.md",
+                    "CLAUDE.md",
                     "papers/{paper_id}/metadata.json",
                     "papers/{paper_id}/original.pdf",
                     "papers/{paper_id}/full_text.txt",
@@ -395,9 +414,57 @@ public final class PaperCodexMCPService: @unchecked Sendable {
                     "papers/{paper_id}/anchors.jsonl"
                 ]
             ])
+        case "workspace-manifest":
+            return try readSessionWorkspaceManifest(session: session, uri: uri)
+        case "agent-runtime":
+            return try readSessionAgentRuntime(session: session)
+        case "prompt-contract":
+            return try readSessionPromptContract(session: session, uri: uri)
         default:
             throw PaperCodexMCPServiceError.resourceNotFound(uri)
         }
+    }
+
+    private func readSessionWorkspaceManifest(session: PaperSession, uri: String) throws -> String {
+        let manifestURL = sessionWorkspaceURL(session).appendingPathComponent("workspace_manifest.json")
+        guard FileManager.default.fileExists(atPath: manifestURL.path) else {
+            throw PaperCodexMCPServiceError.resourceNotFound(uri)
+        }
+        let data = try Data(contentsOf: manifestURL)
+        let manifest = try JSONSerialization.jsonObject(with: data)
+        return try jsonText([
+            "session_id": session.id,
+            "manifest_path": manifestURL.path,
+            "manifest": manifest
+        ])
+    }
+
+    private func readSessionAgentRuntime(session: PaperSession) throws -> String {
+        let workspaceURL = sessionWorkspaceURL(session)
+        return try jsonText([
+            "session_id": session.id,
+            "default_runtime_id": session.defaultRuntimeID as Any,
+            "legacy_codex_session_id": session.codexSessionID as Any,
+            "runtime_session_links": session.runtimeSessionLinks.map(runtimeSessionLinkDictionary),
+            "workspace_materialization_mode": session.workspaceMaterializationMode.rawValue,
+            "workspace_path": session.workspacePath,
+            "workspace_manifest_path": workspaceURL.appendingPathComponent("workspace_manifest.json").path,
+            "prompt_contract_path": workspaceURL.appendingPathComponent("prompt_contract.md").path,
+            "agent_instructions_path": workspaceURL.appendingPathComponent("agent_instructions.md").path,
+            "mcp_config_path": workspaceURL.appendingPathComponent("mcp.json").path
+        ])
+    }
+
+    private func readSessionPromptContract(session: PaperSession, uri: String) throws -> String {
+        let promptContractURL = sessionWorkspaceURL(session).appendingPathComponent("prompt_contract.md")
+        guard FileManager.default.fileExists(atPath: promptContractURL.path) else {
+            throw PaperCodexMCPServiceError.resourceNotFound(uri)
+        }
+        return try jsonText([
+            "session_id": session.id,
+            "prompt_contract_path": promptContractURL.path,
+            "text": String(contentsOf: promptContractURL, encoding: .utf8)
+        ])
     }
 
     private func readSettingsResource(components: [String], uri: String) throws -> String {
@@ -1219,6 +1286,17 @@ public final class PaperCodexMCPService: @unchecked Sendable {
             "id": tag.id,
             "name": tag.name
         ]
+    }
+
+    private func runtimeSessionLinkDictionary(_ link: AgentRuntimeSessionLink) -> [String: Any] {
+        [
+            "runtime_id": link.runtimeID,
+            "session_id": link.sessionID
+        ]
+    }
+
+    private func sessionWorkspaceURL(_ session: PaperSession) -> URL {
+        URL(fileURLWithPath: session.workspacePath, isDirectory: true)
     }
 
     private func withRepository<T>(_ body: () throws -> T) throws -> T {

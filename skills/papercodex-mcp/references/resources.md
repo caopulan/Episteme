@@ -23,6 +23,9 @@ papercodex://sessions/recent
 papercodex://sessions/{session_id}
 papercodex://sessions/{session_id}/messages
 papercodex://sessions/{session_id}/workspace
+papercodex://sessions/{session_id}/workspace-manifest
+papercodex://sessions/{session_id}/agent-runtime
+papercodex://sessions/{session_id}/prompt-contract
 papercodex://app/active-context
 papercodex://settings/prompt-templates
 papercodex://settings/prompt-templates/{template_id}
@@ -32,3 +35,5 @@ papercodex://settings/prompt-templates/variables
 ```
 
 Use `metadata` for organization state, `full-text` for broad reading, `spans` and `anchors` for citation-grounded claims, and `notes` or `digest` for user-authored reading memory.
+
+For local agent runs, use `workspace-manifest` to discover session files, `agent-runtime` to see runtime links and materialization mode, and `prompt-contract` to preserve citation/output requirements.

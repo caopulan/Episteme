@@ -27,6 +27,18 @@ Then read specific paper/folder/tag/note resources before calling tools that cha
 4. Re-read the relevant resource after mutation to verify the result.
 5. For paper facts, ground claims in `full-text`, `spans`, `anchors`, or session workspace files.
 
+## Agent Workspaces
+
+For a reading session, prefer these resources before operating from a local agent terminal:
+
+```text
+papercodex://sessions/{session_id}/workspace-manifest
+papercodex://sessions/{session_id}/agent-runtime
+papercodex://sessions/{session_id}/prompt-contract
+```
+
+Use workspace files for source reading and generated artifacts. Use MCP tools for app state changes such as notes, folders, tags, paper metadata, reader navigation, and prompt templates.
+
 ## Prompt Templates
 
 Prompt templates are typed settings. Never call or invent a generic `settings.update`.

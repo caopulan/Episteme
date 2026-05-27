@@ -310,6 +310,9 @@ func runMCPChecks() throws {
     ])
     let resourceTemplates = try mcpResultArray(templatesResponse, key: "resourceTemplates").compactMap { $0["uriTemplate"] as? String }
     try check(resourceTemplates.contains("papercodex://papers/{paper_id}/notes"), "MCP should expose paper notes as a resource template")
+    try check(resourceTemplates.contains("papercodex://sessions/{session_id}/workspace-manifest"), "MCP should expose session workspace manifests as resources")
+    try check(resourceTemplates.contains("papercodex://sessions/{session_id}/agent-runtime"), "MCP should expose session agent runtime state as resources")
+    try check(resourceTemplates.contains("papercodex://sessions/{session_id}/prompt-contract"), "MCP should expose session prompt contracts as resources")
     try check(resourceTemplates.contains("papercodex://settings/prompt-templates/{template_id}"), "MCP should expose typed prompt templates as resources")
     try check(resourceTemplates.contains("papercodex://app/active-context"), "MCP should expose active app context")
 
@@ -334,6 +337,24 @@ func runMCPChecks() throws {
 
     let fullText = try mcpReadResource("papercodex://papers/\(fixture.paperID)/full-text", service: service)
     try check(fullText.contains("This paper studies visual grounding."), "paper full-text resource should include page text")
+
+    let workspaceManifest = try mcpReadResource("papercodex://sessions/\(fixture.sessionID)/workspace-manifest", service: service)
+    try check(workspaceManifest.contains("workspace_manifest.json"), "session workspace manifest resource should expose the manifest path")
+    try check(workspaceManifest.contains("full_text.txt"), "session workspace manifest resource should expose paper workspace files")
+
+    let agentRuntime = try mcpReadResource("papercodex://sessions/\(fixture.sessionID)/agent-runtime", service: service)
+    try check(agentRuntime.contains("claude-code"), "session agent runtime resource should expose the default runtime id")
+    try check(agentRuntime.contains("openclaw-kimi"), "session agent runtime resource should expose runtime session links")
+
+    let promptContract = try mcpReadResource("papercodex://sessions/\(fixture.sessionID)/prompt-contract", service: service)
+    try check(promptContract.contains("[[cite:paper:{paper_id}:p{page}:b{block_index}]]"), "session prompt contract resource should expose citation markers")
+
+    let sourceRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+    let mcpSkill = try String(contentsOf: sourceRoot.appendingPathComponent("skills/papercodex-mcp/SKILL.md"))
+    let workspaceSkill = try String(contentsOf: sourceRoot.appendingPathComponent("skills/papercodex-agent-workspace/SKILL.md"))
+    try check(mcpSkill.contains("papercodex://sessions/{session_id}/workspace-manifest"), "Paper Codex MCP skill should document agent workspace resources")
+    try check(workspaceSkill.contains("Use MCP tools for app state changes"), "Agent workspace skill should keep app mutations behind MCP tools")
+    try check(workspaceSkill.contains("[[cite:paper:{paper_id}:p{page}:b{block_index}]]"), "Agent workspace skill should document citation markers")
 
     let validateText = try mcpCallTool(
         "prompt_template.validate",
@@ -520,6 +541,7 @@ private struct MCPFixture {
     var root: URL
     var repository: PaperRepository
     var paperID: String
+    var sessionID: String
 }
 
 private func makeMCPFixture(withPaper: Bool) throws -> MCPFixture {
@@ -530,12 +552,15 @@ private func makeMCPFixture(withPaper: Bool) throws -> MCPFixture {
     try repository.migrate()
 
     guard withPaper else {
-        return MCPFixture(root: root, repository: repository, paperID: "")
+        return MCPFixture(root: root, repository: repository, paperID: "", sessionID: "")
     }
 
+    let paperPath = root.appendingPathComponent("papers/paper-example/original.pdf")
+    try FileManager.default.createDirectory(at: paperPath.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try writeFixturePDF(to: paperPath, lines: ["This paper studies visual grounding."])
     let paper = Paper(
         id: "paper-example",
-        filePath: root.appendingPathComponent("papers/paper-example/original.pdf").path,
+        filePath: paperPath.path,
         fileHash: "hash-example",
         title: "Example Paper",
         authors: ["Ada Lovelace"],
@@ -580,7 +605,55 @@ private func makeMCPFixture(withPaper: Bool) throws -> MCPFixture {
         syncRevision: 1
     ))
 
-    return MCPFixture(root: root, repository: repository, paperID: paper.id)
+    let session = PaperSession(
+        id: "session-example",
+        title: "Example Reading Session",
+        paperIDs: [paper.id],
+        codexSessionID: "codex-thread-example",
+        defaultRuntimeID: "claude-code",
+        runtimeSessionLinks: [
+            AgentRuntimeSessionLink(runtimeID: "claude-code", sessionID: "claude-thread-example"),
+            AgentRuntimeSessionLink(runtimeID: "openclaw-kimi", sessionID: "kimi-thread-example")
+        ],
+        workspaceMaterializationMode: .copyPDF,
+        workspacePath: root.appendingPathComponent("session-example", isDirectory: true).path,
+        createdAt: Date(timeIntervalSince1970: 1_800_000_002),
+        updatedAt: Date(timeIntervalSince1970: 1_800_000_002)
+    )
+    try repository.upsertSession(session)
+    try SessionWorkspaceManager().writeWorkspace(
+        session: session,
+        papers: [paper],
+        pagesByPaperID: [
+            paper.id: [
+                PageIndex(
+                    paperID: paper.id,
+                    page: 1,
+                    text: "This paper studies visual grounding.",
+                    confidence: 0.99
+                )
+            ]
+        ],
+        spansByPaperID: [
+            paper.id: [
+                Span(
+                    id: Span.makeID(paperID: paper.id, page: 1, blockIndex: 0),
+                    paperID: paper.id,
+                    page: 1,
+                    bbox: BoundingBox(x: 0, y: 0, width: 10, height: 10),
+                    text: "This paper studies visual grounding.",
+                    charRange: TextRange(location: 0, length: 37),
+                    sectionHint: "Abstract",
+                    confidence: 0.99
+                )
+            ]
+        ],
+        anchorsByPaperID: [paper.id: []],
+        mcpEndpoint: nil,
+        materializationMode: session.workspaceMaterializationMode
+    )
+
+    return MCPFixture(root: root, repository: repository, paperID: paper.id, sessionID: session.id)
 }
 
 func runLibraryDerivedStateChecks() throws {
