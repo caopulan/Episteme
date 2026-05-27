@@ -977,6 +977,7 @@ func runUILayoutSourceChecks() throws {
     let libraryCategoryAssignmentSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexCore/LibraryCategoryAssignment.swift"))
     let agentRuntimeSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexCore/AgentRuntime.swift"))
     let codexAgentRuntimeSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexCore/CodexAgentRuntime.swift"))
+    let agentRuntimeStoreSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/AgentRuntimeStore.swift"))
     let arxivIDExtractorSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexCore/ArxivIDExtractor.swift"))
     let interactionFeedbackSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/InteractionFeedback.swift"))
     let localArxivClientSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexCore/LocalArxivClient.swift"))
@@ -1233,6 +1234,49 @@ func runUILayoutSourceChecks() throws {
             && appModelSource.contains("private let agentRuntime: any AgentRuntime")
             && appModelSource.contains("agentRuntime.runTurn"),
         "Codex CLI streaming should sit behind an AgentRuntime boundary and carry app-local MCP settings"
+    )
+    try check(
+        agentRuntimeStoreSource.contains("final class AgentRuntimeStore: ObservableObject")
+            && agentRuntimeStoreSource.contains("selectedChatRuntimeID")
+            && agentRuntimeStoreSource.contains("selectedEnrichmentRuntimeID")
+            && agentRuntimeStoreSource.contains("enabledRuntimeIDs")
+            && agentRuntimeStoreSource.contains("modelOverridesByRuntimeID")
+            && agentRuntimeStoreSource.contains("providerOverridesByRuntimeID")
+            && agentRuntimeStoreSource.contains("mcpModesByRuntimeID")
+            && agentRuntimeStoreSource.contains("diagnosticsByRuntimeID")
+            && agentRuntimeStoreSource.contains("authSummariesByRuntimeID")
+            && agentRuntimeStoreSource.contains("func refreshDiagnostics() async")
+            && agentRuntimeStoreSource.contains("safeAuthStatusArguments")
+            && appModelSource.contains("private let agentRuntimeStore = AgentRuntimeStore()")
+            && appModelSource.contains("agentRuntimeStore.objectWillChange")
+            && appModelSource.contains("var agentRuntimeProfiles: [AgentRuntimeProfile]")
+            && appModelSource.contains("var selectedChatRuntimeDisplayName: String")
+            && appModelSource.contains("func setSelectedChatRuntimeID")
+            && appModelSource.contains("func setAgentRuntimeEnabled")
+            && appModelSource.contains("func refreshAgentRuntimeDiagnostics() async"),
+        "generic agent runtime settings should live in AgentRuntimeStore and be exposed through AppModel"
+    )
+    try check(
+        settingsViewSource.contains("agentRuntimeSettings")
+            && settingsViewSource.contains("Agent Runtimes")
+            && settingsViewSource.contains("selectedChatRuntimeID")
+            && settingsViewSource.contains("selectedEnrichmentRuntimeID")
+            && settingsViewSource.contains("setAgentRuntimeEnabled")
+            && settingsViewSource.contains("setAgentRuntimeModelOverride")
+            && settingsViewSource.contains("setAgentRuntimeProviderOverride")
+            && settingsViewSource.contains("setAgentRuntimeMCPMode")
+            && settingsViewSource.contains("refreshAgentRuntimeDiagnostics"),
+        "settings should expose runtime selection, enablement, diagnostics, auth, model/provider overrides, and MCP mode"
+    )
+    try check(
+        chatSource.contains("AgentStatusLine")
+            && chatSource.contains("selectedChatRuntimeDisplayName")
+            && chatSource.contains("selectedChatRuntimeDiagnostic")
+            && chatSource.contains("setSelectedChatRuntimeID")
+            && chatSource.contains("Stop Agent")
+            && !chatSource.contains("Stop Codex")
+            && !chatSource.contains("ask Codex in this session"),
+        "reader chat controls should present runtime-neutral agent labels instead of Codex-only labels"
     )
     try check(
         actionButtonSource.contains("struct PaperCodexToolbarButton")

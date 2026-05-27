@@ -719,6 +719,7 @@ final class AppModel: ObservableObject {
     private let libraryStore = LibraryFeatureStore()
     private let readerStore = ReaderFeatureStore()
     private let discoverStore: DiscoverFeatureStore
+    private let agentRuntimeStore = AgentRuntimeStore()
     private var repository: PaperRepository?
     private let supportRoot: URL
     private let arxivCache: ArxivFeedCache
@@ -743,6 +744,7 @@ final class AppModel: ObservableObject {
     private var libraryStoreObservation: AnyCancellable?
     private var readerStoreObservation: AnyCancellable?
     private var discoverStoreObservation: AnyCancellable?
+    private var agentRuntimeStoreObservation: AnyCancellable?
     private var cachedEmbeddingProviderAPIKey: String?
     private var activeCodexRunHandlesBySessionID: [String: CodexRunHandle] = [:]
     private var activeDiscoverCodexRunHandles: [CodexRunHandle] = []
@@ -840,7 +842,7 @@ final class AppModel: ObservableObject {
         if isSending {
             let activeRuns = activeCodexRunsBySessionID.values.sorted { $0.startedAt < $1.startedAt }
             return AppOperationStatus(
-                title: isCancellingCodexRun ? "Stopping Codex" : "Codex Running",
+                title: isCancellingCodexRun ? "Stopping Agent" : "Agent Running",
                 detail: activeRuns.count == 1
                     ? (activeRuns.first?.title ?? "Current session")
                     : "\(activeRuns.count) sessions running",
@@ -856,6 +858,71 @@ final class AppModel: ObservableObject {
             return nil
         }
         return activeCodexRunsBySessionID[sessionID]
+    }
+
+    var agentRuntimeProfiles: [AgentRuntimeProfile] {
+        agentRuntimeStore.profiles
+    }
+
+    var selectedChatRuntimeID: String {
+        agentRuntimeStore.selectedChatRuntimeID
+    }
+
+    var selectedEnrichmentRuntimeID: String {
+        agentRuntimeStore.selectedEnrichmentRuntimeID
+    }
+
+    var selectedChatRuntimeDisplayName: String {
+        agentRuntimeStore.selectedChatRuntime.displayName
+    }
+
+    var selectedChatRuntimeDiagnostic: AgentRuntimeDiagnostic? {
+        agentRuntimeDiagnostic(for: selectedChatRuntimeID)
+    }
+
+    var selectedChatRuntimeAuthSummary: String {
+        agentRuntimeAuthSummary(for: selectedChatRuntimeID)
+    }
+
+    var isRefreshingAgentRuntimeDiagnostics: Bool {
+        agentRuntimeStore.isRefreshingDiagnostics
+    }
+
+    func isAgentRuntimeEnabled(_ runtimeID: String) -> Bool {
+        agentRuntimeStore.isRuntimeEnabled(runtimeID)
+    }
+
+    func agentRuntimeDiagnostic(for runtimeID: String) -> AgentRuntimeDiagnostic? {
+        if let diagnostic = agentRuntimeStore.diagnosticsByRuntimeID[runtimeID] {
+            return diagnostic
+        }
+        if runtimeID == "codex", let codexDiagnostic {
+            return AgentRuntimeDiagnostic(
+                runtimeID: "codex",
+                state: AgentRuntimeDiagnosticState(codexDiagnostic.severity),
+                title: codexDiagnostic.title,
+                detail: codexDiagnostic.detail,
+                executablePath: codexDiagnostic.executablePath,
+                version: codexDiagnostic.version
+            )
+        }
+        return nil
+    }
+
+    func agentRuntimeAuthSummary(for runtimeID: String) -> String {
+        agentRuntimeStore.authSummariesByRuntimeID[runtimeID] ?? "Auth not checked"
+    }
+
+    func agentRuntimeModelOverride(for runtimeID: String) -> String {
+        runtimeID == "codex" ? codexModelOverride : agentRuntimeStore.modelOverride(for: runtimeID)
+    }
+
+    func agentRuntimeProviderOverride(for runtimeID: String) -> String {
+        agentRuntimeStore.providerOverride(for: runtimeID)
+    }
+
+    func agentRuntimeMCPMode(for runtimeID: String) -> AgentRuntimeMCPMode {
+        agentRuntimeStore.mcpMode(for: runtimeID)
     }
 
     func isSessionSending(_ sessionID: String?) -> Bool {
@@ -908,6 +975,9 @@ final class AppModel: ObservableObject {
         discoverStoreObservation = discoverStore.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
         }
+        agentRuntimeStoreObservation = agentRuntimeStore.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }
         discoverSelectedCategories = localDiscoverPreferences.categories.isEmpty ? ["cs.CV"] : [localDiscoverPreferences.categories[0]]
         do {
             try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -922,6 +992,7 @@ final class AppModel: ObservableObject {
             Task {
                 await refreshCodexDiagnostic()
                 await refreshAvailableCodexModels()
+                await refreshAgentRuntimeDiagnostics()
             }
             startWatchedFolderAutoScan()
         } catch {
@@ -3855,9 +3926,46 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func refreshAgentRuntimeDiagnostics() async {
+        await agentRuntimeStore.refreshDiagnostics()
+    }
+
+    func setSelectedChatRuntimeID(_ runtimeID: String) {
+        agentRuntimeStore.setSelectedChatRuntimeID(runtimeID)
+        postNotice(kind: .success, title: "Chat Runtime Selected", message: selectedChatRuntimeDisplayName)
+    }
+
+    func setSelectedEnrichmentRuntimeID(_ runtimeID: String) {
+        agentRuntimeStore.setSelectedEnrichmentRuntimeID(runtimeID)
+        let name = agentRuntimeStore.selectedEnrichmentRuntime.displayName
+        postNotice(kind: .success, title: "Explore Runtime Selected", message: name)
+    }
+
+    func setAgentRuntimeEnabled(_ runtimeID: String, enabled: Bool) {
+        agentRuntimeStore.setRuntimeEnabled(runtimeID, enabled: enabled)
+    }
+
+    func setAgentRuntimeModelOverride(_ model: String, for runtimeID: String) {
+        agentRuntimeStore.setModelOverride(model, for: runtimeID)
+        if runtimeID == "codex" {
+            setCodexModelOverride(model)
+        }
+    }
+
+    func setAgentRuntimeProviderOverride(_ provider: String, for runtimeID: String) {
+        agentRuntimeStore.setProviderOverride(provider, for: runtimeID)
+    }
+
+    func setAgentRuntimeMCPMode(_ mode: AgentRuntimeMCPMode, for runtimeID: String) {
+        agentRuntimeStore.setMCPMode(mode, for: runtimeID)
+    }
+
     func setCodexModelOverride(_ model: String) {
         let trimmed = model.trimmingCharacters(in: .whitespacesAndNewlines)
         codexModelOverride = trimmed
+        if agentRuntimeStore.modelOverride(for: "codex") != trimmed {
+            agentRuntimeStore.setModelOverride(trimmed, for: "codex")
+        }
         if trimmed.isEmpty {
             UserDefaults.standard.removeObject(forKey: codexModelOverrideDefaultsKey)
         } else {

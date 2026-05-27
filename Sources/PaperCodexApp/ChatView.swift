@@ -32,6 +32,7 @@ struct ChatView: View {
         }
         .task {
             await model.refreshAvailableCodexModels()
+            await model.refreshAgentRuntimeDiagnostics()
         }
         .onChange(of: model.selectedSessionPanelTab) { _, tab in
             guard tab == .notes, let paper = model.selectedPaper else {
@@ -69,7 +70,7 @@ struct ChatView: View {
                             ContentUnavailableView(
                                 "No Messages",
                                 systemImage: "text.bubble",
-                                description: Text("Select text in the PDF, then ask Codex in this session. The selected source appears as a quoted reply.")
+                                description: Text("Select text in the PDF, then ask \(model.selectedChatRuntimeDisplayName) in this session. The selected source appears as a quoted reply.")
                             )
                             .padding(.top, 80)
                         } else {
@@ -270,18 +271,24 @@ struct ChatView: View {
 
                 QuickPromptLine(
                     prompts: model.quickPrompts,
-                    diagnostic: model.codexDiagnostic,
+                    runtimeProfiles: model.agentRuntimeProfiles,
+                    selectedRuntimeID: model.selectedChatRuntimeID,
+                    runtimeName: model.selectedChatRuntimeDisplayName,
+                    diagnostic: model.selectedChatRuntimeDiagnostic,
+                    authSummary: model.selectedChatRuntimeAuthSummary,
                     modelOverride: model.codexModelOverride,
                     availableModelIDs: model.availableCodexModelIDs,
                     defaultModelID: model.codexDefaultModelID,
                     reasoningEffort: model.codexReasoningEffort,
                     onPrompt: { model.sendQuickPrompt($0) },
+                    onRuntime: { model.setSelectedChatRuntimeID($0) },
                     onModelOverride: { model.setCodexModelOverride($0) },
                     onReasoningEffort: { model.setCodexReasoningEffort($0) }
                 ) {
                     Task {
                         await model.refreshCodexDiagnostic()
                         await model.refreshAvailableCodexModels()
+                        await model.refreshAgentRuntimeDiagnostics()
                     }
                 }
 
@@ -356,7 +363,7 @@ struct ChatView: View {
 
     private var sendButtonHelp: String {
         if isCurrentSessionSending {
-            return "Stop Codex"
+            return "Stop Agent"
         }
         return "Send"
     }
@@ -826,12 +833,17 @@ private struct WindowSafeComposerResizeHandle: NSViewRepresentable {
 
 private struct QuickPromptLine: View {
     var prompts: [QuickPrompt]
-    var diagnostic: CodexDiagnostic?
+    var runtimeProfiles: [AgentRuntimeProfile]
+    var selectedRuntimeID: String
+    var runtimeName: String
+    var diagnostic: AgentRuntimeDiagnostic?
+    var authSummary: String
     var modelOverride: String
     var availableModelIDs: [String]
     var defaultModelID: String
     var reasoningEffort: CodexReasoningEffort
     var onPrompt: (QuickPrompt) -> Void
+    var onRuntime: (String) -> Void
     var onModelOverride: (String) -> Void
     var onReasoningEffort: (CodexReasoningEffort) -> Void
     var onRefresh: () -> Void
@@ -854,12 +866,17 @@ private struct QuickPromptLine: View {
 
             Spacer()
 
-            CodexStatusLine(
+            AgentStatusLine(
+                runtimeProfiles: runtimeProfiles,
+                selectedRuntimeID: selectedRuntimeID,
+                runtimeName: runtimeName,
                 diagnostic: diagnostic,
+                authSummary: authSummary,
                 modelOverride: modelOverride,
                 availableModelIDs: availableModelIDs,
                 defaultModelID: defaultModelID,
                 reasoningEffort: reasoningEffort,
+                onRuntime: onRuntime,
                 onModelOverride: onModelOverride,
                 onReasoningEffort: onReasoningEffort,
                 onRefresh: onRefresh
@@ -869,12 +886,17 @@ private struct QuickPromptLine: View {
     }
 }
 
-private struct CodexStatusLine: View {
-    var diagnostic: CodexDiagnostic?
+private struct AgentStatusLine: View {
+    var runtimeProfiles: [AgentRuntimeProfile]
+    var selectedRuntimeID: String
+    var runtimeName: String
+    var diagnostic: AgentRuntimeDiagnostic?
+    var authSummary: String
     var modelOverride: String
     var availableModelIDs: [String]
     var defaultModelID: String
     var reasoningEffort: CodexReasoningEffort
+    var onRuntime: (String) -> Void
     var onModelOverride: (String) -> Void
     var onReasoningEffort: (CodexReasoningEffort) -> Void
     var onRefresh: () -> Void
@@ -888,74 +910,96 @@ private struct CodexStatusLine: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
             Spacer()
-            if shouldOfferCompatibleModel {
+            Menu {
+                ForEach(runtimeProfiles) { profile in
+                    Button {
+                        onRuntime(profile.id)
+                    } label: {
+                        if profile.id == selectedRuntimeID {
+                            Label(profile.displayName, systemImage: "checkmark")
+                        } else {
+                            Text(profile.displayName)
+                        }
+                    }
+                }
+            } label: {
+                Label(runtimeName, systemImage: "terminal")
+                    .labelStyle(.titleAndIcon)
+            }
+            .menuStyle(.button)
+            .buttonStyle(.borderless)
+            .controlSize(.small)
+
+            if selectedRuntimeID == "codex", shouldOfferCompatibleModel {
                 Button("Use gpt-5.4-mini") {
                     onModelOverride("gpt-5.4-mini")
                 }
                 .buttonStyle(.borderless)
                 .controlSize(.small)
             }
-            Menu {
-                Button {
-                    onModelOverride("")
+            if selectedRuntimeID == "codex" {
+                Menu {
+                    Button {
+                        onModelOverride("")
+                    } label: {
+                        if modelOverride.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            Label(defaultModelLabel, systemImage: "checkmark")
+                        } else {
+                            Text(defaultModelLabel)
+                        }
+                    }
+                    Divider()
+                    ForEach(availableModelIDs, id: \.self) { modelID in
+                        Button {
+                            onModelOverride(modelID)
+                        } label: {
+                            if modelID == modelOverride.trimmingCharacters(in: .whitespacesAndNewlines) {
+                                Label(modelID, systemImage: "checkmark")
+                            } else {
+                                Text(modelID)
+                            }
+                        }
+                    }
                 } label: {
-                    if modelOverride.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        Label(defaultModelLabel, systemImage: "checkmark")
-                    } else {
-                        Text(defaultModelLabel)
-                    }
+                    Label(modelLabel, systemImage: "slider.horizontal.3")
+                        .labelStyle(.titleAndIcon)
                 }
-                Divider()
-                ForEach(availableModelIDs, id: \.self) { modelID in
-                    Button {
-                        onModelOverride(modelID)
-                    } label: {
-                        if modelID == modelOverride.trimmingCharacters(in: .whitespacesAndNewlines) {
-                            Label(modelID, systemImage: "checkmark")
-                        } else {
-                            Text(modelID)
+                .menuStyle(.button)
+                .buttonStyle(.borderless)
+                .controlSize(.small)
+                Menu {
+                    ForEach(CodexReasoningEffort.allCases, id: \.self) { effort in
+                        Button {
+                            onReasoningEffort(effort)
+                        } label: {
+                            if effort == reasoningEffort {
+                                Label(effort.displayName, systemImage: "checkmark")
+                            } else {
+                                Text(effort.displayName)
+                            }
                         }
                     }
+                } label: {
+                    Label(reasoningLabel, systemImage: "brain.head.profile")
+                        .labelStyle(.titleAndIcon)
                 }
-            } label: {
-                Label(modelLabel, systemImage: "slider.horizontal.3")
-                    .labelStyle(.titleAndIcon)
+                .menuStyle(.button)
+                .buttonStyle(.borderless)
+                .controlSize(.small)
             }
-            .menuStyle(.button)
-            .buttonStyle(.borderless)
-            .controlSize(.small)
-            Menu {
-                ForEach(CodexReasoningEffort.allCases, id: \.self) { effort in
-                    Button {
-                        onReasoningEffort(effort)
-                    } label: {
-                        if effort == reasoningEffort {
-                            Label(effort.displayName, systemImage: "checkmark")
-                        } else {
-                            Text(effort.displayName)
-                        }
-                    }
-                }
-            } label: {
-                Label(reasoningLabel, systemImage: "brain.head.profile")
-                    .labelStyle(.titleAndIcon)
-            }
-            .menuStyle(.button)
-            .buttonStyle(.borderless)
-            .controlSize(.small)
             Button(action: onRefresh) {
                 Image(systemName: "arrow.clockwise")
             }
             .buttonStyle(.borderless)
             .controlSize(.small)
-            .help("Refresh Codex Status")
+            .help("Refresh Agent Status")
         }
         .help(detail)
     }
 
     private var title: String {
         guard let diagnostic else {
-            return "Checking Codex"
+            return "Checking \(runtimeName)"
         }
         if let version = diagnostic.version {
             return "\(diagnostic.title) · \(version)"
@@ -964,7 +1008,8 @@ private struct CodexStatusLine: View {
     }
 
     private var detail: String {
-        diagnostic?.detail ?? "Checking local Codex CLI."
+        let status = diagnostic?.detail ?? "Checking local agent runtime."
+        return "\(status)\n\(authSummary)"
     }
 
     private var modelLabel: String {
@@ -990,7 +1035,9 @@ private struct CodexStatusLine: View {
         guard let diagnostic else {
             return "circle.dotted"
         }
-        switch diagnostic.severity {
+        switch diagnostic.state {
+        case .checking:
+            return "clock"
         case .ready:
             return "checkmark.circle.fill"
         case .warning:
@@ -1004,7 +1051,9 @@ private struct CodexStatusLine: View {
         guard let diagnostic else {
             return .secondary
         }
-        switch diagnostic.severity {
+        switch diagnostic.state {
+        case .checking:
+            return .secondary
         case .ready:
             return .green
         case .warning:
@@ -1038,7 +1087,7 @@ private struct CodexRunBubble: View {
                 HStack(spacing: 8) {
                     ProgressView()
                         .controlSize(.small)
-                    Text("Codex")
+                    Text("Agent")
                         .font(.caption.weight(.semibold))
                     Text("Running")
                         .font(.caption)
@@ -1217,7 +1266,7 @@ private struct MessageBubble: View {
                 Spacer(minLength: 32)
             }
             VStack(alignment: .leading, spacing: 6) {
-                Text(isUser ? "You" : "Codex")
+                Text(isUser ? "You" : "Agent")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 if let userSourceAttachment {

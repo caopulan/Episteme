@@ -74,6 +74,7 @@ struct SettingsView: View {
                     codexEnrichmentSettings
                     codexSystemPromptSettings
                     codexMCPSettings
+                    agentRuntimeSettings
                     discoverCodexProcessingSettings
                     embeddingProviderSettings
                     quickPromptSettings
@@ -413,6 +414,137 @@ struct SettingsView: View {
         }
     }
 
+    private var agentRuntimeSettings: some View {
+        settingsSection(title: "Agent Runtimes", systemImage: "terminal") {
+            HStack(spacing: 12) {
+                Picker("Chat", selection: Binding(
+                    get: { model.selectedChatRuntimeID },
+                    set: { model.setSelectedChatRuntimeID($0) }
+                )) {
+                    ForEach(model.agentRuntimeProfiles) { profile in
+                        Text(profile.displayName).tag(profile.id)
+                    }
+                }
+                .pickerStyle(.menu)
+
+                Picker("Explore", selection: Binding(
+                    get: { model.selectedEnrichmentRuntimeID },
+                    set: { model.setSelectedEnrichmentRuntimeID($0) }
+                )) {
+                    ForEach(model.agentRuntimeProfiles) { profile in
+                        Text(profile.displayName).tag(profile.id)
+                    }
+                }
+                .pickerStyle(.menu)
+
+                Spacer()
+
+                Button {
+                    Task {
+                        await model.refreshAgentRuntimeDiagnostics()
+                    }
+                } label: {
+                    Label(model.isRefreshingAgentRuntimeDiagnostics ? "Checking" : "Check Runtimes", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.bordered)
+                .disabled(model.isRefreshingAgentRuntimeDiagnostics)
+            }
+
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(model.agentRuntimeProfiles) { profile in
+                    agentRuntimeRow(profile)
+                    if profile.id != model.agentRuntimeProfiles.last?.id {
+                        Divider()
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func agentRuntimeRow(_ profile: AgentRuntimeProfile) -> some View {
+        let diagnostic = model.agentRuntimeDiagnostic(for: profile.id)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Toggle(
+                    profile.displayName,
+                    isOn: Binding(
+                        get: { model.isAgentRuntimeEnabled(profile.id) },
+                        set: { model.setAgentRuntimeEnabled(profile.id, enabled: $0) }
+                    )
+                )
+                .toggleStyle(.checkbox)
+                .font(.paperCodexSystem(size: 13, weight: .semibold))
+
+                Text(diagnostic?.title ?? "Not checked")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(diagnostic?.state.settingsColor ?? .secondary)
+
+                Spacer()
+
+                Text(profile.executableName)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack(spacing: 10) {
+                if let path = diagnostic?.executablePath {
+                    Text(path)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                } else {
+                    Text(diagnostic?.detail ?? "Executable has not been checked yet.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                Text(model.agentRuntimeAuthSummary(for: profile.id))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+
+            HStack(spacing: 10) {
+                if profile.backend == .hermes || profile.backend == .pi {
+                    TextField("Provider", text: Binding(
+                        get: { model.agentRuntimeProviderOverride(for: profile.id) },
+                        set: { model.setAgentRuntimeProviderOverride($0, for: profile.id) }
+                    ))
+                    .textFieldStyle(.roundedBorder)
+                    .frame(maxWidth: 150)
+                }
+
+                TextField(profile.defaultModelID ?? "Model override", text: Binding(
+                    get: { model.agentRuntimeModelOverride(for: profile.id) },
+                    set: { model.setAgentRuntimeModelOverride($0, for: profile.id) }
+                ))
+                .textFieldStyle(.roundedBorder)
+                .frame(maxWidth: 220)
+
+                Picker("MCP", selection: Binding(
+                    get: { model.agentRuntimeMCPMode(for: profile.id) },
+                    set: { model.setAgentRuntimeMCPMode($0, for: profile.id) }
+                )) {
+                    ForEach(AgentRuntimeMCPMode.allCases, id: \.self) { mode in
+                        Text(mode.settingsTitle).tag(mode)
+                    }
+                }
+                .pickerStyle(.menu)
+
+                Spacer()
+
+                Text(profile.capabilitySummary)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
     private var embeddingProviderSettings: some View {
         settingsSection(title: "Embedding Provider", systemImage: "point.3.connected.trianglepath.dotted") {
             Toggle("Enable embedding similarity", isOn: $draftEmbeddingEnabled)
@@ -746,5 +878,54 @@ struct SettingsView: View {
             parentID = parent.parentID
         }
         return names.reversed().joined(separator: " / ")
+    }
+}
+
+private extension AgentRuntimeMCPMode {
+    var settingsTitle: String {
+        switch self {
+        case .codexConfigOverrides:
+            "Codex config"
+        case .mcpConfigFile:
+            "MCP file"
+        case .configuredExternally:
+            "External"
+        case .workspaceOnly:
+            "Workspace"
+        }
+    }
+}
+
+private extension AgentRuntimeDiagnosticState {
+    var settingsColor: Color {
+        switch self {
+        case .checking:
+            .secondary
+        case .ready:
+            .green
+        case .warning:
+            .orange
+        case .blocked:
+            .red
+        }
+    }
+}
+
+private extension AgentRuntimeProfile {
+    var capabilitySummary: String {
+        var parts: [String] = []
+        if supportsNonInteractiveRuns {
+            parts.append("chat")
+        }
+        if supportsPTY {
+            parts.append("tui")
+        }
+        if supportsStructuredOutput {
+            parts.append("json")
+        }
+        if supportsMCPConfig {
+            parts.append("mcp")
+        }
+        return parts.joined(separator: " · ")
     }
 }
