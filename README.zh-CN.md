@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="Sources/PaperCodexApp/Resources/AppIcon.png" alt="Paper Codex 标志" width="132">
+  <img src="docs/assets/logo-rounded.png" alt="Paper Codex 标志" width="132">
 </p>
 
 <h1 align="center">Paper Codex</h1>
