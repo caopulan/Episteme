@@ -3612,6 +3612,105 @@ func runCodexCLIChecks() throws {
     try check(!oldVersionModels.contains("gpt-5.5"), "Codex model detector should filter models blocked by the current CLI version")
 }
 
+func runAgentRuntimeProfileChecks() throws {
+    let profiles = AgentRuntimeProfile.defaultProfiles
+    let profilesByID = Dictionary(uniqueKeysWithValues: profiles.map { ($0.id, $0) })
+    try check(Set(profilesByID.keys) == ["codex", "claude-code", "hermes", "openclaw-kimi", "pi"], "default agent runtime profiles should cover Codex, Claude Code, Hermes, OpenClaw Kimi, and pi")
+
+    let codex = try requiredProfile("codex", in: profilesByID)
+    try check(codex.backend == .codex, "Codex profile should use the codex backend")
+    try check(codex.executableName == "codex", "Codex profile should launch the codex executable")
+    try check(codex.supportsNonInteractiveRuns, "Codex profile should support deterministic non-interactive runs")
+    try check(codex.supportsPTY, "Codex profile should support terminal launches")
+    try check(codex.supportsResume, "Codex profile should preserve runtime session resume")
+    try check(codex.supportsStructuredOutput, "Codex profile should expose structured JSONL output")
+    try check(codex.mcpMode == .codexConfigOverrides, "Codex profile should use app-local config overrides for MCP")
+    try check(codex.promptInjectionModes.contains(.argumentPrompt), "Codex profile should inject the rendered prompt as an argument")
+
+    let claude = try requiredProfile("claude-code", in: profilesByID)
+    try check(claude.backend == .claudeCode, "Claude Code profile should use the Claude Code backend")
+    try check(claude.executableName == "claude", "Claude Code profile should launch claude")
+    try check(claude.supportsNonInteractiveRuns, "Claude Code profile should support print-mode checks")
+    try check(claude.supportsPTY, "Claude Code profile should support interactive terminal launches")
+    try check(claude.supportsMCPConfig, "Claude Code profile should accept explicit MCP config")
+    try check(claude.mcpMode == .mcpConfigFile, "Claude Code profile should use a workspace MCP config file")
+    try check(claude.promptInjectionModes.contains(.systemPromptFlag), "Claude Code profile should support system prompt flags")
+
+    let hermes = try requiredProfile("hermes", in: profilesByID)
+    try check(hermes.backend == .hermes, "Hermes profile should use the Hermes backend")
+    try check(hermes.executableName == "hermes", "Hermes profile should launch hermes")
+    try check(hermes.supportsPTY, "Hermes profile should support TUI launches")
+    try check(hermes.promptInjectionModes.contains(.skill), "Hermes profile should support skill-based Paper Codex instructions")
+
+    let openClaw = try requiredProfile("openclaw-kimi", in: profilesByID)
+    try check(openClaw.backend == .openClawKimi, "OpenClaw Kimi profile should use the OpenClaw Kimi backend")
+    try check(openClaw.executableName == "openclaw", "OpenClaw Kimi profile should launch openclaw")
+    try check(openClaw.defaultModelID == "kimi-coding/k2p5", "OpenClaw Kimi profile should default to the locally configured Kimi model")
+    try check(openClaw.supportsStructuredOutput, "OpenClaw Kimi profile should support JSON smoke checks")
+
+    let pi = try requiredProfile("pi", in: profilesByID)
+    try check(pi.backend == .pi, "pi profile should use the pi backend")
+    try check(pi.executableName == "pi", "pi profile should launch pi")
+    try check(pi.supportsPTY, "pi profile should support interactive terminal launches")
+    try check(pi.promptInjectionModes.contains(.appendSystemPromptFile), "pi profile should support prompt contract files")
+
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys]
+    let decoder = JSONDecoder()
+    let decoded = try decoder.decode([AgentRuntimeProfile].self, from: encoder.encode(profiles))
+    try check(decoded == profiles, "agent runtime profiles should JSON round-trip")
+}
+
+func runAgentWorkspaceManifestChecks() throws {
+    let paper = AgentWorkspacePaper(
+        paperID: "paper-a",
+        title: "Test Paper",
+        originalPDFPath: "/tmp/session/papers/paper-a/original.pdf",
+        fullTextPath: "/tmp/session/papers/paper-a/full_text.txt",
+        pagesJSONLPath: "/tmp/session/papers/paper-a/pages.jsonl",
+        spansJSONLPath: "/tmp/session/papers/paper-a/spans.jsonl",
+        anchorsJSONLPath: "/tmp/session/papers/paper-a/anchors.jsonl",
+        metadataJSONPath: "/tmp/session/papers/paper-a/metadata.json"
+    )
+    let manifest = AgentWorkspaceManifest(
+        sessionID: "session-a",
+        workspacePath: "/tmp/session",
+        materializationMode: .copyPDF,
+        mcpConfigPath: "/tmp/session/mcp.json",
+        promptContractPath: "/tmp/session/prompt_contract.md",
+        agentInstructionsPath: "/tmp/session/agent_instructions.md",
+        papers: [paper]
+    )
+    try check(manifest.sessionID == "session-a", "workspace manifest should keep the session id")
+    try check(manifest.workspacePath == "/tmp/session", "workspace manifest should keep the workspace root")
+    try check(manifest.materializationMode == .copyPDF, "workspace manifest should record the file materialization mode")
+    try check(manifest.mcpConfigPath == "/tmp/session/mcp.json", "workspace manifest should point to the MCP config file")
+    try check(manifest.promptContractPath == "/tmp/session/prompt_contract.md", "workspace manifest should point to the prompt contract")
+    try check(manifest.agentInstructionsPath == "/tmp/session/agent_instructions.md", "workspace manifest should point to agent instructions")
+    try check(manifest.papers.first?.paperID == "paper-a", "workspace manifest should list paper entries")
+    try check(manifest.papers.first?.spansJSONLPath.hasSuffix("spans.jsonl") == true, "workspace paper entries should include span index paths")
+
+    var symlinkManifest = manifest
+    symlinkManifest.materializationMode = .symlinkPDF
+    try check(symlinkManifest.materializationMode == .symlinkPDF, "workspace manifest should support symlinked paper files")
+
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys]
+    let decoder = JSONDecoder()
+    let decoded = try decoder.decode(AgentWorkspaceManifest.self, from: encoder.encode(manifest))
+    try check(decoded == manifest, "workspace manifest should JSON round-trip")
+}
+
+private func requiredProfile(
+    _ id: String,
+    in profilesByID: [String: AgentRuntimeProfile]
+) throws -> AgentRuntimeProfile {
+    guard let profile = profilesByID[id] else {
+        throw CheckFailure(description: "missing default agent runtime profile \(id)")
+    }
+    return profile
+}
+
 func runGeneratedImageChecks() throws {
     let root = FileManager.default.temporaryDirectory
         .appendingPathComponent("paper-codex-generated-images-\(UUID().uuidString)", isDirectory: true)
@@ -4740,6 +4839,14 @@ do {
     if selectedChecks.isEmpty || selectedChecks.contains("workspace") {
         try runWorkspaceChecks()
         print("workspace: pass")
+    }
+    if selectedChecks.isEmpty || selectedChecks.contains("agent-runtime-profiles") {
+        try runAgentRuntimeProfileChecks()
+        print("agent-runtime-profiles: pass")
+    }
+    if selectedChecks.isEmpty || selectedChecks.contains("agent-workspace-manifest") {
+        try runAgentWorkspaceManifestChecks()
+        print("agent-workspace-manifest: pass")
     }
     if selectedChecks.isEmpty || selectedChecks.contains("pdf") {
         try runPDFChecks()
