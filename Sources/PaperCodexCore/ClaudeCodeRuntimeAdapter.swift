@@ -31,11 +31,12 @@ public struct ClaudeCodeRuntimeAdapter: Sendable {
         var arguments = [
             "--print",
             "--output-format", "stream-json",
+            "--verbose",
             "--system-prompt", systemPrompt,
-            "--add-dir", workspacePath
+            "--add-dir=\(workspacePath)"
         ]
         if let mcpConfigPath = normalized(mcpConfigPath) {
-            arguments += ["--mcp-config", mcpConfigPath]
+            arguments.append("--mcp-config=\(mcpConfigPath)")
         }
         arguments.append(prompt)
         return AgentRuntimeCommand(
@@ -50,10 +51,10 @@ public struct ClaudeCodeRuntimeAdapter: Sendable {
         mcpConfigPath: String?
     ) -> AgentRuntimeCommand {
         var arguments = [
-            "--add-dir", workspacePath
+            "--add-dir=\(workspacePath)"
         ]
         if let mcpConfigPath = normalized(mcpConfigPath) {
-            arguments += ["--mcp-config", mcpConfigPath]
+            arguments.append("--mcp-config=\(mcpConfigPath)")
         }
         return AgentRuntimeCommand(
             executablePath: executablePath,

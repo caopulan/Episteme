@@ -224,6 +224,20 @@ swift run PaperCodexCoreChecks codex
 swift run PaperCodexCoreChecks arxiv-feed
 ```
 
+针对安全 fixture 工作区运行本地 Agent runtime smoke 检查：
+
+```bash
+scripts/agent-runtime-smoke.sh --codex --claude --kimi-openclaw
+```
+
+该脚本会验证 Codex、Claude Code 和 OpenClaw Kimi 路由是否能看到 `workspace_manifest.json`、Paper Codex 引用契约，以及 app 正在运行时的 live MCP endpoint。默认只读，不会修改文库论文、文件夹、标签或笔记。
+
+如果 OpenClaw Kimi 被当前本地账号或会员状态挡住，可以使用已配置的 Hermes Kimi 路由：
+
+```bash
+scripts/agent-runtime-smoke.sh --hermes-kimi
+```
+
 构建可打开的本地 app bundle：
 
 ```bash
@@ -248,6 +262,7 @@ Sources/
 - `PDFIndexExtractor` 从带文本层的 PDF 中抽取页面文本、span 和 anchor。
 - `SessionWorkspaceManager` 写入每个 session 的论文工作区。
 - `CodexAgentRuntime` 调用 `codex exec` 和 `codex exec resume`。
+- Agent runtime adapters 会把 Codex、Claude Code、Hermes、OpenClaw Kimi 和 pi 接到同一个 session workspace 契约上。
 - `LocalArxivClient` 与 `ArxivFeedCache` 支撑本地 arXiv 发现。
 - `SimilarityRanker` 计算可选的本地相似度排序。
 

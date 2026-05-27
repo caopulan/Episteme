@@ -3952,9 +3952,10 @@ func runAgentCommandBuilderChecks() throws {
         claude.arguments == [
             "--print",
             "--output-format", "stream-json",
+            "--verbose",
             "--system-prompt", "Use the Paper Codex citation contract.",
-            "--add-dir", "/tmp/session-a",
-            "--mcp-config", "/tmp/session-a/mcp.json",
+            "--add-dir=/tmp/session-a",
+            "--mcp-config=/tmp/session-a/mcp.json",
             "Summarize"
         ],
         "Claude Code adapter should inject system prompt, workspace, and MCP config"
@@ -4030,7 +4031,7 @@ func runAgentCommandBuilderChecks() throws {
         mcpConfigPath: "/tmp/session-a/mcp.json"
     )
     try check(claudeTerminal.launchMode == .pty, "Claude terminal command should launch in PTY mode")
-    try check(claudeTerminal.arguments == ["--add-dir", "/tmp/session-a", "--mcp-config", "/tmp/session-a/mcp.json"], "Claude terminal command should pass workspace and MCP config")
+    try check(claudeTerminal.arguments == ["--add-dir=/tmp/session-a", "--mcp-config=/tmp/session-a/mcp.json"], "Claude terminal command should pass workspace and MCP config")
 
     let hermesTerminal = HermesRuntimeAdapter(executablePath: "/usr/local/bin/hermes").terminalCommand(
         workspacePath: "/tmp/session-a",
@@ -4237,6 +4238,28 @@ func runAgentRuntimeSourceChecks() throws {
             && appModelSource.contains("PiRuntimeAdapter"),
         "AppModel should own Terminal state, log output under turns, and launch every PTY-capable runtime"
     )
+}
+
+func runAgentRuntimeSmokeScriptChecks() throws {
+    let sourceRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+    let scriptURL = sourceRoot.appendingPathComponent("scripts/agent-runtime-smoke.sh")
+    let script = try String(contentsOf: scriptURL)
+    try check(FileManager.default.isExecutableFile(atPath: scriptURL.path), "agent runtime smoke script should be executable")
+    try check(script.contains("--codex") && script.contains("codex exec"), "smoke script should support Codex exec")
+    try check(script.contains("--claude") && script.contains("claude --print"), "smoke script should support Claude Code print mode")
+    try check(script.contains("--kimi-openclaw") && script.contains("openclaw agent"), "smoke script should support OpenClaw Kimi route")
+    try check(script.contains("--hermes-kimi") && script.contains("hermes chat"), "smoke script should support Hermes Kimi fallback route")
+    try check(script.contains("workspace_manifest.json"), "smoke script should create or inspect a Paper Codex workspace manifest")
+    try check(script.contains("citation_contract_seen"), "smoke script should verify the citation contract")
+    try check(script.contains("mcp_endpoint_seen"), "smoke script should verify MCP endpoint visibility")
+    try check(script.contains("--write-test"), "smoke script should make write tests explicit rather than mutating app state by default")
+
+    let readme = try String(contentsOf: sourceRoot.appendingPathComponent("README.md"))
+    let readmeZH = try String(contentsOf: sourceRoot.appendingPathComponent("README.zh-CN.md"))
+    try check(readme.contains("scripts/agent-runtime-smoke.sh --codex --claude --kimi-openclaw"), "English README should document multi-runtime smoke checks")
+    try check(readme.contains("OpenClaw Kimi"), "English README should document the Kimi runtime route")
+    try check(readmeZH.contains("scripts/agent-runtime-smoke.sh --codex --claude --kimi-openclaw"), "Chinese README should document multi-runtime smoke checks")
+    try check(readmeZH.contains("OpenClaw Kimi"), "Chinese README should document the Kimi runtime route")
 }
 
 private func requiredProfile(
@@ -5397,6 +5420,10 @@ do {
     if selectedChecks.isEmpty || selectedChecks.contains("agent-runtime-source") {
         try runAgentRuntimeSourceChecks()
         print("agent-runtime-source: pass")
+    }
+    if selectedChecks.isEmpty || selectedChecks.contains("agent-runtime-smoke-script") {
+        try runAgentRuntimeSmokeScriptChecks()
+        print("agent-runtime-smoke-script: pass")
     }
     if selectedChecks.isEmpty || selectedChecks.contains("pdf") {
         try runPDFChecks()

@@ -224,6 +224,20 @@ swift run PaperCodexCoreChecks codex
 swift run PaperCodexCoreChecks arxiv-feed
 ```
 
+Run local agent runtime smoke checks against a safe fixture workspace:
+
+```bash
+scripts/agent-runtime-smoke.sh --codex --claude --kimi-openclaw
+```
+
+The smoke script verifies that Codex, Claude Code, and the OpenClaw Kimi route can see `workspace_manifest.json`, the Paper Codex citation contract, and the live MCP endpoint when the app is running. It is read-only by default and does not mutate library papers, folders, tags, or notes.
+
+If OpenClaw Kimi is blocked by local account or membership state, use the configured Hermes Kimi route:
+
+```bash
+scripts/agent-runtime-smoke.sh --hermes-kimi
+```
+
 Build the distributable local app bundle:
 
 ```bash
@@ -248,6 +262,7 @@ Core runtime pieces:
 - `PDFIndexExtractor` extracts page text, spans, and anchors from text-layer PDFs.
 - `SessionWorkspaceManager` writes per-session paper workspaces.
 - `CodexAgentRuntime` invokes `codex exec` and `codex exec resume`.
+- Agent runtime adapters launch Codex, Claude Code, Hermes, OpenClaw Kimi, and pi against the same session workspace contract.
 - `LocalArxivClient` and `ArxivFeedCache` power local arXiv discovery.
 - `SimilarityRanker` computes optional local similarity ordering.
 
