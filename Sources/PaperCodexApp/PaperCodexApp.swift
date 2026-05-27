@@ -68,9 +68,20 @@ struct RootView: View {
         .onAppear {
             mountRoute(navigation.route)
             scheduleRouteCacheWarmup()
+            model.refreshMCPActiveContextSnapshot()
         }
         .onChange(of: navigation.route) { _, newRoute in
             scheduleRouteMount(to: newRoute)
+            model.refreshMCPActiveContextSnapshot()
+        }
+        .onChange(of: model.selectedPaper?.id) { _, _ in
+            model.refreshMCPActiveContextSnapshot()
+        }
+        .onChange(of: model.selectedSession?.id) { _, _ in
+            model.refreshMCPActiveContextSnapshot()
+        }
+        .onChange(of: model.currentSelection) { _, _ in
+            model.refreshMCPActiveContextSnapshot()
         }
         .onDisappear {
             routeMountTask?.cancel()

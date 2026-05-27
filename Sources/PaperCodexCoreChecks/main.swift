@@ -284,6 +284,305 @@ func runReaderPositionRepositoryChecks() throws {
     try check(reopenedPositionA == positionA, "reader position should survive repository reopen")
 }
 
+func runMCPChecks() throws {
+    let fixture = try makeMCPFixture(withPaper: true)
+    let service = PaperCodexMCPService(repository: fixture.repository, supportRoot: fixture.root)
+
+    let toolsResponse = try service.handleJSONRPC([
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/list"
+    ])
+    let toolNames = try mcpResultArray(toolsResponse, key: "tools").compactMap { $0["name"] as? String }
+    try check(toolNames.contains("paper.import_pdf"), "MCP should expose PDF import as a typed tool")
+    try check(toolNames.contains("paper.add_tags"), "MCP should expose paper tag assignment as a typed tool")
+    try check(toolNames.contains("note.create"), "MCP should expose note creation as a typed tool")
+    try check(toolNames.contains("prompt_template.validate"), "MCP should expose prompt template validation")
+    try check(toolNames.contains("prompt_template.preview_render"), "MCP should expose prompt template preview rendering")
+    try check(toolNames.contains("app.open_paper"), "MCP should expose app paper-opening commands")
+    try check(toolNames.contains("app.jump_to_anchor"), "MCP should expose app anchor jump commands")
+    try check(!toolNames.contains("settings.update"), "MCP should not expose generic settings.update")
+
+    let templatesResponse = try service.handleJSONRPC([
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "resources/templates/list"
+    ])
+    let resourceTemplates = try mcpResultArray(templatesResponse, key: "resourceTemplates").compactMap { $0["uriTemplate"] as? String }
+    try check(resourceTemplates.contains("papercodex://papers/{paper_id}/notes"), "MCP should expose paper notes as a resource template")
+    try check(resourceTemplates.contains("papercodex://settings/prompt-templates/{template_id}"), "MCP should expose typed prompt templates as resources")
+    try check(resourceTemplates.contains("papercodex://app/active-context"), "MCP should expose active app context")
+
+    let promptsResponse = try service.handleJSONRPC([
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "prompts/list"
+    ])
+    let promptNames = try mcpResultArray(promptsResponse, key: "prompts").compactMap { $0["name"] as? String }
+    try check(promptNames.contains("paper_reading"), "MCP should expose a paper reading prompt")
+    try check(promptNames.contains("paper_summary"), "MCP should expose a paper summary prompt")
+    try check(promptNames.contains("tag_suggestion"), "MCP should expose a tag suggestion prompt")
+
+    let metadata = try mcpReadResource("papercodex://papers/\(fixture.paperID)/metadata", service: service)
+    try check(metadata.contains("Example Paper"), "paper metadata resource should include the title")
+    try check(metadata.contains("Visual Grounding"), "paper metadata resource should include tags")
+    try check(metadata.contains("reading-list"), "paper metadata resource should include folders")
+
+    let notes = try mcpReadResource("papercodex://papers/\(fixture.paperID)/notes", service: service)
+    try check(notes.contains("Main idea"), "paper notes resource should include note titles")
+    try check(notes.contains("Ground claims with spans."), "paper notes resource should include note body")
+
+    let fullText = try mcpReadResource("papercodex://papers/\(fixture.paperID)/full-text", service: service)
+    try check(fullText.contains("This paper studies visual grounding."), "paper full-text resource should include page text")
+
+    let validateText = try mcpCallTool(
+        "prompt_template.validate",
+        arguments: ["template_id": "paper_summary.default"],
+        service: service
+    )
+    try check(validateText.contains(#""is_valid": true"#) || validateText.contains(#""is_valid" : true"#), "prompt template validation should report valid templates")
+    try check(validateText.contains("paper_title"), "prompt template validation should report variables")
+
+    let previewText = try mcpCallTool(
+        "prompt_template.preview_render",
+        arguments: [
+            "template_id": "paper_summary.default",
+            "variables": [
+                "paper_title": "A Test Paper",
+                "paper_abstract": "A compact abstract",
+                "selected_text": "selected span",
+                "user_goal": "summarize methods"
+            ]
+        ],
+        service: service
+    )
+    try check(previewText.contains("A Test Paper"), "prompt template preview should render paper_title")
+    try check(previewText.contains("summarize methods"), "prompt template preview should render user_goal")
+
+    let replaceText = try mcpCallTool(
+        "prompt_template.replace_body",
+        arguments: [
+            "template_id": "paper_summary.default",
+            "body_markdown": "Summarize {{paper_title}} for {{user_goal}}."
+        ],
+        service: service
+    )
+    try check(replaceText.contains("updated"), "prompt template replacement should persist the changed body")
+
+    let updatedPreviewText = try mcpCallTool(
+        "prompt_template.preview_render",
+        arguments: [
+            "template_id": "paper_summary.default",
+            "variables": [
+                "paper_title": "Updated Paper",
+                "user_goal": "method extraction"
+            ]
+        ],
+        service: service
+    )
+    try check(updatedPreviewText.contains("Updated Paper"), "updated prompt template should render new title")
+    try check(updatedPreviewText.contains("method extraction"), "updated prompt template should render new user goal")
+
+    let queuedCommandText = try mcpCallTool(
+        "app.open_paper",
+        arguments: ["paper_id": fixture.paperID],
+        service: service
+    )
+    try check(queuedCommandText.contains("queued"), "app command tools should queue commands for the running app")
+    let commandLogURL = PaperCodexMCPAppCommand.commandLogURL(supportRoot: fixture.root)
+    try check(FileManager.default.fileExists(atPath: commandLogURL.path), "app command tools should write the command queue")
+
+    let server = PaperCodexMCPServer(service: service, supportRoot: fixture.root)
+    let endpoint = try server.start(preferredPort: 41927, token: "test-token")
+    defer { server.stop() }
+    try check(FileManager.default.fileExists(atPath: endpoint.metadataPath), "MCP server should write connection metadata")
+    let initializeResponse = try mcpHTTPPost(
+        url: endpoint.url,
+        token: endpoint.token,
+        object: [
+            "jsonrpc": "2.0",
+            "id": 99,
+            "method": "initialize"
+        ]
+    )
+    let serverInfo = try mcpResult(initializeResponse)["serverInfo"] as? [String: Any]
+    try check(serverInfo?["name"] as? String == "paper-codex", "MCP HTTP endpoint should respond to initialize")
+}
+
+private func mcpResult(_ response: [String: Any]) throws -> [String: Any] {
+    if let error = response["error"] {
+        throw CheckFailure(description: "Unexpected MCP error: \(error)")
+    }
+    guard let result = response["result"] as? [String: Any] else {
+        throw CheckFailure(description: "MCP response missing result: \(response)")
+    }
+    return result
+}
+
+private func mcpResultArray(_ response: [String: Any], key: String) throws -> [[String: Any]] {
+    let result = try mcpResult(response)
+    guard let array = result[key] as? [[String: Any]] else {
+        throw CheckFailure(description: "MCP result missing array \(key): \(result)")
+    }
+    return array
+}
+
+private func mcpReadResource(_ uri: String, service: PaperCodexMCPService) throws -> String {
+    let response = try service.handleJSONRPC([
+        "jsonrpc": "2.0",
+        "id": 10,
+        "method": "resources/read",
+        "params": ["uri": uri]
+    ])
+    let contents = try mcpResultArray(response, key: "contents")
+    guard let text = contents.first?["text"] as? String else {
+        throw CheckFailure(description: "MCP resource response missing text for \(uri)")
+    }
+    return text
+}
+
+private func mcpCallTool(_ name: String, arguments: [String: Any], service: PaperCodexMCPService) throws -> String {
+    let response = try service.handleJSONRPC([
+        "jsonrpc": "2.0",
+        "id": 20,
+        "method": "tools/call",
+        "params": [
+            "name": name,
+            "arguments": arguments
+        ]
+    ])
+    let content = try mcpResultArray(response, key: "content")
+    guard let text = content.first?["text"] as? String else {
+        throw CheckFailure(description: "MCP tool response missing text for \(name)")
+    }
+    return text
+}
+
+private func mcpHTTPPost(url: String, token: String, object: [String: Any]) throws -> [String: Any] {
+    guard let requestURL = URL(string: url) else {
+        throw CheckFailure(description: "Invalid MCP test URL: \(url)")
+    }
+    var request = URLRequest(url: requestURL)
+    request.httpMethod = "POST"
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+    request.httpBody = try JSONSerialization.data(withJSONObject: object)
+
+    let semaphore = DispatchSemaphore(value: 0)
+    let resultBox = MCPHTTPPostResultBox()
+    let task = URLSession.shared.dataTask(with: request) { data, _, error in
+        defer { semaphore.signal() }
+        if let error {
+            resultBox.set(.failure(error))
+            return
+        }
+        guard let data else {
+            resultBox.set(.failure(CheckFailure(description: "MCP HTTP response missing body")))
+            return
+        }
+        do {
+            guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                throw CheckFailure(description: "MCP HTTP response was not an object")
+            }
+            resultBox.set(.success(object))
+        } catch {
+            resultBox.set(.failure(error))
+        }
+    }
+    task.resume()
+    guard semaphore.wait(timeout: .now() + 5) == .success else {
+        task.cancel()
+        throw CheckFailure(description: "MCP HTTP request timed out")
+    }
+    return try resultBox.get()?.get() ?? {
+        throw CheckFailure(description: "MCP HTTP request returned no result")
+    }()
+}
+
+private final class MCPHTTPPostResultBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var result: Result<[String: Any], Error>?
+
+    func set(_ result: Result<[String: Any], Error>) {
+        lock.lock()
+        self.result = result
+        lock.unlock()
+    }
+
+    func get() -> Result<[String: Any], Error>? {
+        lock.lock()
+        defer { lock.unlock() }
+        return result
+    }
+}
+
+private struct MCPFixture {
+    var root: URL
+    var repository: PaperRepository
+    var paperID: String
+}
+
+private func makeMCPFixture(withPaper: Bool) throws -> MCPFixture {
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent("paper-codex-mcp-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    let repository = try PaperRepository(databasePath: root.appendingPathComponent("store.sqlite").path)
+    try repository.migrate()
+
+    guard withPaper else {
+        return MCPFixture(root: root, repository: repository, paperID: "")
+    }
+
+    let paper = Paper(
+        id: "paper-example",
+        filePath: root.appendingPathComponent("papers/paper-example/original.pdf").path,
+        fileHash: "hash-example",
+        title: "Example Paper",
+        authors: ["Ada Lovelace"],
+        year: 2026,
+        sourceURL: "https://arxiv.org/abs/2601.00001",
+        isSaved: true,
+        importedAt: Date(timeIntervalSince1970: 1_800_000_000),
+        updatedAt: Date(timeIntervalSince1970: 1_800_000_000)
+    )
+    try repository.upsertPaper(paper)
+    try repository.upsertPage(PageIndex(
+        paperID: paper.id,
+        page: 1,
+        text: "This paper studies visual grounding.",
+        confidence: 0.99
+    ))
+    try repository.upsertSpan(Span(
+        id: Span.makeID(paperID: paper.id, page: 1, blockIndex: 0),
+        paperID: paper.id,
+        page: 1,
+        bbox: BoundingBox(x: 0, y: 0, width: 10, height: 10),
+        text: "This paper studies visual grounding.",
+        charRange: TextRange(location: 0, length: 37),
+        sectionHint: "Abstract",
+        confidence: 0.99
+    ))
+    let folder = Category(id: "cat-reading-list", parentID: nil, name: "reading-list", sortOrder: 10)
+    try repository.upsertCategory(folder)
+    try repository.assignPaper(paper.id, toCategory: folder.id)
+    let tag = PaperTag(id: "tag-visual-grounding", name: "Visual Grounding")
+    try repository.upsertTag(tag)
+    try repository.assignPaper(paper.id, toTag: tag.id)
+    try repository.upsertNote(PaperNote(
+        id: "note-main",
+        paperID: paper.id,
+        anchorID: nil,
+        title: "Main idea",
+        bodyMarkdown: "Ground claims with spans.",
+        createdAt: Date(timeIntervalSince1970: 1_800_000_001),
+        updatedAt: Date(timeIntervalSince1970: 1_800_000_001),
+        deletedAt: nil,
+        syncRevision: 1
+    ))
+
+    return MCPFixture(root: root, repository: repository, paperID: paper.id)
+}
+
 func runLibraryDerivedStateChecks() throws {
     let now = Date(timeIntervalSince1970: 1_777_400_000)
     let paperA = Paper(
@@ -4357,6 +4656,10 @@ do {
     if selectedChecks.isEmpty || selectedChecks.contains("library-data-store") {
         try runLibraryDataStoreChecks()
         print("library-data-store: pass")
+    }
+    if selectedChecks.isEmpty || selectedChecks.contains("mcp") {
+        try runMCPChecks()
+        print("mcp: pass")
     }
     if selectedChecks.isEmpty || selectedChecks.contains("arxiv-cache-data-store") {
         try runArxivCacheDataStoreChecks()

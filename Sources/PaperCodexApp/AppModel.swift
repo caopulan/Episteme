@@ -12,6 +12,23 @@ enum AppRoute: Hashable {
     case reader
 }
 
+private extension AppRoute {
+    var mcpName: String {
+        switch self {
+        case .library:
+            "library"
+        case .discover:
+            "discover"
+        case .search:
+            "search"
+        case .settings:
+            "settings"
+        case .reader:
+            "reader"
+        }
+    }
+}
+
 @MainActor
 final class AppNavigation: ObservableObject {
     @Published var route: AppRoute = .library
@@ -709,6 +726,11 @@ final class AppModel: ObservableObject {
     private var cacheStorageSummaryTask: Task<Void, Never>?
     private var libraryThumbnailRefreshTask: Task<Void, Never>?
     private var routeDeferredWorkTask: Task<Void, Never>?
+    private var mcpService: PaperCodexMCPService?
+    private var mcpServer: PaperCodexMCPServer?
+    private var mcpEndpoint: PaperCodexMCPEndpoint?
+    private var mcpCommandPollingTask: Task<Void, Never>?
+    private var mcpCommandReadOffset: UInt64 = 0
     private var libraryStoreObservation: AnyCancellable?
     private var readerStoreObservation: AnyCancellable?
     private var discoverStoreObservation: AnyCancellable?
@@ -876,6 +898,8 @@ final class AppModel: ObservableObject {
             try reloadLibrary()
             startDiscoverCacheWarmupIfNeeded()
             refreshCacheStorageSummary()
+            startMCPServer(repository: store)
+            refreshMCPActiveContextSnapshot()
             Task {
                 await refreshCodexDiagnostic()
                 await refreshAvailableCodexModels()
@@ -895,6 +919,153 @@ final class AppModel: ObservableObject {
         cacheStorageSummaryTask?.cancel()
         libraryThumbnailRefreshTask?.cancel()
         routeDeferredWorkTask?.cancel()
+        mcpCommandPollingTask?.cancel()
+        mcpServer?.stop()
+    }
+
+    private func startMCPServer(repository: PaperRepository) {
+        do {
+            let service = PaperCodexMCPService(repository: repository, supportRoot: supportRoot)
+            let server = PaperCodexMCPServer(service: service, supportRoot: supportRoot)
+            mcpEndpoint = try server.start()
+            mcpService = service
+            mcpServer = server
+            startMCPCommandPolling()
+        } catch {
+            errorMessage = "Paper Codex MCP server failed to start: \(String(describing: error))"
+        }
+    }
+
+    func refreshMCPActiveContextSnapshot() {
+        do {
+            let context = PaperCodexMCPActiveContext(
+                route: route.mcpName,
+                paperID: selectedPaper?.id,
+                paperTitle: selectedPaper?.title,
+                sessionID: selectedSession?.id,
+                selectedText: currentSelection?.text,
+                selectedPage: currentSelection?.page
+            )
+            try mcpService?.writeActiveContextSnapshot(context)
+        } catch {
+            errorMessage = "Paper Codex MCP context update failed: \(String(describing: error))"
+        }
+    }
+
+    private func startMCPCommandPolling() {
+        let commandLogURL = PaperCodexMCPAppCommand.commandLogURL(supportRoot: supportRoot)
+        if let attributes = try? FileManager.default.attributesOfItem(atPath: commandLogURL.path),
+           let size = attributes[.size] as? NSNumber {
+            mcpCommandReadOffset = size.uint64Value
+        } else {
+            mcpCommandReadOffset = 0
+        }
+        mcpCommandPollingTask?.cancel()
+        mcpCommandPollingTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                guard !Task.isCancelled else {
+                    return
+                }
+                self?.processPendingMCPCommands()
+            }
+        }
+    }
+
+    private func processPendingMCPCommands() {
+        let commandLogURL = PaperCodexMCPAppCommand.commandLogURL(supportRoot: supportRoot)
+        guard FileManager.default.fileExists(atPath: commandLogURL.path),
+              let handle = try? FileHandle(forReadingFrom: commandLogURL) else {
+            return
+        }
+        defer { try? handle.close() }
+        do {
+            try handle.seek(toOffset: mcpCommandReadOffset)
+            let data = handle.readDataToEndOfFile()
+            mcpCommandReadOffset = try handle.offset()
+            guard !data.isEmpty,
+                  let text = String(data: data, encoding: .utf8) else {
+                return
+            }
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            for line in text.split(separator: "\n") {
+                let lineData = Data(line.utf8)
+                let command = try decoder.decode(PaperCodexMCPAppCommand.self, from: lineData)
+                handleMCPCommand(command)
+            }
+        } catch {
+            errorMessage = "Paper Codex MCP command handling failed: \(String(describing: error))"
+        }
+    }
+
+    private func handleMCPCommand(_ command: PaperCodexMCPAppCommand) {
+        do {
+            guard let repository else {
+                throw AppModelError.repositoryUnavailable
+            }
+            switch command.type {
+            case "app.open_paper":
+                let paper = try paperFromMCPCommand(command, repository: repository)
+                openPaper(paper)
+            case "app.reveal_paper":
+                let paper = try paperFromMCPCommand(command, repository: repository)
+                selectedLibraryPaper = paper
+                selectedLibrarySurface = .papers
+                route = .library
+            case "app.open_folder":
+                let folderID = try mcpCommandArgument("folder_id", in: command)
+                librarySelectedCategoryID = folderID
+                librarySelectedTagID = nil
+                selectedLibrarySurface = .papers
+                route = .library
+            case "app.open_tag":
+                let tagID = try mcpCommandArgument("tag_id", in: command)
+                librarySelectedTagID = tagID
+                librarySelectedCategoryID = nil
+                selectedLibrarySurface = .papers
+                route = .library
+            case "app.jump_to_page":
+                let paper = try paperFromMCPCommand(command, repository: repository)
+                openPaper(paper)
+                let page = Int(command.arguments["page"] ?? "1") ?? 1
+                readerPosition = PaperReaderPosition(
+                    sessionID: selectedSession?.id ?? "mcp-navigation",
+                    paperID: paper.id,
+                    pageIndex: max(page - 1, 0),
+                    pagePointX: 0,
+                    pagePointY: 0,
+                    scaleFactor: 1,
+                    updatedAt: Date()
+                )
+            case "app.jump_to_anchor":
+                jumpToCitation(try mcpCommandArgument("anchor_id", in: command))
+            default:
+                return
+            }
+            refreshMCPActiveContextSnapshot()
+        } catch {
+            errorMessage = "Paper Codex MCP command failed: \(String(describing: error))"
+        }
+    }
+
+    private func paperFromMCPCommand(_ command: PaperCodexMCPAppCommand, repository: PaperRepository) throws -> Paper {
+        let paperID = try mcpCommandArgument("paper_id", in: command)
+        if let paper = papers.first(where: { $0.id == paperID }) {
+            return paper
+        }
+        guard let paper = try repository.fetchPapers(ids: [paperID]).first else {
+            throw AppModelError.paperNotFound(paperID)
+        }
+        return paper
+    }
+
+    private func mcpCommandArgument(_ name: String, in command: PaperCodexMCPAppCommand) throws -> String {
+        guard let value = command.arguments[name],
+              !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw AppModelError.missingMCPCommandArgument(name)
+        }
+        return value
     }
 
     func postNotice(
@@ -5404,6 +5575,8 @@ enum AppModelError: Error, CustomStringConvertible {
     case arxivMetadataNotFound(String)
     case categoryNotFound(String)
     case invalidCategoryMove
+    case paperNotFound(String)
+    case missingMCPCommandArgument(String)
 
     var description: String {
         switch self {
@@ -5431,6 +5604,10 @@ enum AppModelError: Error, CustomStringConvertible {
             "No folder was found for \(categoryID)."
         case .invalidCategoryMove:
             "A category cannot be moved into itself or one of its subcategories."
+        case let .paperNotFound(paperID):
+            "No paper was found for \(paperID)."
+        case let .missingMCPCommandArgument(name):
+            "MCP command is missing \(name)."
         }
     }
 }
