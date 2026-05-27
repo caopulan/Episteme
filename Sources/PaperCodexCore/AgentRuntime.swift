@@ -9,6 +9,7 @@ public struct AgentRuntimeRequest: Sendable {
     public var reasoningEffort: CodexReasoningEffort
     public var prefersWorkspaceImageOutput: Bool
     public var runModeDescription: String
+    public var mcpServers: [CodexMCPServerConfig]
 
     public init(
         prompt: String,
@@ -18,7 +19,8 @@ public struct AgentRuntimeRequest: Sendable {
         modelOverride: String,
         reasoningEffort: CodexReasoningEffort,
         prefersWorkspaceImageOutput: Bool,
-        runModeDescription: String
+        runModeDescription: String,
+        mcpServers: [CodexMCPServerConfig] = []
     ) {
         self.prompt = prompt
         self.workspacePath = workspacePath
@@ -28,6 +30,15 @@ public struct AgentRuntimeRequest: Sendable {
         self.reasoningEffort = reasoningEffort
         self.prefersWorkspaceImageOutput = prefersWorkspaceImageOutput
         self.runModeDescription = runModeDescription
+        self.mcpServers = mcpServers
+    }
+
+    public var mcpEnvironmentOverrides: [String: String] {
+        mcpServers.reduce(into: [:]) { result, server in
+            for (key, value) in server.environmentOverrides {
+                result[key] = value
+            }
+        }
     }
 }
 

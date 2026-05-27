@@ -192,6 +192,7 @@ private struct SessionPaperContext {
 private let codexModelOverrideDefaultsKey = "PaperCodexCodexModelOverride"
 private let codexReasoningEffortDefaultsKey = "PaperCodexCodexReasoningEffort"
 private let codexSystemPromptDefaultsKey = "PaperCodexCodexSystemPrompt"
+private let inAppCodexMCPEnabledDefaultsKey = "PaperCodexInAppCodexMCPEnabled"
 private let globalLanguageModeDefaultsKey = "PaperCodexGlobalLanguageMode"
 private let discoverCodexModelOverrideDefaultsKey = "PaperCodexDiscoverCodexModelOverride"
 private let discoverCodexReasoningEffortDefaultsKey = "PaperCodexDiscoverCodexReasoningEffort"
@@ -220,6 +221,13 @@ private func loadDiscoverCodexConcurrencyFromDefaults() -> Int {
 private func loadCodexReasoningEffortFromDefaults(key: String) -> CodexReasoningEffort {
     let stored = UserDefaults.standard.string(forKey: key)
     return stored.flatMap(CodexReasoningEffort.init(rawValue:)) ?? .default
+}
+
+private func loadInAppCodexMCPEnabledFromDefaults() -> Bool {
+    guard UserDefaults.standard.object(forKey: inAppCodexMCPEnabledDefaultsKey) != nil else {
+        return true
+    }
+    return UserDefaults.standard.bool(forKey: inAppCodexMCPEnabledDefaultsKey)
 }
 
 private func loadQuickPromptsFromDefaults() -> [QuickPrompt] {
@@ -457,6 +465,7 @@ final class AppModel: ObservableObject {
     @Published var codexModelOverride: String = UserDefaults.standard.string(forKey: codexModelOverrideDefaultsKey) ?? ""
     @Published var codexReasoningEffort: CodexReasoningEffort = loadCodexReasoningEffortFromDefaults(key: codexReasoningEffortDefaultsKey)
     @Published var codexSystemPrompt: String = PromptBuilder.defaultSystemPrompt
+    @Published var inAppCodexMCPEnabled: Bool = loadInAppCodexMCPEnabledFromDefaults()
     @Published var globalLanguageMode: PaperCodexLanguageMode = .automatic
     @Published var activeCodexRunsBySessionID: [String: ActiveCodexRun] = [:]
     @Published var errorMessage: String?
@@ -760,6 +769,16 @@ final class AppModel: ObservableObject {
 
     var paperLibraryRootPath: String {
         supportRoot.appendingPathComponent("papers", isDirectory: true).path
+    }
+
+    var inAppCodexMCPStatusText: String {
+        guard inAppCodexMCPEnabled else {
+            return "Disabled"
+        }
+        guard let endpoint = mcpEndpoint else {
+            return "Enabled · Starting"
+        }
+        return "Enabled · \(endpoint.host):\(endpoint.port)"
     }
 
     private var arxivSearchQueryPreview: String {
@@ -3855,6 +3874,16 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func setInAppCodexMCPEnabled(_ enabled: Bool) {
+        inAppCodexMCPEnabled = enabled
+        UserDefaults.standard.set(enabled, forKey: inAppCodexMCPEnabledDefaultsKey)
+        postNotice(
+            kind: .success,
+            title: enabled ? "Paper Codex MCP Enabled" : "Paper Codex MCP Disabled",
+            message: inAppCodexMCPStatusText
+        )
+    }
+
     func cancelActiveCodexRun() {
         let targetSessionID = selectedSession?.id ?? activeCodexRunsBySessionID.values.sorted { $0.startedAt < $1.startedAt }.first?.sessionID
         guard let targetSessionID,
@@ -5341,7 +5370,8 @@ final class AppModel: ObservableObject {
                     reasoningEffort: reasoningEffort,
                     modelOverride: modelOverride,
                     prefersWorkspaceImageOutput: prefersWorkspaceImageOutput
-                )
+                ),
+                mcpServers: inAppCodexMCPServers()
             ),
             runHandle: runHandle,
             onEvent: eventSink
@@ -5363,6 +5393,20 @@ final class AppModel: ObservableObject {
             generatedImages: result.generatedImages,
             tokenUsage: result.tokenUsage
         )
+    }
+
+    private func inAppCodexMCPServers() -> [CodexMCPServerConfig] {
+        guard inAppCodexMCPEnabled, let endpoint = mcpEndpoint else {
+            return []
+        }
+        return [
+            CodexMCPServerConfig(
+                name: "paper-codex",
+                url: endpoint.url,
+                bearerTokenEnvironmentVariable: "PAPER_CODEX_MCP_TOKEN",
+                bearerToken: endpoint.token
+            )
+        ]
     }
 
     private func effectiveModelOverride(prefersWorkspaceImageOutput: Bool) -> String {

@@ -73,6 +73,7 @@ struct SettingsView: View {
                     localRankingSettings
                     codexEnrichmentSettings
                     codexSystemPromptSettings
+                    codexMCPSettings
                     discoverCodexProcessingSettings
                     embeddingProviderSettings
                     quickPromptSettings
@@ -388,6 +389,26 @@ struct SettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+            }
+        }
+    }
+
+    private var codexMCPSettings: some View {
+        settingsSection(title: "Paper Codex MCP", systemImage: "point.3.connected.trianglepath.dotted") {
+            Toggle(
+                "Enable for in-app Codex",
+                isOn: Binding(
+                    get: { model.inAppCodexMCPEnabled },
+                    set: { model.setInAppCodexMCPEnabled($0) }
+                )
+            )
+            .toggleStyle(.checkbox)
+
+            HStack {
+                Text(model.inAppCodexMCPStatusText)
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                Spacer()
             }
         }
     }

@@ -72,6 +72,24 @@ public struct CodexExecutableCandidate: Equatable, Sendable {
     }
 }
 
+public struct CodexMCPServerConfig: Equatable, Sendable {
+    public var name: String
+    public var url: String
+    public var bearerTokenEnvironmentVariable: String
+    public var bearerToken: String
+
+    public init(name: String, url: String, bearerTokenEnvironmentVariable: String, bearerToken: String) {
+        self.name = name
+        self.url = url
+        self.bearerTokenEnvironmentVariable = bearerTokenEnvironmentVariable
+        self.bearerToken = bearerToken
+    }
+
+    public var environmentOverrides: [String: String] {
+        [bearerTokenEnvironmentVariable: bearerToken]
+    }
+}
+
 public enum CodexReasoningEffort: String, Codable, CaseIterable, Sendable {
     case `default`
     case low
@@ -550,11 +568,15 @@ public struct CodexCLI: Sendable {
 
     public static func sanitizedProcessEnvironment(
         workingDirectoryURL: URL,
-        baseEnvironment: [String: String] = ProcessInfo.processInfo.environment
+        baseEnvironment: [String: String] = ProcessInfo.processInfo.environment,
+        environmentOverrides: [String: String] = [:]
     ) -> [String: String] {
         var environment = baseEnvironment
         environment["PWD"] = workingDirectoryURL.standardizedFileURL.path
         environment.removeValue(forKey: "OLDPWD")
+        for (key, value) in environmentOverrides {
+            environment[key] = value
+        }
         return environment
     }
 
@@ -634,7 +656,8 @@ public struct CodexCLI: Sendable {
         workspacePath: String,
         outputLastMessagePath: String? = nil,
         modelOverride: String? = nil,
-        reasoningEffort: CodexReasoningEffort = .default
+        reasoningEffort: CodexReasoningEffort = .default,
+        mcpServers: [CodexMCPServerConfig] = []
     ) -> [String] {
         var arguments = ["exec", "--skip-git-repo-check", "--json", "--enable", "image_generation"]
         if let modelOverride = Self.normalizedModelOverride(modelOverride) {
@@ -643,6 +666,7 @@ public struct CodexCLI: Sendable {
         if let reasoningEffort = reasoningEffort.codexConfigValue {
             arguments += ["-c", "model_reasoning_effort=\"\(reasoningEffort)\""]
         }
+        arguments += Self.mcpConfigArguments(mcpServers)
         arguments += ["-C", workspacePath]
         if let outputLastMessagePath {
             arguments += ["--output-last-message", outputLastMessagePath]
@@ -656,7 +680,8 @@ public struct CodexCLI: Sendable {
         prompt: String,
         outputLastMessagePath: String? = nil,
         modelOverride: String? = nil,
-        reasoningEffort: CodexReasoningEffort = .default
+        reasoningEffort: CodexReasoningEffort = .default,
+        mcpServers: [CodexMCPServerConfig] = []
     ) -> [String] {
         var arguments = ["exec", "resume", "--skip-git-repo-check", "--json", "--enable", "image_generation"]
         if let modelOverride = Self.normalizedModelOverride(modelOverride) {
@@ -665,6 +690,7 @@ public struct CodexCLI: Sendable {
         if let reasoningEffort = reasoningEffort.codexConfigValue {
             arguments += ["-c", "model_reasoning_effort=\"\(reasoningEffort)\""]
         }
+        arguments += Self.mcpConfigArguments(mcpServers)
         if let outputLastMessagePath {
             arguments += ["--output-last-message", outputLastMessagePath]
         }
@@ -898,6 +924,24 @@ public struct CodexCLI: Sendable {
         return trimmed.isEmpty ? nil : trimmed
     }
 
+    private static func mcpConfigArguments(_ servers: [CodexMCPServerConfig]) -> [String] {
+        servers.flatMap { server in
+            [
+                "-c",
+                "mcp_servers.\(server.name).url=\(tomlStringLiteral(server.url))",
+                "-c",
+                "mcp_servers.\(server.name).bearer_token_env_var=\(tomlStringLiteral(server.bearerTokenEnvironmentVariable))"
+            ]
+        }
+    }
+
+    private static func tomlStringLiteral(_ value: String) -> String {
+        let escaped = value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        return "\"\(escaped)\""
+    }
+
     public func run(arguments: [String], currentDirectoryURL: URL? = nil) throws -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executablePath)
@@ -924,13 +968,14 @@ public struct CodexCLI: Sendable {
         arguments: [String],
         eventLogURL: URL? = nil,
         currentDirectoryURL: URL? = nil,
+        environmentOverrides: [String: String] = [:],
         runHandle: CodexRunHandle? = nil,
         onEvent: @escaping @Sendable (CodexRunEvent) -> Void
     ) throws -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executablePath)
         process.arguments = arguments
-        configureProcessDirectory(process, currentDirectoryURL: currentDirectoryURL)
+        configureProcessDirectory(process, currentDirectoryURL: currentDirectoryURL, environmentOverrides: environmentOverrides)
 
         let output = Pipe()
         let error = Pipe()
@@ -986,10 +1031,13 @@ public struct CodexCLI: Sendable {
         return result.stdout
     }
 
-    private func configureProcessDirectory(_ process: Process, currentDirectoryURL: URL?) {
+    private func configureProcessDirectory(_ process: Process, currentDirectoryURL: URL?, environmentOverrides: [String: String] = [:]) {
         let workingDirectoryURL = (currentDirectoryURL ?? Self.defaultProcessWorkingDirectory()).standardizedFileURL
         process.currentDirectoryURL = workingDirectoryURL
-        process.environment = Self.sanitizedProcessEnvironment(workingDirectoryURL: workingDirectoryURL)
+        process.environment = Self.sanitizedProcessEnvironment(
+            workingDirectoryURL: workingDirectoryURL,
+            environmentOverrides: environmentOverrides
+        )
     }
 
     private static func defaultProcessWorkingDirectory() -> URL {

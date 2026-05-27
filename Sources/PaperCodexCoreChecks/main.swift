@@ -1219,12 +1219,16 @@ func runUILayoutSourceChecks() throws {
         agentRuntimeSource.contains("protocol AgentRuntime")
             && agentRuntimeSource.contains("struct AgentRuntimeRequest")
             && agentRuntimeSource.contains("struct AgentRuntimeResult")
+            && agentRuntimeSource.contains("public var mcpServers: [CodexMCPServerConfig]")
+            && agentRuntimeSource.contains("public var mcpEnvironmentOverrides: [String: String]")
             && codexAgentRuntimeSource.contains("struct CodexAgentRuntime")
             && codexAgentRuntimeSource.contains("CodexCLI")
+            && codexAgentRuntimeSource.contains("mcpServers: request.mcpServers")
+            && codexAgentRuntimeSource.contains("environmentOverrides: request.mcpEnvironmentOverrides")
             && codexAgentRuntimeSource.contains("GeneratedImageCollector.newImages")
             && appModelSource.contains("private let agentRuntime: any AgentRuntime")
             && appModelSource.contains("agentRuntime.runCodexTurn"),
-        "Codex CLI streaming should sit behind an AgentRuntime boundary instead of being assembled directly in AppModel"
+        "Codex CLI streaming should sit behind an AgentRuntime boundary and carry app-local MCP settings"
     )
     try check(
         actionButtonSource.contains("struct PaperCodexToolbarButton")
@@ -1373,6 +1377,18 @@ func runUILayoutSourceChecks() throws {
     try check(
         settingsViewSource.contains("codexSystemPromptSettings"),
         "settings should include a dedicated Codex system prompt section"
+    )
+    try check(
+        appModelSource.contains("inAppCodexMCPEnabledDefaultsKey")
+            && appModelSource.contains("@Published var inAppCodexMCPEnabled")
+            && appModelSource.contains("mcpServers: inAppCodexMCPServers()")
+            && appModelSource.contains("private func inAppCodexMCPServers() -> [CodexMCPServerConfig]"),
+        "AppModel should inject the Paper Codex MCP endpoint into in-app Codex sessions behind a persisted setting"
+    )
+    try check(
+        settingsViewSource.contains("codexMCPSettings")
+            && settingsViewSource.contains("model.setInAppCodexMCPEnabled"),
+        "settings should expose the in-app Paper Codex MCP session switch"
     )
     try check(
         settingsViewSource.contains("isEditingCodexSystemPrompt")
@@ -3420,6 +3436,28 @@ func runCodexCLIChecks() throws {
     try check(startWithReasoning == ["exec", "--skip-git-repo-check", "--json", "--enable", "image_generation", "-c", "model_reasoning_effort=\"high\"", "-C", "/tmp/session-a", "hello"], "start args should support an app-local reasoning effort override")
     let startWithDefaultReasoning = cli.startArguments(prompt: "hello", workspacePath: "/tmp/session-a", reasoningEffort: .default)
     try check(startWithDefaultReasoning == start, "default reasoning effort should not add a Codex config override")
+    let mcpServer = CodexMCPServerConfig(
+        name: "paper-codex",
+        url: "http://127.0.0.1:39427/mcp",
+        bearerTokenEnvironmentVariable: "PAPER_CODEX_MCP_TOKEN",
+        bearerToken: "secret-token"
+    )
+    let startWithMCP = cli.startArguments(prompt: "hello", workspacePath: "/tmp/session-a", mcpServers: [mcpServer])
+    try check(
+        startWithMCP == [
+            "exec", "--skip-git-repo-check", "--json", "--enable", "image_generation",
+            "-c", "mcp_servers.paper-codex.url=\"http://127.0.0.1:39427/mcp\"",
+            "-c", "mcp_servers.paper-codex.bearer_token_env_var=\"PAPER_CODEX_MCP_TOKEN\"",
+            "-C", "/tmp/session-a", "hello"
+        ],
+        "start args should inject the Paper Codex MCP server as an app-local config override"
+    )
+    let mcpEnvironment = CodexCLI.sanitizedProcessEnvironment(
+        workingDirectoryURL: isolatedWorkingDirectory,
+        baseEnvironment: ["PATH": "/usr/bin"],
+        environmentOverrides: mcpServer.environmentOverrides
+    )
+    try check(mcpEnvironment["PAPER_CODEX_MCP_TOKEN"] == "secret-token", "Codex subprocess environment should include the Paper Codex MCP bearer token")
 
     let resume = cli.resumeArguments(sessionID: "session-a", prompt: "continue")
     try check(resume == ["exec", "resume", "--skip-git-repo-check", "--json", "--enable", "image_generation", "session-a", "continue"], "resume args should use codex exec resume with JSON output and image generation enabled")
@@ -3427,6 +3465,16 @@ func runCodexCLIChecks() throws {
     try check(resumeWithModel == ["exec", "resume", "--skip-git-repo-check", "--json", "--enable", "image_generation", "--model", "gpt-5.4", "session-a", "continue"], "resume args should support an app-local model override")
     let resumeWithReasoning = cli.resumeArguments(sessionID: "session-a", prompt: "continue", reasoningEffort: .xhigh)
     try check(resumeWithReasoning == ["exec", "resume", "--skip-git-repo-check", "--json", "--enable", "image_generation", "-c", "model_reasoning_effort=\"xhigh\"", "session-a", "continue"], "resume args should support an app-local reasoning effort override")
+    let resumeWithMCP = cli.resumeArguments(sessionID: "session-a", prompt: "continue", mcpServers: [mcpServer])
+    try check(
+        resumeWithMCP == [
+            "exec", "resume", "--skip-git-repo-check", "--json", "--enable", "image_generation",
+            "-c", "mcp_servers.paper-codex.url=\"http://127.0.0.1:39427/mcp\"",
+            "-c", "mcp_servers.paper-codex.bearer_token_env_var=\"PAPER_CODEX_MCP_TOKEN\"",
+            "session-a", "continue"
+        ],
+        "resume args should inject the Paper Codex MCP server as an app-local config override"
+    )
     let parsedThreadID = CodexCLI.parseThreadID(from: #"{"type":"thread.started","thread_id":"019dcaf6-01d5-7060-bc43-40401e3693c3"}"#)
     try check(parsedThreadID == "019dcaf6-01d5-7060-bc43-40401e3693c3", "Codex thread ID should be parsed from JSONL output")
 
