@@ -1763,6 +1763,18 @@ func runUILayoutSourceChecks() throws {
         "Library focused papers should have direct keyboard commands for reading and chat"
     )
     try check(
+        librarySource.contains("@FocusState private var isPaperListFocused")
+            && librarySource.contains("ScrollViewReader { scrollProxy in")
+            && librarySource.contains("LibraryPaperKeyboardBridge(")
+            && librarySource.contains("NSEvent.addLocalMonitorForEvents(matching: .keyDown)")
+            && librarySource.contains("case 126:")
+            && librarySource.contains("case 125:")
+            && librarySource.contains("private func moveFocusedPaperSelection(by offset: Int)")
+            && librarySource.contains("scrollProxy.scrollTo(selectedPaperID, anchor: .center)")
+            && librarySource.contains("isPaperListFocused = true"),
+        "Library paper lists should support focused arrow-key browsing and keep the selected row visible"
+    )
+    try check(
         rootViewSource.contains("GlobalOperationStatusView"),
         "the root view should show the current long-running operation"
     )

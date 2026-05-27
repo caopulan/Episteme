@@ -15,6 +15,7 @@ struct LibraryView: View {
     @State private var selectedPaperIDs: Set<String> = []
     @State private var lastSelectedPaperID: String?
     @State private var lastPaperRowClick: LibraryPaperRowClick?
+    @FocusState private var isPaperListFocused: Bool
     @State private var isShowingBulkCopy = false
     @State private var isShowingBulkTag = false
     @State private var isConfirmingBulkDelete = false
@@ -494,34 +495,60 @@ struct LibraryView: View {
                 ContentUnavailableView("No Papers", systemImage: "doc.text.magnifyingglass")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                LibraryPaperList(papers: listState.papers) { paper in
-                    PaperRow(
-                        paper: paper,
-                        categories: categories(for: paper),
-                        tags: model.paperTagsByID[paper.id, default: []],
-                        thumbnailURLs: model.paperThumbnailURLsByID[paper.id, default: []],
-                        isImportPlaceholder: paper.isArxivImportPlaceholder,
-                        placeholderDetail: model.arxivImportPlaceholderDetail(for: paper),
-                        isSelected: model.selectedLibraryPaper?.id == paper.id,
-                        isMultiSelected: selectedPaperIDs.contains(paper.id),
-                        onToggleStar: {
-                            model.togglePaperStar(paper)
-                        },
-                        onRead: {
-                            model.openPaper(paper)
-                        }
-                    )
-                    .contentShape(Rectangle())
-                    .onDrag {
-                        NSItemProvider(object: paperDragPayload(for: paper) as NSString)
-                    } preview: {
-                        PaperDragPreview(
+                ScrollViewReader { scrollProxy in
+                    LibraryPaperList(papers: listState.papers) { paper in
+                        PaperRow(
                             paper: paper,
-                            selectedCount: dragPreviewPaperIDs(for: paper).count
+                            categories: categories(for: paper),
+                            tags: model.paperTagsByID[paper.id, default: []],
+                            thumbnailURLs: model.paperThumbnailURLsByID[paper.id, default: []],
+                            isImportPlaceholder: paper.isArxivImportPlaceholder,
+                            placeholderDetail: model.arxivImportPlaceholderDetail(for: paper),
+                            isSelected: model.selectedLibraryPaper?.id == paper.id,
+                            isMultiSelected: selectedPaperIDs.contains(paper.id),
+                            onToggleStar: {
+                                model.togglePaperStar(paper)
+                            },
+                            onRead: {
+                                model.openPaper(paper)
+                            }
                         )
+                        .contentShape(Rectangle())
+                        .onDrag {
+                            NSItemProvider(object: paperDragPayload(for: paper) as NSString)
+                        } preview: {
+                            PaperDragPreview(
+                                paper: paper,
+                                selectedCount: dragPreviewPaperIDs(for: paper).count
+                            )
+                        }
+                        .onTapGesture {
+                            handlePaperRowClick(paper)
+                            isPaperListFocused = true
+                        }
                     }
-                    .onTapGesture {
-                        handlePaperRowClick(paper)
+                    .focusable()
+                    .focused($isPaperListFocused)
+                    .background(
+                        LibraryPaperKeyboardBridge(
+                            isActive: isPaperListFocused,
+                            onMoveUp: {
+                                moveFocusedPaperSelection(by: -1)
+                            },
+                            onMoveDown: {
+                                moveFocusedPaperSelection(by: 1)
+                            }
+                        )
+                    )
+                    .onChange(of: model.selectedLibraryPaper?.id) { _, selectedPaperID in
+                        guard isPaperListFocused,
+                              let selectedPaperID,
+                              listState.paperIDs.contains(selectedPaperID) else {
+                            return
+                        }
+                        withAnimation(PaperCodexMotion.selection) {
+                            scrollProxy.scrollTo(selectedPaperID, anchor: .center)
+                        }
                     }
                 }
                 .overlay(alignment: .top) {
@@ -873,6 +900,31 @@ struct LibraryView: View {
             lastSelectedPaperID = paper.id
             model.selectLibraryPaper(paper)
         }
+    }
+
+    private func moveFocusedPaperSelection(by offset: Int) {
+        guard selectedLibrarySurface == .papers else {
+            return
+        }
+        let visiblePapers = sortedPapers
+        guard !visiblePapers.isEmpty else {
+            return
+        }
+        let currentIndex = model.selectedLibraryPaper.flatMap { selectedPaper in
+            visiblePapers.firstIndex { $0.id == selectedPaper.id }
+        }
+        let lastIndex = visiblePapers.index(before: visiblePapers.endIndex)
+        let nextIndex: Int
+        if let currentIndex {
+            nextIndex = min(max(currentIndex + offset, visiblePapers.startIndex), lastIndex)
+        } else {
+            nextIndex = offset < 0 ? lastIndex : visiblePapers.startIndex
+        }
+        let nextPaper = visiblePapers[nextIndex]
+        clearPaperMultiSelection()
+        lastSelectedPaperID = nextPaper.id
+        model.selectLibraryPaper(nextPaper)
+        isPaperListFocused = true
     }
 
     private func togglePaperSelection(_ paper: Paper) {
@@ -1656,6 +1708,7 @@ private struct LibraryPaperList<RowContent: View>: View {
     var body: some View {
         List(papers) { paper in
             rowContent(paper)
+                .id(paper.id)
                 .listRowInsets(EdgeInsets(top: 2, leading: 0, bottom: 2, trailing: 0))
                 .listRowSeparator(.hidden)
                 .listRowBackground(Color.clear)
@@ -1663,6 +1716,77 @@ private struct LibraryPaperList<RowContent: View>: View {
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+private struct LibraryPaperKeyboardBridge: NSViewRepresentable {
+    var isActive: Bool
+    var onMoveUp: () -> Void
+    var onMoveDown: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        context.coordinator.installMonitor()
+        DispatchQueue.main.async { [weak view, weak coordinator = context.coordinator] in
+            coordinator?.targetWindow = view?.window
+        }
+        return view
+    }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        context.coordinator.targetWindow = view.window
+        context.coordinator.isActive = isActive
+        context.coordinator.onMoveUp = onMoveUp
+        context.coordinator.onMoveDown = onMoveDown
+        context.coordinator.installMonitor()
+    }
+
+    final class Coordinator {
+        weak var targetWindow: NSWindow?
+        var isActive = false
+        var onMoveUp: () -> Void = {}
+        var onMoveDown: () -> Void = {}
+        private var monitor: Any?
+
+        deinit {
+            if let monitor {
+                NSEvent.removeMonitor(monitor)
+            }
+        }
+
+        func installMonitor() {
+            guard monitor == nil else {
+                return
+            }
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                self?.handleKeyDown(event) ?? event
+            }
+        }
+
+        private func handleKeyDown(_ event: NSEvent) -> NSEvent? {
+            guard isActive,
+                  targetWindow === event.window else {
+                return event
+            }
+            let disallowedModifiers = event.modifierFlags.intersection([.command, .option, .control, .shift])
+            guard disallowedModifiers.isEmpty else {
+                return event
+            }
+            switch event.keyCode {
+            case 126:
+                onMoveUp()
+                return nil
+            case 125:
+                onMoveDown()
+                return nil
+            default:
+                return event
+            }
+        }
     }
 }
 
