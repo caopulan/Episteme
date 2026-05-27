@@ -1407,6 +1407,9 @@ private struct LibraryRootFolderRow: View {
 }
 
 private struct LibraryInlineControlRow: View {
+    @EnvironmentObject private var model: AppModel
+    @FocusState private var isLibrarySearchFocused: Bool
+
     @Binding var searchText: String
     @Binding var sortRawValue: String
     @Binding var sortAscending: Bool
@@ -1471,6 +1474,12 @@ private struct LibraryInlineControlRow: View {
         .frame(maxWidth: .infinity, minHeight: 34)
         .lineLimit(1)
         .controlSize(.small)
+        .onChange(of: model.searchFocusRequestID) { _, _ in
+            guard model.route == .library else {
+                return
+            }
+            isLibrarySearchFocused = true
+        }
     }
 
     private var searchField: some View {
@@ -1479,6 +1488,7 @@ private struct LibraryInlineControlRow: View {
             .font(.paperCodexSystem(size: 14))
             .frame(minWidth: 180, maxWidth: .infinity)
             .layoutPriority(1)
+            .focused($isLibrarySearchFocused)
             .overlay(alignment: .trailing) {
                 if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     Button {

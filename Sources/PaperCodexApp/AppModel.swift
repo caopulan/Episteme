@@ -351,6 +351,8 @@ private func isCancellationError(_ error: any Error) -> Bool {
 @MainActor
 final class AppModel: ObservableObject {
     let navigation = AppNavigation()
+    @Published var searchFocusRequestID = UUID()
+
     var route: AppRoute {
         get { navigation.route }
         set { navigation.route = newValue }
@@ -1505,6 +1507,18 @@ final class AppModel: ObservableObject {
 
     func showSearch() {
         route = .search
+    }
+
+    func requestSearchFocus() {
+        if route == .settings {
+            route = .search
+        } else if route == .reader {
+            returnFromReader()
+            if route == .reader || route == .settings {
+                route = .search
+            }
+        }
+        searchFocusRequestID = UUID()
     }
 
     private func startDiscoverCacheWarmupIfNeeded() {

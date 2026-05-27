@@ -36,6 +36,7 @@ struct DiscoverView: View {
     @State private var visibleDiscoverPaperID: String?
     @State private var isRestoringDiscoverScrollPosition = false
     @State private var discoverScrollPositionCommitTask: Task<Void, Never>?
+    @FocusState private var isDiscoverSearchFocused: Bool
 
     private var papers: [ArxivFeedPaper] {
         var result = model.arxivFeed?.papers ?? []
@@ -179,6 +180,12 @@ struct DiscoverView: View {
                         isShowingProcessSelection = false
                     }
                 )
+            }
+            .onChange(of: model.searchFocusRequestID) { _, _ in
+                guard model.route == .discover else {
+                    return
+                }
+                isDiscoverSearchFocused = true
             }
     }
 
@@ -537,6 +544,7 @@ struct DiscoverView: View {
                 .font(.paperCodexSystem(size: 14))
                 .frame(minWidth: 260, maxWidth: .infinity)
                 .layoutPriority(1)
+                .focused($isDiscoverSearchFocused)
                 .onSubmit {
                     model.startDiscoverSearch()
                 }
@@ -629,6 +637,7 @@ struct ArxivSearchView: View {
     @State private var paperPendingSave: ArxivFeedPaper?
     @State private var previewPaper: ArxivFeedPaper?
     @State private var isShowingProcessSelection = false
+    @FocusState private var isArxivSearchFocused: Bool
 
     private var papers: [ArxivFeedPaper] {
         var result = model.arxivSearchFeed?.papers ?? []
@@ -728,6 +737,12 @@ struct ArxivSearchView: View {
                     isShowingProcessSelection = false
                 }
             )
+        }
+        .onChange(of: model.searchFocusRequestID) { _, _ in
+            guard model.route == .search else {
+                return
+            }
+            isArxivSearchFocused = true
         }
     }
 
@@ -858,6 +873,7 @@ struct ArxivSearchView: View {
                     .font(.paperCodexSystem(size: 14))
                     .frame(minWidth: 280, maxWidth: .infinity)
                     .layoutPriority(1)
+                    .focused($isArxivSearchFocused)
                     .onSubmit {
                         model.startArxivSearch()
                     }

@@ -319,6 +319,13 @@ struct PaperCodexCommands: Commands {
 
             Divider()
 
+            Button("Focus Search") {
+                model.requestSearchFocus()
+            }
+            .keyboardShortcut("f", modifiers: [.command])
+
+            Divider()
+
             Button("Settings") {
                 model.showSettings()
             }

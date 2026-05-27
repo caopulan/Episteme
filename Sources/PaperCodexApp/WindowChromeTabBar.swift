@@ -42,19 +42,9 @@ struct PaperCodexWindowTabBar: View {
                 .layoutPriority(1)
 
                 if let paper = model.selectedPaper, !paper.isSaved {
-                    Button {
+                    PaperCodexIconButton(title: "Save to Library", systemImage: "tray.and.arrow.down", tint: .accentColor) {
                         onShowSaveToLibrary()
-                    } label: {
-                        Image(systemName: "tray.and.arrow.down")
-                            .font(.paperCodexSystem(size: 12.5, weight: .semibold))
-                            .frame(width: 28, height: 26)
-                            .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(Color.accentColor)
-                    .background(Color.accentColor.opacity(0.12))
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
-                    .help("Save to Library")
                     .padding(.bottom, 5)
                 }
             }
@@ -125,10 +115,13 @@ private struct PaperCodexHomeChromeTab: View {
                 .stroke(tabBorder, lineWidth: isActive ? 1 : 0.8)
         )
         .clipShape(chromeTabShape)
+        .scaleEffect(tabScale, anchor: .bottom)
+        .animation(PaperCodexMotion.hover, value: isHovering)
+        .animation(PaperCodexMotion.selection, value: isActive)
         .help(helpText)
         .accessibilityLabel("Home")
         .onHover { hovering in
-            withAnimation(.easeOut(duration: 0.10)) {
+            withAnimation(PaperCodexMotion.hover) {
                 isHovering = hovering
             }
         }
@@ -159,6 +152,10 @@ private struct PaperCodexHomeChromeTab: View {
             return PaperCodexChromeTabStyle.activeBorder
         }
         return isHovering ? PaperCodexChromeTabStyle.inactiveBorder : Color.clear
+    }
+
+    private var tabScale: CGFloat {
+        isHovering && !isActive ? 1.018 : 1
     }
 }
 
@@ -232,8 +229,11 @@ private struct PaperCodexReaderChromeTabItem: View {
             x: 0,
             y: 1
         )
+        .scaleEffect(tabScale, anchor: .bottom)
+        .animation(PaperCodexMotion.hover, value: isHovering)
+        .animation(PaperCodexMotion.selection, value: isActive)
         .onHover { hovering in
-            withAnimation(.easeOut(duration: 0.10)) {
+            withAnimation(PaperCodexMotion.hover) {
                 isHovering = hovering
             }
         }
@@ -264,6 +264,10 @@ private struct PaperCodexReaderChromeTabItem: View {
             return PaperCodexChromeTabStyle.activeBorder
         }
         return isHovering ? PaperCodexChromeTabStyle.inactiveBorder : Color.clear
+    }
+
+    private var tabScale: CGFloat {
+        isHovering && !isActive ? 1.012 : 1
     }
 }
 

@@ -1390,6 +1390,13 @@ func runUILayoutSourceChecks() throws {
         "reader top tabs should be a fixed window chrome row in the root layout, not an overlay compensated by Reader padding"
     )
     try check(
+        windowTabBarSource.contains("private var tabScale")
+            && windowTabBarSource.components(separatedBy: ".scaleEffect(tabScale").count - 1 >= 2
+            && windowTabBarSource.components(separatedBy: "PaperCodexMotion.hover").count - 1 >= 2
+            && windowTabBarSource.contains("PaperCodexIconButton(title: \"Save to Library\""),
+        "window chrome tabs and the save-to-library control should use the shared interaction motion affordances"
+    )
+    try check(
         homeChromeSource.contains("static let sidebarTopPadding: CGFloat = 28")
             && librarySource.contains("static let splitPaneTopInset: CGFloat = 0")
             && librarySource.contains(".padding(.top, 14)")
@@ -1731,6 +1738,18 @@ func runUILayoutSourceChecks() throws {
     try check(
         rootViewSource.contains("PaperCodexCommands"),
         "the app should expose keyboard shortcuts through a Commands scene"
+    )
+    try check(
+        rootViewSource.contains("Button(\"Focus Search\")")
+            && rootViewSource.contains(".keyboardShortcut(\"f\", modifiers: [.command])")
+            && appModelSource.contains("@Published var searchFocusRequestID")
+            && appModelSource.contains("func requestSearchFocus()")
+            && librarySource.contains("@FocusState private var isLibrarySearchFocused")
+            && librarySource.contains(".onChange(of: model.searchFocusRequestID)")
+            && discoverSource.contains("@FocusState private var isDiscoverSearchFocused")
+            && discoverSource.contains("@FocusState private var isArxivSearchFocused")
+            && discoverSource.contains(".onChange(of: model.searchFocusRequestID)"),
+        "Cmd-F should focus the active page search field across Library, Explore, and Search"
     )
     try check(
         rootViewSource.contains("GlobalOperationStatusView"),
