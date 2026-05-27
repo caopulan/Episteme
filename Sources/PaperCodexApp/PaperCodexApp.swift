@@ -1,6 +1,7 @@
 import SwiftUI
 
 private let routeMountDelayNanoseconds: UInt64 = 16_000_000
+private let routeCacheWarmupDelayNanoseconds: UInt64 = 120_000_000
 private let persistentRouteOrder: [AppRoute] = [.library, .discover, .search, .settings, .reader]
 
 @main
@@ -173,7 +174,7 @@ struct RootView: View {
                     return
                 }
                 if !mountedRoutes.contains(route) {
-                    try? await Task.sleep(nanoseconds: routeMountDelayNanoseconds)
+                    try? await Task.sleep(nanoseconds: routeCacheWarmupDelayNanoseconds)
                     guard !Task.isCancelled else {
                         return
                     }
@@ -205,9 +206,12 @@ private struct RouteVisibilityHost<Content: View>: View {
         content()
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .opacity(route == activeRoute ? 1 : 0)
+            .offset(y: route == activeRoute ? 0 : 4)
+            .scaleEffect(route == activeRoute ? 1 : 0.996, anchor: .center)
             .allowsHitTesting(route == activeRoute)
             .accessibilityHidden(route != activeRoute)
             .zIndex(route == activeRoute ? 1 : 0)
+            .animation(PaperCodexMotion.route, value: activeRoute)
     }
 }
 

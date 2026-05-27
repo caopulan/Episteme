@@ -313,10 +313,23 @@ struct ChatView: View {
                         }
                     } label: {
                         Image(systemName: sendButtonIcon)
-                            .font(.paperCodexSystem(size: 26))
+                            .font(.paperCodexSystem(size: 20, weight: .semibold))
+                            .frame(width: 36, height: 36)
+                            .foregroundStyle(sendButtonColor)
+                            .background(
+                                Circle()
+                                    .fill(sendButtonBackground)
+                            )
+                            .overlay(
+                                Circle()
+                                    .stroke(sendButtonBorder, lineWidth: 1)
+                            )
+                            .shadow(color: sendButtonShadow, radius: 8, y: 3)
+                            .scaleEffect(isSendButtonHovered && canUseSendButton ? 1.06 : 1)
+                            .animation(PaperCodexMotion.hover, value: isSendButtonHovered)
+                            .animation(PaperCodexMotion.hover, value: canUseSendButton)
                     }
                     .buttonStyle(.plain)
-                    .foregroundStyle(sendButtonColor)
                     .disabled(!canUseSendButton)
                     .onHover { isSendButtonHovered = $0 }
                     .help(sendButtonHelp)
@@ -359,10 +372,34 @@ struct ChatView: View {
     }
 
     private var sendButtonColor: Color {
+        if !canUseSendButton {
+            return .secondary.opacity(0.45)
+        }
         if isCurrentSessionSending {
             return isSendButtonHovered ? .red : .blue
         }
-        return .blue
+        return .accentColor
+    }
+
+    private var sendButtonBackground: Color {
+        if !canUseSendButton {
+            return Color(nsColor: .controlBackgroundColor).opacity(0.45)
+        }
+        return sendButtonColor.opacity(isSendButtonHovered ? 0.18 : 0.11)
+    }
+
+    private var sendButtonBorder: Color {
+        guard canUseSendButton else {
+            return Color.clear
+        }
+        return sendButtonColor.opacity(isSendButtonHovered ? 0.42 : 0.18)
+    }
+
+    private var sendButtonShadow: Color {
+        guard canUseSendButton, isSendButtonHovered else {
+            return Color.clear
+        }
+        return sendButtonColor.opacity(0.20)
     }
 
     private var sendButtonHelp: String {
@@ -481,6 +518,7 @@ private struct SessionNotesPanel: View {
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
                 .frame(minWidth: 22, alignment: .trailing)
+                .contentTransition(.numericText())
             Button {
                 clearNoteDraft()
             } label: {
@@ -746,6 +784,7 @@ private struct WindowSafeComposerResizeHandle: NSViewRepresentable {
         var onDragEnded: () -> Void = {}
         private var dragStartWindowY: CGFloat?
         private var isHovering = false
+        private var isDragging = false
         private var trackingArea: NSTrackingArea?
 
         override var mouseDownCanMoveWindow: Bool {
@@ -793,8 +832,10 @@ private struct WindowSafeComposerResizeHandle: NSViewRepresentable {
 
         override func mouseDown(with event: NSEvent) {
             dragStartWindowY = event.locationInWindow.y
+            isDragging = true
             window?.makeFirstResponder(self)
             NSCursor.resizeUpDown.set()
+            needsDisplay = true
         }
 
         override func mouseDragged(with event: NSEvent) {
@@ -806,6 +847,7 @@ private struct WindowSafeComposerResizeHandle: NSViewRepresentable {
 
         override func mouseUp(with event: NSEvent) {
             dragStartWindowY = nil
+            isDragging = false
             onDragEnded()
             needsDisplay = true
         }
@@ -819,15 +861,17 @@ private struct WindowSafeComposerResizeHandle: NSViewRepresentable {
 
         override func draw(_ dirtyRect: NSRect) {
             super.draw(dirtyRect)
-            let width: CGFloat = isHovering ? 58 : 44
+            let isActive = isHovering || isDragging
+            let width: CGFloat = isDragging ? 70 : (isHovering ? 58 : 44)
+            let height: CGFloat = isDragging ? 5 : 4
             let rect = NSRect(
                 x: bounds.midX - width / 2,
-                y: bounds.midY - 2,
+                y: bounds.midY - height / 2,
                 width: width,
-                height: 4
+                height: height
             )
-            let color = isHovering
-                ? NSColor.controlAccentColor.withAlphaComponent(0.68)
+            let color = isActive
+                ? NSColor.controlAccentColor.withAlphaComponent(isDragging ? 0.86 : 0.68)
                 : NSColor.secondaryLabelColor.withAlphaComponent(0.34)
             color.setFill()
             NSBezierPath(roundedRect: rect, xRadius: 2, yRadius: 2).fill()

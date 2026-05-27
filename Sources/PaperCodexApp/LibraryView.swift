@@ -1033,10 +1033,12 @@ struct LibraryView: View {
     }
 
     private func toggleCategoryCollapsed(_ categoryID: String) {
-        if collapsedCategoryIDs.contains(categoryID) {
-            collapsedCategoryIDs.remove(categoryID)
-        } else {
-            collapsedCategoryIDs.insert(categoryID)
+        withAnimation(PaperCodexMotion.selection) {
+            if collapsedCategoryIDs.contains(categoryID) {
+                collapsedCategoryIDs.remove(categoryID)
+            } else {
+                collapsedCategoryIDs.insert(categoryID)
+            }
         }
     }
 
@@ -1350,6 +1352,8 @@ struct LibraryPaperArxivMetadata: Equatable {
 }
 
 private struct LibraryRootFolderRow: View {
+    @State private var isHovering = false
+
     var countText: String
     var isSelected: Bool
     var onSelect: () -> Void
@@ -1367,20 +1371,38 @@ private struct LibraryRootFolderRow: View {
                 Text(countText)
                     .font(.caption2.monospacedDigit())
                     .foregroundStyle(.secondary)
+                    .contentTransition(.numericText())
             }
             .padding(.horizontal, 9)
             .padding(.vertical, 7)
             .background(
                 RoundedRectangle(cornerRadius: 8)
-                    .fill(isSelected ? Color.accentColor.opacity(0.13) : Color.clear)
+                    .fill(isSelected ? Color.accentColor.opacity(0.13) : (isHovering ? Color.primary.opacity(0.045) : Color.clear))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 8)
-                    .stroke(isSelected ? Color.accentColor.opacity(0.22) : Color.clear, lineWidth: 1)
+                    .stroke(isSelected ? Color.accentColor.opacity(0.22) : (isHovering ? Color.accentColor.opacity(0.18) : Color.clear), lineWidth: 1)
             )
+            .overlay(alignment: .leading) {
+                if isSelected {
+                    Capsule()
+                        .fill(Color.accentColor.opacity(0.72))
+                        .frame(width: 3, height: 18)
+                        .padding(.leading, 3)
+                        .transition(.opacity.combined(with: .scale(scale: 0.82)))
+                }
+            }
+            .scaleEffect(isHovering ? 1.01 : 1, anchor: .center)
+            .animation(PaperCodexMotion.hover, value: isHovering)
+            .animation(PaperCodexMotion.selection, value: isSelected)
         }
         .buttonStyle(.plain)
         .help("Show all papers")
+        .onHover { hovering in
+            withAnimation(PaperCodexMotion.hover) {
+                isHovering = hovering
+            }
+        }
     }
 }
 
@@ -1415,6 +1437,7 @@ private struct LibraryInlineControlRow: View {
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
                 .fixedSize()
+                .contentTransition(.numericText())
 
             if showsFolderScope {
                 scopeToggle
@@ -1746,9 +1769,25 @@ private struct PaperRow: View {
                 .stroke(rowBorderColor, lineWidth: isMultiSelected ? 1.5 : 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 8))
-        .shadow(color: isHovering ? Color.black.opacity(0.08) : .clear, radius: 4, y: 1)
+        .shadow(color: isHovering ? Color.black.opacity(0.10) : .clear, radius: 6, y: 2)
+        .scaleEffect(isHovering && !isImportPlaceholder ? 1.006 : 1, anchor: .center)
+        .overlay(alignment: .leading) {
+            if isSelected || isMultiSelected {
+                Capsule()
+                    .fill(Color.accentColor.opacity(isMultiSelected ? 0.82 : 0.62))
+                    .frame(width: 4)
+                    .padding(.vertical, 12)
+                    .padding(.leading, 4)
+                    .transition(.opacity.combined(with: .scale(scale: 0.92)))
+            }
+        }
+        .animation(PaperCodexMotion.hover, value: isHovering)
+        .animation(PaperCodexMotion.selection, value: isSelected)
+        .animation(PaperCodexMotion.selection, value: isMultiSelected)
         .onHover { hovering in
-            isHovering = hovering
+            withAnimation(PaperCodexMotion.hover) {
+                isHovering = hovering
+            }
         }
     }
 
@@ -1805,6 +1844,7 @@ private struct PaperDragPreview: View {
                     Text("\(selectedCount) papers")
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(Color.accentColor)
+                        .contentTransition(.numericText())
                 }
             }
         }
@@ -2123,6 +2163,7 @@ private struct BulkLibraryActionBar: View {
             Label("\(selectedCount) selected", systemImage: "checkmark.circle.fill")
                 .font(.paperCodexSystem(size: 13, weight: .semibold))
                 .foregroundStyle(Color.accentColor)
+                .contentTransition(.numericText())
             Spacer()
             Button(action: onRead) {
                 Label("Read", systemImage: "book")
@@ -2568,6 +2609,7 @@ private struct CategorySidebarRow: View {
                     Text(countText)
                         .font(.caption2.monospacedDigit())
                         .foregroundStyle(.secondary)
+                        .contentTransition(.numericText())
                     if isHovering || isSelected {
                         Button(action: onCreateChild) {
                             Image(systemName: "plus")
@@ -2621,7 +2663,9 @@ private struct CategorySidebarRow: View {
             }
         }
         .scaleEffect(isDropActive ? 1.02 : 1, anchor: .center)
-        .animation(.easeOut(duration: 0.12), value: isDropActive)
+        .animation(PaperCodexMotion.hover, value: isHovering)
+        .animation(PaperCodexMotion.selection, value: isSelected)
+        .animation(PaperCodexMotion.hover, value: isDropActive)
         .animation(.easeOut(duration: 0.10), value: dropPlacement)
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
@@ -2850,6 +2894,7 @@ private struct TagSidebarRow: View {
                 Text(countText)
                     .font(.caption2.monospacedDigit())
                     .foregroundStyle(.secondary)
+                    .contentTransition(.numericText())
                 if isHovering || isSelected {
                     Button(action: onManage) {
                         Image(systemName: "ellipsis")

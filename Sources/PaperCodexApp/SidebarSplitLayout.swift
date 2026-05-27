@@ -95,6 +95,7 @@ struct WindowSafeSplitterHandle: NSViewRepresentable {
         var onDragEnded: () -> Void = {}
         private var dragStartWindowX: CGFloat?
         private var isHovering = false
+        private var isDragging = false
         private var trackingArea: NSTrackingArea?
 
         override var mouseDownCanMoveWindow: Bool {
@@ -142,8 +143,10 @@ struct WindowSafeSplitterHandle: NSViewRepresentable {
 
         override func mouseDown(with event: NSEvent) {
             dragStartWindowX = event.locationInWindow.x
+            isDragging = true
             window?.makeFirstResponder(self)
             NSCursor.resizeLeftRight.set()
+            needsDisplay = true
         }
 
         override func mouseDragged(with event: NSEvent) {
@@ -155,22 +158,31 @@ struct WindowSafeSplitterHandle: NSViewRepresentable {
 
         override func mouseUp(with event: NSEvent) {
             dragStartWindowX = nil
+            isDragging = false
             onDragEnded()
             needsDisplay = true
         }
 
         override func draw(_ dirtyRect: NSRect) {
             super.draw(dirtyRect)
-            NSColor.separatorColor.withAlphaComponent(isHovering ? 0.80 : 0.55).setFill()
+            let isActive = isHovering || isDragging
+            NSColor.separatorColor.withAlphaComponent(isActive ? 0.84 : 0.55).setFill()
             let separator = NSRect(x: bounds.midX - 2.5, y: bounds.minY, width: 5, height: bounds.height)
             separator.fill()
 
-            guard isHovering else {
+            guard isActive else {
                 return
             }
-            NSColor.controlAccentColor.withAlphaComponent(0.72).setFill()
-            let accent = NSRect(x: bounds.midX - 1.5, y: bounds.midY - 26, width: 3, height: 52)
-            NSBezierPath(roundedRect: accent, xRadius: 1.5, yRadius: 1.5).fill()
+            NSColor.controlAccentColor.withAlphaComponent(isDragging ? 0.92 : 0.72).setFill()
+            let accentWidth: CGFloat = isDragging ? 4 : 3
+            let accentHeight: CGFloat = isDragging ? 68 : 52
+            let accent = NSRect(
+                x: bounds.midX - accentWidth / 2,
+                y: bounds.midY - accentHeight / 2,
+                width: accentWidth,
+                height: accentHeight
+            )
+            NSBezierPath(roundedRect: accent, xRadius: accentWidth / 2, yRadius: accentWidth / 2).fill()
         }
     }
 }

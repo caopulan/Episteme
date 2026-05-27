@@ -29,10 +29,21 @@ struct SidebarRowButton: View {
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .shadow(color: isHovering ? Color.black.opacity(0.08) : .clear, radius: 7, y: 3)
             .scaleEffect(isHovering ? 1.015 : 1, anchor: .center)
+            .overlay(alignment: .leading) {
+                if selected {
+                    Capsule()
+                        .fill(Color.accentColor.opacity(0.72))
+                        .frame(width: 3, height: 18)
+                        .padding(.leading, CGFloat(depth * 14) + 3)
+                        .transition(.opacity.combined(with: .scale(scale: 0.82)))
+                }
+            }
+            .animation(PaperCodexMotion.hover, value: isHovering)
+            .animation(PaperCodexMotion.selection, value: selected)
         }
         .buttonStyle(.plain)
         .onHover { hovering in
-            withAnimation(.easeOut(duration: 0.12)) {
+            withAnimation(PaperCodexMotion.hover) {
                 isHovering = hovering
             }
         }

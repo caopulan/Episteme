@@ -250,82 +250,52 @@ private struct ReaderPDFToolbar: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Button {
+            PaperCodexIconButton(title: "Previous Page", systemImage: "chevron.up", tint: .secondary) {
                 onCommand(.previousPage)
-            } label: {
-                Image(systemName: "chevron.up")
-                    .frame(width: 24, height: 24)
             }
-            .buttonStyle(.borderless)
-            .help("Previous Page")
-            .accessibilityLabel("Previous Page")
 
-            Button {
+            PaperCodexIconButton(title: "Next Page", systemImage: "chevron.down", tint: .secondary) {
                 onCommand(.nextPage)
-            } label: {
-                Image(systemName: "chevron.down")
-                    .frame(width: 24, height: 24)
             }
-            .buttonStyle(.borderless)
-            .help("Next Page")
-            .accessibilityLabel("Next Page")
 
             Text(pageText)
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
                 .frame(width: 82, alignment: .leading)
+                .contentTransition(.numericText())
 
             Divider()
                 .frame(height: 18)
 
-            Button {
+            PaperCodexIconButton(title: "Zoom Out", systemImage: "minus.magnifyingglass", tint: .secondary) {
                 onCommand(.zoomOut)
-            } label: {
-                Image(systemName: "minus.magnifyingglass")
-                    .frame(width: 26, height: 24)
             }
-            .buttonStyle(.borderless)
-            .help("Zoom Out")
-            .accessibilityLabel("Zoom Out")
 
-            Button {
+            PaperCodexIconButton(title: "Zoom In", systemImage: "plus.magnifyingglass", tint: .secondary) {
                 onCommand(.zoomIn)
-            } label: {
-                Image(systemName: "plus.magnifyingglass")
-                    .frame(width: 26, height: 24)
             }
-            .buttonStyle(.borderless)
-            .help("Zoom In")
-            .accessibilityLabel("Zoom In")
 
-            Button {
+            PaperCodexIconButton(title: "Fit Width", systemImage: "arrow.left.and.right", tint: .secondary) {
                 onCommand(.fitWidth)
-            } label: {
-                Image(systemName: "arrow.left.and.right")
-                    .frame(width: 26, height: 24)
             }
-            .buttonStyle(.borderless)
-            .help("Fit Width")
-            .accessibilityLabel("Fit Width")
 
             Text(zoomText)
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
                 .frame(width: 48, alignment: .leading)
+                .contentTransition(.numericText())
 
             Divider()
                 .frame(height: 18)
 
             paperSelector
 
-            Button(action: onToggleSplit) {
-                Image(systemName: isSplitVisible ? "rectangle.split.2x1.fill" : "rectangle.split.2x1")
-                    .frame(width: 26, height: 24)
-            }
-            .buttonStyle(.borderless)
-            .foregroundStyle(isSplitVisible ? Color.accentColor : Color.primary)
-            .help(isSplitVisible ? "Close PDF Split" : "Open PDF Split")
-            .accessibilityLabel(isSplitVisible ? "Close PDF Split" : "Open PDF Split")
+            PaperCodexIconButton(
+                title: isSplitVisible ? "Close PDF Split" : "Open PDF Split",
+                systemImage: isSplitVisible ? "rectangle.split.2x1.fill" : "rectangle.split.2x1",
+                tint: isSplitVisible ? .accentColor : .secondary,
+                action: onToggleSplit
+            )
 
             Spacer()
 
@@ -352,6 +322,7 @@ private struct ReaderPDFToolbar: View {
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
                 .frame(minWidth: 14, alignment: .leading)
+                .contentTransition(.numericText())
 
             Picker("Paper", selection: selectedPaperBinding) {
                 ForEach(papers) { paper in
@@ -364,23 +335,15 @@ private struct ReaderPDFToolbar: View {
             .frame(minWidth: 130, idealWidth: 220, maxWidth: 260)
             .help(activePaperTitle)
 
-            Button(action: onAddPaper) {
-                Image(systemName: "plus")
-                    .frame(width: 22, height: 22)
-            }
-            .buttonStyle(.borderless)
-            .help("Add Paper")
-            .accessibilityLabel("Add Paper")
+            PaperCodexIconButton(title: "Add Paper", systemImage: "plus", tint: .secondary, action: onAddPaper)
 
-            Button(action: onRemoveActivePaper) {
-                Image(systemName: "xmark")
-                    .frame(width: 22, height: 22)
-            }
-            .buttonStyle(.borderless)
-            .disabled(papers.count <= 1)
-            .opacity(papers.count > 1 ? 1 : 0.35)
-            .help("Remove Current Paper")
-            .accessibilityLabel("Remove Current Paper")
+            PaperCodexIconButton(
+                title: "Remove Current Paper",
+                systemImage: "xmark",
+                tint: .secondary,
+                disabled: papers.count <= 1,
+                action: onRemoveActivePaper
+            )
         }
         .layoutPriority(1)
     }
