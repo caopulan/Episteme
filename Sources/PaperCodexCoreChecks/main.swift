@@ -3804,6 +3804,22 @@ func runLocalArxivClientChecks() throws {
     let clientSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexCore/LocalArxivClient.swift"))
     let appModelSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/AppModel.swift"))
     try check(clientSource.contains("isRetriableNetworkError"), "local arXiv client should retry transient network failures")
+    try check(
+        LocalArxivClient.isRetriableNetworkError(URLError(.secureConnectionFailed)),
+        "local arXiv client should retry transient TLS connection failures"
+    )
+    try check(
+        !LocalArxivClient.isRetriableNetworkError(URLError(.serverCertificateUntrusted)),
+        "local arXiv client should not retry permanent certificate trust failures"
+    )
+    let tlsFailureDescription = LocalArxivClientError.networkFailure(
+        url: "https://export.arxiv.org/api/query",
+        reason: "TLS connection failed."
+    ).description
+    try check(
+        tlsFailureDescription == "arXiv network request failed for https://export.arxiv.org/api/query. TLS connection failed.",
+        "local arXiv network failures should produce concise UI-facing descriptions"
+    )
     try check(clientSource.contains("http.statusCode == 429"), "local arXiv client should handle export API rate limiting")
     try check(clientSource.contains("arXivAPIRequestDelayNanoseconds"), "local arXiv metadata batches should be throttled")
     try check(

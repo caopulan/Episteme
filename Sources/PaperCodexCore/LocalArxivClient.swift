@@ -55,6 +55,7 @@ public enum LocalArxivClientError: Error, CustomStringConvertible, Equatable {
     case atomParseFailed(String)
     case missingPDFURL(String)
     case downloadedFileIsNotPDF(String)
+    case networkFailure(url: String, reason: String)
 
     public var description: String {
         switch self {
@@ -76,6 +77,8 @@ public enum LocalArxivClientError: Error, CustomStringConvertible, Equatable {
             "Paper \(arxivID) does not include a PDF URL."
         case let .downloadedFileIsNotPDF(arxivID):
             "Downloaded arXiv file is not a PDF for \(arxivID)."
+        case let .networkFailure(url, reason):
+            "arXiv network request failed for \(url). \(reason)"
         }
     }
 }
@@ -456,9 +459,15 @@ public final class LocalArxivClient: Sendable {
                     throw error
                 }
                 lastError = error
-                if isRetriableNetworkError(error), attempt < 2 {
-                    try await Task.sleep(nanoseconds: retryDelayNanoseconds(for: nil, attempt: attempt))
-                    continue
+                if Self.isRetriableNetworkError(error) {
+                    if attempt < 2 {
+                        try await Task.sleep(nanoseconds: retryDelayNanoseconds(for: nil, attempt: attempt))
+                        continue
+                    }
+                    throw LocalArxivClientError.networkFailure(
+                        url: url.absoluteString,
+                        reason: Self.networkFailureReason(for: error)
+                    )
                 }
                 throw error
             }
@@ -474,16 +483,51 @@ public final class LocalArxivClient: Sendable {
         return UInt64(attempt + 1) * arXivAPIRequestDelayNanoseconds
     }
 
-    private func isRetriableNetworkError(_ error: Error) -> Bool {
-        guard let urlError = error as? URLError else {
+    public static func isRetriableNetworkError(_ error: Error) -> Bool {
+        guard let urlErrorCode = urlErrorCode(for: error) else {
             return false
         }
-        switch urlError.code {
-        case .timedOut, .networkConnectionLost, .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed:
+        switch urlErrorCode {
+        case .timedOut,
+             .networkConnectionLost,
+             .cannotConnectToHost,
+             .cannotFindHost,
+             .dnsLookupFailed,
+             .secureConnectionFailed:
             return true
         default:
             return false
         }
+    }
+
+    private static func networkFailureReason(for error: Error) -> String {
+        switch urlErrorCode(for: error) {
+        case .timedOut:
+            return "The request timed out."
+        case .networkConnectionLost:
+            return "The network connection was lost."
+        case .cannotConnectToHost:
+            return "Could not connect to the arXiv host."
+        case .cannotFindHost:
+            return "Could not find the arXiv host."
+        case .dnsLookupFailed:
+            return "DNS lookup failed."
+        case .secureConnectionFailed:
+            return "TLS connection failed."
+        default:
+            return (error as NSError).localizedDescription
+        }
+    }
+
+    private static func urlErrorCode(for error: Error) -> URLError.Code? {
+        if let urlError = error as? URLError {
+            return urlError.code
+        }
+        let nsError = error as NSError
+        guard nsError.domain == NSURLErrorDomain else {
+            return nil
+        }
+        return URLError.Code(rawValue: nsError.code)
     }
 }
 
