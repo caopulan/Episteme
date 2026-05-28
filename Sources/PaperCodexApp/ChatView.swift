@@ -2121,6 +2121,10 @@ private struct MarkdownWebView: NSViewRepresentable {
     @Binding var height: CGFloat
     var onCitation: (String) -> Void
 
+    private var htmlBaseURL: URL {
+        Bundle.main.resourceURL ?? URL(fileURLWithPath: "/")
+    }
+
     func makeCoordinator() -> Coordinator {
         Coordinator(height: $height, onCitation: onCitation)
     }
@@ -2133,7 +2137,7 @@ private struct MarkdownWebView: NSViewRepresentable {
         webView.setValue(false, forKey: "drawsBackground")
         webView.allowsMagnification = false
         context.coordinator.currentHTML = html
-        webView.loadHTMLString(html, baseURL: URL(fileURLWithPath: "/"))
+        webView.loadHTMLString(html, baseURL: htmlBaseURL)
         return webView
     }
 
@@ -2141,7 +2145,7 @@ private struct MarkdownWebView: NSViewRepresentable {
         context.coordinator.onCitation = onCitation
         if context.coordinator.currentHTML != html {
             context.coordinator.currentHTML = html
-            webView.loadHTMLString(html, baseURL: URL(fileURLWithPath: "/"))
+            webView.loadHTMLString(html, baseURL: htmlBaseURL)
         }
     }
 

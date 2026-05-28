@@ -1676,6 +1676,11 @@ func runUILayoutSourceChecks() throws {
         "Reader Chat should expose persistent font family and size settings with larger defaults for messages and composer"
     )
     try check(
+        chatSource.contains("Bundle.main.resourceURL")
+            && chatSource.contains("loadHTMLString(html, baseURL: htmlBaseURL)"),
+        "chat markdown web view should resolve bundled math assets relative to the app resources directory"
+    )
+    try check(
         discoverSource.contains("private struct SaveActionButtonStyle")
             && discoverSource.contains("private struct StableOpenButtonStyle")
             && discoverSource.components(separatedBy: "configuration.isPressed").count - 1 >= 2
@@ -3783,13 +3788,20 @@ func runCitationChecks() throws {
     let rendered = ChatMarkdownRenderer.renderDocument(
         markdown: "## Result\n\nValue $x^2$.\n\n![figure](/tmp/figure.png)\n\n\(parsed.displayMarkdown)"
     )
-    try check(rendered.contains("window.MathJax"), "markdown renderer should configure MathJax for formulas")
     try check(
-        rendered.contains("processEscapes: true")
-            && rendered.contains("[tex]/noerrors")
-            && rendered.contains("[tex]/noundefined")
-            && rendered.contains("mjx-container"),
+        rendered.contains("renderMathInElement")
+            && rendered.contains("throwOnError: false")
+            && rendered.contains("strict: 'ignore'")
+            && rendered.contains(".katex-display"),
         "markdown renderer should harden formula display so bad TeX does not break the whole message"
+    )
+    try check(
+        rendered.contains("KaTeX/katex.min.css")
+            && rendered.contains("KaTeX/katex.min.js")
+            && rendered.contains("KaTeX/contrib/auto-render.min.js")
+            && rendered.contains("renderMathInElement")
+            && !rendered.contains("cdn.jsdelivr.net"),
+        "markdown renderer should use bundled math assets instead of a remote CDN"
     )
     try check(rendered.contains("<h2>Result</h2>"), "markdown renderer should render markdown headings")
     try check(rendered.contains(#"<img alt="figure" src="file:///tmp/figure.png">"#), "markdown renderer should render absolute local images")
@@ -3868,8 +3880,8 @@ func runCitationChecks() throws {
     )
 
     try check(
-        rendered.contains("MathJax.startup.promise"),
-        "markdown renderer should report height after MathJax finishes typesetting"
+        rendered.contains("setTimeout(function() { renderMath(); reportHeight(); }, 250);"),
+        "markdown renderer should report height after the local math renderer finishes typesetting"
     )
 
     let displayMath = """
@@ -5224,7 +5236,8 @@ func runPathChecks() throws {
 }
 
 func runBundleChecks() throws {
-    let scriptURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+    let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+    let scriptURL = root
         .appendingPathComponent("scripts/build-app-bundle.sh")
     let script = try String(contentsOf: scriptURL, encoding: .utf8)
     let oldHost = ["nas", "pucao", "cn"].joined(separator: ".")
@@ -5236,6 +5249,14 @@ func runBundleChecks() throws {
             && script.contains("swift build -c \"$configuration\"")
             && script.contains("swift build -c \"$configuration\" --show-bin-path"),
         "installed app bundle should default to a Release build while keeping an explicit configuration override"
+    )
+    let katexResourceRoot = root.appendingPathComponent("Sources/PaperCodexApp/Resources/KaTeX")
+    try check(
+        script.contains("Sources/PaperCodexApp/Resources/KaTeX")
+            && FileManager.default.fileExists(atPath: katexResourceRoot.appendingPathComponent("katex.min.css").path)
+            && FileManager.default.fileExists(atPath: katexResourceRoot.appendingPathComponent("katex.min.js").path)
+            && FileManager.default.fileExists(atPath: katexResourceRoot.appendingPathComponent("contrib/auto-render.min.js").path),
+        "installed app bundle should include local KaTeX assets for offline chat formula rendering"
     )
 }
 

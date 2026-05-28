@@ -21,6 +21,9 @@ mkdir -p "$(dirname "$app_path")"
 mkdir -p "$macos_path" "$resources_path"
 cp "$binary_path" "$macos_path/PaperCodexApp"
 cp Sources/PaperCodexApp/Resources/AppIcon.icns "$resources_path/AppIcon.icns"
+if [[ -d "Sources/PaperCodexApp/Resources/KaTeX" ]]; then
+  cp -R Sources/PaperCodexApp/Resources/KaTeX "$resources_path/KaTeX"
+fi
 if compgen -G "Sources/PaperCodexApp/Resources/*.lproj" > /dev/null; then
   cp -R Sources/PaperCodexApp/Resources/*.lproj "$resources_path/"
 fi

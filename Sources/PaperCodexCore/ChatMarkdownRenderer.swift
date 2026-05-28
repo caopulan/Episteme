@@ -114,36 +114,19 @@ public enum ChatMarkdownRenderer {
           margin: 0 0 0.72em;
           overflow-x: auto;
         }
-        mjx-container {
-          line-height: 1.35;
+        .katex {
+          font-size: 1.03em;
         }
-        mjx-container[display="true"] {
+        .katex-display {
+          margin: 0.2em 0;
           overflow-x: auto;
           overflow-y: hidden;
-          padding: 0.12em 0;
           max-width: 100%;
         }
         </style>
-        <script>
-        window.MathJax = {
-          loader: {
-            load: ['[tex]/noerrors', '[tex]/noundefined']
-          },
-          tex: {
-            inlineMath: [['$', '$'], ['\\\\(', '\\\\)']],
-            displayMath: [['$$', '$$'], ['\\\\[', '\\\\]']],
-            processEscapes: true,
-            packages: {'[+]': ['noerrors', 'noundefined']}
-          },
-          chtml: {
-            matchFontHeight: false
-          },
-          options: {
-            skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code']
-          }
-        };
-        </script>
-        <script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>
+        <link rel="stylesheet" href="KaTeX/katex.min.css">
+        <script defer src="KaTeX/katex.min.js"></script>
+        <script defer src="KaTeX/contrib/auto-render.min.js"></script>
         </head>
         <body>
         <div class="message">
@@ -156,24 +139,35 @@ public enum ChatMarkdownRenderer {
             window.webkit.messageHandlers.height.postMessage(height);
           }
         }
-        let mathJaxHeightReports = new WeakSet();
-        function reportHeightAfterMathJax() {
-          if (window.MathJax && window.MathJax.startup && window.MathJax.startup.promise && !mathJaxHeightReports.has(window.MathJax.startup.promise)) {
-            mathJaxHeightReports.add(window.MathJax.startup.promise);
-            window.MathJax.startup.promise.then(function() {
-              reportHeight();
-              setTimeout(reportHeight, 50);
-            }).catch(reportHeight);
+        let didRenderMath = false;
+        function renderMath() {
+          if (didRenderMath || !window.renderMathInElement) {
+            return;
           }
-        }
-        window.addEventListener('load', function() {
+          didRenderMath = true;
+          renderMathInElement(document.querySelector('.message'), {
+            delimiters: [
+              {left: '$$', right: '$$', display: true},
+              {left: '\\\\[', right: '\\\\]', display: true},
+              {left: '\\\\(', right: '\\\\)', display: false},
+              {left: '$', right: '$', display: false}
+            ],
+            ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'],
+            throwOnError: false,
+            strict: 'ignore'
+          });
           reportHeight();
-          reportHeightAfterMathJax();
+          setTimeout(reportHeight, 50);
+        }
+        document.addEventListener('DOMContentLoaded', renderMath);
+        window.addEventListener('load', function() {
+          renderMath();
+          reportHeight();
         });
         window.addEventListener('resize', reportHeight);
-        setTimeout(function() { reportHeight(); reportHeightAfterMathJax(); }, 50);
-        setTimeout(function() { reportHeight(); reportHeightAfterMathJax(); }, 250);
-        setTimeout(function() { reportHeight(); reportHeightAfterMathJax(); }, 1000);
+        setTimeout(function() { renderMath(); reportHeight(); }, 50);
+        setTimeout(function() { renderMath(); reportHeight(); }, 250);
+        setTimeout(function() { renderMath(); reportHeight(); }, 1000);
         </script>
         </body>
         </html>
