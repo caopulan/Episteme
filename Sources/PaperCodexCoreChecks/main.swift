@@ -1393,6 +1393,20 @@ func runUILayoutSourceChecks() throws {
             && discoverSource.contains(".buttonStyle(StableOpenButtonStyle("),
         "Discover card save and open actions should provide immediate pressed feedback before busy work starts"
     )
+    if let resourceButtonRange = discoverSource.range(of: "private struct ResourceLinkButton: View"),
+       let resourceLinkEndRange = discoverSource.range(of: "private struct PaperResourceLink", range: resourceButtonRange.upperBound..<discoverSource.endIndex) {
+        let resourceLinkControlsSource = String(discoverSource[resourceButtonRange.lowerBound..<resourceLinkEndRange.lowerBound])
+        try check(
+            resourceLinkControlsSource.contains(".buttonStyle(ResourceLinkButtonStyle(")
+                && resourceLinkControlsSource.contains("private struct ResourceLinkButtonStyle: ButtonStyle")
+                && resourceLinkControlsSource.contains("configuration.isPressed")
+                && resourceLinkControlsSource.contains("PaperCodexMotion.press")
+                && !resourceLinkControlsSource.contains(".buttonStyle(.plain)"),
+            "Discover and Search resource link buttons should provide immediate pressed feedback before opening external targets"
+        )
+    } else {
+        throw CheckFailure(description: "Discover resource link button source should remain inspectable")
+    }
     try check(
         discoverSource.contains("private struct SidebarFilterButtonStyle")
             && discoverSource.contains(".buttonStyle(SidebarFilterButtonStyle(")

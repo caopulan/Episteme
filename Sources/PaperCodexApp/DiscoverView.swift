@@ -2645,7 +2645,7 @@ private struct ResourceLinkButton: View {
         } label: {
             labelContent
         }
-        .buttonStyle(.plain)
+        .buttonStyle(ResourceLinkButtonStyle(isHovering: isHovering))
         .overlay(alignment: .top) {
             if compact && isHovering {
                 Text(link.title)
@@ -2685,18 +2685,53 @@ private struct ResourceLinkButton: View {
             }
         }
         .font(.paperCodexSystem(size: compact ? 11.5 : 13, weight: .semibold))
-        .foregroundStyle(isHovering ? Color.accentColor : Color.primary.opacity(0.82))
-        .background(buttonBackground)
-        .scaleEffect(isHovering ? 1.06 : 1)
+    }
+}
+
+private struct ResourceLinkButtonStyle: ButtonStyle {
+    var isHovering: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        let isPressed = configuration.isPressed
+        configuration.label
+            .foregroundStyle(foregroundColor(isPressed: isPressed))
+            .background(buttonBackground(isPressed: isPressed))
+            .shadow(color: shadowColor(isPressed: isPressed), radius: isPressed ? 3 : 5, y: isPressed ? 1 : 2)
+            .scaleEffect(isPressed ? 0.94 : (isHovering ? 1.06 : 1), anchor: .center)
+            .contentShape(RoundedRectangle(cornerRadius: 6))
+            .animation(PaperCodexMotion.press, value: configuration.isPressed)
+            .animation(PaperCodexMotion.hover, value: isHovering)
     }
 
-    private var buttonBackground: some View {
+    private func foregroundColor(isPressed: Bool) -> Color {
+        isPressed || isHovering ? Color.accentColor : Color.primary.opacity(0.82)
+    }
+
+    private func shadowColor(isPressed: Bool) -> Color {
+        isPressed || isHovering ? Color.accentColor.opacity(isPressed ? 0.10 : 0.14) : .clear
+    }
+
+    private func buttonBackground(isPressed: Bool) -> some View {
         RoundedRectangle(cornerRadius: 6)
-            .fill(isHovering ? Color.accentColor.opacity(0.13) : Color(nsColor: .controlBackgroundColor))
+            .fill(backgroundFill(isPressed: isPressed))
             .overlay(
                 RoundedRectangle(cornerRadius: 6)
-                    .stroke(isHovering ? Color.accentColor.opacity(0.45) : Color.black.opacity(0.10), lineWidth: 1)
+                    .stroke(borderColor(isPressed: isPressed), lineWidth: 1)
             )
+    }
+
+    private func backgroundFill(isPressed: Bool) -> Color {
+        if isPressed {
+            return Color.accentColor.opacity(0.20)
+        }
+        return isHovering ? Color.accentColor.opacity(0.13) : Color(nsColor: .controlBackgroundColor)
+    }
+
+    private func borderColor(isPressed: Bool) -> Color {
+        if isPressed {
+            return Color.accentColor.opacity(0.58)
+        }
+        return isHovering ? Color.accentColor.opacity(0.45) : Color.black.opacity(0.10)
     }
 }
 
