@@ -5580,6 +5580,7 @@ final class AppModel: ObservableObject {
             throw LocalArxivClientError.invalidURL(asset.url)
         }
         let configuration = URLSessionConfiguration.default
+        configuration.httpMaximumConnectionsPerHost = 1
         configuration.timeoutIntervalForRequest = 12
         configuration.timeoutIntervalForResource = 30
         var request = URLRequest(url: url)
@@ -5596,6 +5597,7 @@ final class AppModel: ObservableObject {
         let preferences = localDiscoverPreferences.normalized
         let categories = overrideCategories ?? (preferences.categories.isEmpty ? LocalArxivClient.defaultCategories : preferences.categories)
         let configuration = URLSessionConfiguration.default
+        configuration.httpMaximumConnectionsPerHost = 1
         configuration.timeoutIntervalForRequest = 18
         configuration.timeoutIntervalForResource = 60
         return LocalArxivClient(

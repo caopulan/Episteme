@@ -99,6 +99,7 @@ public enum LocalArxivClientError: Error, CustomStringConvertible, Equatable {
 
 public final class LocalArxivClient: Sendable {
     public static let defaultCategories = ["cs.AI", "cs.CL", "cs.CV", "cs.LG"]
+    private static let requestGate = LocalArxivRequestGate()
 
     private let configuration: LocalArxivClientConfiguration
     private let session: URLSession
@@ -583,10 +584,14 @@ public final class LocalArxivClient: Sendable {
             request.setValue(accept, forHTTPHeaderField: "Accept")
             request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
             do {
-                let (data, response) = try await session.data(for: request)
+                let (data, response) = try await sendRateLimited(request)
                 if let http = response as? HTTPURLResponse,
                    !(200..<300).contains(http.statusCode) {
-                    if (http.statusCode == 429 || (500..<600).contains(http.statusCode)), attempt < 2 {
+                    if http.statusCode == 429, attempt < 2 {
+                        await Self.requestGate.postpone(by: rateLimitDelayNanoseconds(for: http, attempt: attempt))
+                        continue
+                    }
+                    if (500..<600).contains(http.statusCode), attempt < 2 {
                         try await Task.sleep(nanoseconds: retryDelayNanoseconds(for: http, attempt: attempt))
                         continue
                     }
@@ -614,12 +619,34 @@ public final class LocalArxivClient: Sendable {
         throw lastError ?? LocalArxivClientError.invalidURL(url.absoluteString)
     }
 
+    private func sendRateLimited(_ request: URLRequest) async throws -> (Data, URLResponse) {
+        try Task.checkCancellation()
+        try await Self.requestGate.acquire()
+        do {
+            try Task.checkCancellation()
+            let result = try await session.data(for: request)
+            await Self.requestGate.release()
+            return result
+        } catch {
+            await Self.requestGate.release()
+            throw error
+        }
+    }
+
     private func retryDelayNanoseconds(for response: HTTPURLResponse?, attempt: Int) -> UInt64 {
         if let retryAfter = response?.value(forHTTPHeaderField: "Retry-After"),
            let seconds = UInt64(retryAfter.trimmingCharacters(in: .whitespacesAndNewlines)) {
             return seconds * 1_000_000_000
         }
         return UInt64(attempt + 1) * arXivAPIRequestDelayNanoseconds
+    }
+
+    private func rateLimitDelayNanoseconds(for response: HTTPURLResponse?, attempt: Int) -> UInt64 {
+        if let retryAfter = response?.value(forHTTPHeaderField: "Retry-After"),
+           let seconds = UInt64(retryAfter.trimmingCharacters(in: .whitespacesAndNewlines)) {
+            return seconds * 1_000_000_000
+        }
+        return UInt64(attempt + 1) * arXivRateLimitCooldownNanoseconds
     }
 
     public static func isRetriableNetworkError(_ error: Error) -> Bool {
@@ -670,7 +697,68 @@ public final class LocalArxivClient: Sendable {
     }
 }
 
+private actor LocalArxivRequestGate {
+    private var isReserved = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+    private var nextAllowedAt = Date.distantPast
+
+    func acquire() async throws {
+        if isReserved {
+            await withCheckedContinuation { continuation in
+                waiters.append(continuation)
+            }
+        }
+        isReserved = true
+
+        let waitSeconds = nextAllowedAt.timeIntervalSinceNow
+        guard waitSeconds > 0 else {
+            return
+        }
+
+        do {
+            try await Task.sleep(nanoseconds: nanoseconds(from: waitSeconds))
+        } catch {
+            cancelReservation()
+            throw error
+        }
+    }
+
+    func release() {
+        let next = Date().addingTimeInterval(arXivAPIRequestDelaySeconds)
+        if next > nextAllowedAt {
+            nextAllowedAt = next
+        }
+        resumeNextOrClearReservation()
+    }
+
+    func postpone(by delayNanoseconds: UInt64) {
+        let next = Date().addingTimeInterval(Double(delayNanoseconds) / 1_000_000_000)
+        if next > nextAllowedAt {
+            nextAllowedAt = next
+        }
+    }
+
+    private func cancelReservation() {
+        resumeNextOrClearReservation()
+    }
+
+    private func resumeNextOrClearReservation() {
+        if waiters.isEmpty {
+            isReserved = false
+        } else {
+            let next = waiters.removeFirst()
+            next.resume()
+        }
+    }
+}
+
+private let arXivAPIRequestDelaySeconds: TimeInterval = 3
 private let arXivAPIRequestDelayNanoseconds: UInt64 = 3_000_000_000
+private let arXivRateLimitCooldownNanoseconds: UInt64 = 30_000_000_000
+
+private func nanoseconds(from seconds: TimeInterval) -> UInt64 {
+    UInt64(max(seconds, 0) * 1_000_000_000)
+}
 
 private func uniqueVersionedIDs(_ ids: [String]) -> [String] {
     var seen: Set<String> = []

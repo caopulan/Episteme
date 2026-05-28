@@ -5541,6 +5541,17 @@ func runLocalArxivClientChecks() throws {
     try check(clientSource.contains("http.statusCode == 429"), "local arXiv client should handle export API rate limiting")
     try check(clientSource.contains("arXivAPIRequestDelayNanoseconds"), "local arXiv metadata batches should be throttled")
     try check(
+        clientSource.contains("LocalArxivRequestGate")
+            && clientSource.contains("await Self.requestGate.acquire()")
+            && clientSource.contains("await Self.requestGate.release()")
+            && clientSource.contains("await Self.requestGate.postpone"),
+        "local arXiv requests should share a process-wide single-connection rate-limit gate"
+    )
+    try check(
+        appModelSource.contains("configuration.httpMaximumConnectionsPerHost = 1"),
+        "app arXiv URL sessions should avoid opening parallel connections to arXiv"
+    )
+    try check(
         appModelSource.contains("cachedArxivPaperForLibraryImport")
             && appModelSource.contains("arxivLibraryImportRetryDelaysNanoseconds")
             && appModelSource.contains("isArxivRateLimitError")
