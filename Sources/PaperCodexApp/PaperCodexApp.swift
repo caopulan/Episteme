@@ -330,6 +330,24 @@ struct PaperCodexCommands: Commands {
             .keyboardShortcut("l", modifiers: [.command])
             .disabled(!canUseReaderChatCommand)
 
+            Button("Show Reader Chat") {
+                model.showReaderSessionPanel(.chat)
+            }
+            .keyboardShortcut("1", modifiers: [.command, .option])
+            .disabled(!canUseReaderPanelCommand)
+
+            Button("Show Reader Terminal") {
+                model.showReaderSessionPanel(.terminal)
+            }
+            .keyboardShortcut("2", modifiers: [.command, .option])
+            .disabled(!canUseReaderPanelCommand)
+
+            Button("Show Reader Notes") {
+                model.showReaderSessionPanel(.notes)
+            }
+            .keyboardShortcut("3", modifiers: [.command, .option])
+            .disabled(!canUseReaderPanelCommand)
+
             Button("Read Selected Paper") {
                 model.openSelectedLibraryPaperForReading()
             }
@@ -394,6 +412,10 @@ struct PaperCodexCommands: Commands {
     }
 
     private var canUseReaderChatCommand: Bool {
+        navigation.route == .reader && model.selectedPaper != nil
+    }
+
+    private var canUseReaderPanelCommand: Bool {
         navigation.route == .reader && model.selectedPaper != nil
     }
 }

@@ -58,14 +58,19 @@ struct ChatView: View {
 
     @ViewBuilder
     private var selectedPanelContent: some View {
-        switch model.selectedSessionPanelTab {
-        case .chat:
-            chatPanel
-        case .terminal:
-            AgentTerminalView()
-        case .notes:
-            SessionNotesPanel()
+        Group {
+            switch model.selectedSessionPanelTab {
+            case .chat:
+                chatPanel
+            case .terminal:
+                AgentTerminalView()
+            case .notes:
+                SessionNotesPanel()
+            }
         }
+        .id(model.selectedSessionPanelTab)
+        .transition(.opacity.combined(with: .move(edge: .trailing)))
+        .animation(PaperCodexMotion.selection, value: model.selectedSessionPanelTab)
     }
 
     private var chatPanel: some View {

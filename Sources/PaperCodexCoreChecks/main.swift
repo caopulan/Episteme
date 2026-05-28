@@ -1648,6 +1648,20 @@ func runUILayoutSourceChecks() throws {
         chatSource.contains("SessionPanelTab") && chatSource.contains("SessionNotesPanel"),
         "session conversation area should provide a tabbed paper-notes view"
     )
+    try check(
+        rootViewSource.contains("Button(\"Show Reader Chat\")")
+            && rootViewSource.contains(".keyboardShortcut(\"1\", modifiers: [.command, .option])")
+            && rootViewSource.contains("Button(\"Show Reader Terminal\")")
+            && rootViewSource.contains(".keyboardShortcut(\"2\", modifiers: [.command, .option])")
+            && rootViewSource.contains("Button(\"Show Reader Notes\")")
+            && rootViewSource.contains(".keyboardShortcut(\"3\", modifiers: [.command, .option])")
+            && rootViewSource.contains("canUseReaderPanelCommand")
+            && appModelSource.contains("func showReaderSessionPanel(_ tab: SessionPanelTab)")
+            && chatSource.contains(".id(model.selectedSessionPanelTab)")
+            && chatSource.contains(".transition(.opacity.combined(with: .move(edge: .trailing)))")
+            && chatSource.contains(".animation(PaperCodexMotion.selection, value: model.selectedSessionPanelTab)"),
+        "Reader session panels should be keyboard-switchable and animate panel content changes"
+    )
     if let panelPickerRange = chatSource.range(of: "Picker(\"Session Panel\""),
        let sessionPickerRange = chatSource.range(of: "Picker(\"Session\"") {
         try check(

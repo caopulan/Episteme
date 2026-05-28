@@ -1530,6 +1530,13 @@ final class AppModel: ObservableObject {
         chatComposerFocusRequestID = UUID()
     }
 
+    func showReaderSessionPanel(_ tab: SessionPanelTab) {
+        guard route == .reader, selectedPaper != nil else {
+            return
+        }
+        selectedSessionPanelTab = tab
+    }
+
     private func startDiscoverCacheWarmupIfNeeded() {
         guard discoverCacheWarmupTask == nil else {
             return
