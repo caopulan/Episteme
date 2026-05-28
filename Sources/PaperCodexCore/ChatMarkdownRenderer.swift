@@ -362,6 +362,14 @@ public enum ChatMarkdownRenderer {
         var index = text.startIndex
 
         while index < text.endIndex {
+            if let mathEnd = inlineDoubleDollarMathEnd(in: text, openingAt: index) {
+                let contentStart = text.index(index, offsetBy: 2)
+                let content = String(text[contentStart..<mathEnd])
+                output.append("\\(\(escapeText(content))\\)")
+                index = text.index(mathEnd, offsetBy: 2)
+                continue
+            }
+
             if let mathEnd = inlineMathEnd(in: text, openingAt: index) {
                 output.append(escapeText(String(text[index...mathEnd])))
                 index = text.index(after: mathEnd)
@@ -416,6 +424,17 @@ public enum ChatMarkdownRenderer {
         }
 
         return output.replacingOccurrences(of: "\n", with: "<br>")
+    }
+
+    private static func inlineDoubleDollarMathEnd(in text: String, openingAt index: String.Index) -> String.Index? {
+        guard text[index...].hasPrefix("$$") else {
+            return nil
+        }
+        let afterOpening = text.index(index, offsetBy: 2)
+        guard afterOpening < text.endIndex else {
+            return nil
+        }
+        return text[afterOpening...].range(of: "$$")?.lowerBound
     }
 
     private static func inlineMathEnd(in text: String, openingAt index: String.Index) -> String.Index? {

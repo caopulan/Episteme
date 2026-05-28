@@ -3850,6 +3850,15 @@ func runCitationChecks() throws {
         "markdown renderer should not parse links inside bracket-delimited math"
     )
 
+    let inlineDoubleDollarMath = ChatMarkdownRenderer.renderFragment(
+        markdown: #"Agent uses $$[1-\alpha(x_t)](v_{old}-v^-)$$ inline."#
+    )
+    try check(
+        inlineDoubleDollarMath.contains(#"\([1-\alpha(x_t)](v_{old}-v^-)\)"#)
+            && !inlineDoubleDollarMath.contains(#"href="v_{old}-v^-""#),
+        "markdown renderer should normalize inline double-dollar math before parsing markdown links"
+    )
+
     try check(
         rendered.contains("MathJax.startup.promise"),
         "markdown renderer should report height after MathJax finishes typesetting"
