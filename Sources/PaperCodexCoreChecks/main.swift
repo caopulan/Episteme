@@ -914,6 +914,23 @@ func runUILayoutSourceChecks() throws {
         librarySource.contains("paper.isStarred") && librarySource.contains("star.fill"),
         "library paper rows should render starred papers with a filled star icon"
     )
+    if let paperRowRange = librarySource.range(of: "private struct PaperRow: View"),
+       let paperRowEndRange = librarySource.range(of: "private struct PaperDragPreview", range: paperRowRange.upperBound..<librarySource.endIndex) {
+        let paperRowSource = String(librarySource[paperRowRange.lowerBound..<paperRowEndRange.lowerBound])
+        try check(
+            paperRowSource.contains("PaperCodexIconButton(\n                title: paper.isStarred ? \"Remove Star\" : \"Star Paper\"")
+                && paperRowSource.contains("PaperCodexIconButton(title: \"Read\"")
+                && !paperRowSource.contains(".buttonStyle(.borderless)"),
+            "library row star and read icon buttons should use shared immediate press feedback instead of borderless buttons"
+        )
+    } else {
+        throw CheckFailure(description: "library paper row action source should remain inspectable")
+    }
+    try check(
+        librarySource.contains("PaperCodexIconButton(\n                                    title: paper.isStarred ? \"Remove Star\" : \"Star Paper\"")
+            && librarySource.contains("tint: paper.isStarred ? .yellow : .secondary"),
+        "library detail star button should use shared immediate press feedback"
+    )
     try check(
         librarySource.contains("if left.isStarred != right.isStarred"),
         "library sorting should pin starred papers before applying the active sort option"
@@ -931,7 +948,8 @@ func runUILayoutSourceChecks() throws {
         "library paper rows should render pending arXiv imports as placeholders"
     )
     try check(
-        librarySource.contains(".disabled(isImportPlaceholder)"),
+        librarySource.contains(".disabled(isImportPlaceholder)")
+            || librarySource.contains("disabled: isImportPlaceholder"),
         "pending arXiv placeholder rows should disable read/open actions until the PDF is ready"
     )
     try check(

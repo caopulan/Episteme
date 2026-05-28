@@ -609,16 +609,14 @@ struct LibraryView: View {
                                 Text(paper.title)
                                     .font(.headline)
                                 Spacer(minLength: 8)
-                                Button {
+                                PaperCodexIconButton(
+                                    title: paper.isStarred ? "Remove Star" : "Star Paper",
+                                    systemImage: paper.isStarred ? "star.fill" : "star",
+                                    tint: paper.isStarred ? .yellow : .secondary,
+                                    disabled: paper.isArxivImportPlaceholder
+                                ) {
                                     model.togglePaperStar(paper)
-                                } label: {
-                                    Image(systemName: paper.isStarred ? "star.fill" : "star")
-                                        .foregroundStyle(paper.isStarred ? Color.yellow : Color.secondary)
                                 }
-                                .buttonStyle(.borderless)
-                                .disabled(paper.isArxivImportPlaceholder)
-                                .help(paper.isStarred ? "Remove Star" : "Star Paper")
-                                .accessibilityLabel(paper.isStarred ? "Remove Star" : "Star Paper")
                             }
                             Text(paper.isArxivImportPlaceholder ? model.arxivImportPlaceholderDetail(for: paper) : (paper.authors.isEmpty ? "Authors not set" : paper.authors.joined(separator: ", ")))
                                 .foregroundStyle(.secondary)
@@ -1879,21 +1877,15 @@ private struct PaperRow: View {
 
             Spacer()
 
-            Button(action: onToggleStar) {
-                Image(systemName: paper.isStarred ? "star.fill" : "star")
-                    .foregroundStyle(paper.isStarred ? Color.yellow : Color.secondary)
-            }
-            .buttonStyle(.borderless)
-            .disabled(isImportPlaceholder)
-            .help(paper.isStarred ? "Remove Star" : "Star Paper")
-            .accessibilityLabel(paper.isStarred ? "Remove Star" : "Star Paper")
+            PaperCodexIconButton(
+                title: paper.isStarred ? "Remove Star" : "Star Paper",
+                systemImage: paper.isStarred ? "star.fill" : "star",
+                tint: paper.isStarred ? .yellow : .secondary,
+                disabled: isImportPlaceholder,
+                action: onToggleStar
+            )
 
-            Button(action: onRead) {
-                Image(systemName: "book")
-            }
-            .buttonStyle(.borderless)
-            .disabled(isImportPlaceholder)
-            .help("Read")
+            PaperCodexIconButton(title: "Read", systemImage: "book", tint: .secondary, disabled: isImportPlaceholder, action: onRead)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 21)
