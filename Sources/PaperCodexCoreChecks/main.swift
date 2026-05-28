@@ -1693,6 +1693,25 @@ func runUILayoutSourceChecks() throws {
         throw CheckFailure(description: "library inspector source should remain inspectable")
     }
     try check(
+        settingsViewSource.contains("private struct SettingsActionButton<Label: View>: View")
+            && settingsViewSource.contains("private struct SettingsActionButtonStyle: ButtonStyle")
+            && settingsViewSource.contains("private enum SettingsActionButtonKind")
+            && settingsViewSource.contains(".buttonStyle(SettingsActionButtonStyle(")
+            && settingsViewSource.components(separatedBy: "SettingsActionButton(").count - 1 >= 15
+            && settingsViewSource.contains("private struct SettingsCategoryToggleRow: View")
+            && settingsViewSource.contains("private struct SettingsSelectableRowButtonStyle: ButtonStyle")
+            && settingsViewSource.contains(".buttonStyle(SettingsSelectableRowButtonStyle(")
+            && settingsViewSource.contains("PaperCodexIconButton(title: \"Move Up\"")
+            && settingsViewSource.contains("PaperCodexIconButton(title: \"Reveal in Finder\"")
+            && settingsViewSource.contains("configuration.isPressed")
+            && settingsViewSource.contains("PaperCodexMotion.press")
+            && !settingsViewSource.contains(".buttonStyle(.borderedProminent)")
+            && !settingsViewSource.contains(".buttonStyle(.bordered)")
+            && !settingsViewSource.contains(".buttonStyle(.borderless)")
+            && !settingsViewSource.contains(".buttonStyle(.plain)"),
+        "Settings action buttons should provide immediate pressed feedback instead of system default delayed button chrome"
+    )
+    try check(
         homeChromeSource.contains("static let sidebarTopPadding: CGFloat = 28")
             && librarySource.contains("static let splitPaneTopInset: CGFloat = 0")
             && librarySource.contains(".padding(.top, 14)")

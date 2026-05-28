@@ -143,7 +143,7 @@ struct SettingsView: View {
             TextField("Categories, comma separated", text: $draftArxivCategories)
                 .textFieldStyle(.roundedBorder)
             HStack {
-                Button {
+                SettingsActionButton(kind: .primary, disabled: !isArxivFeedDirty) {
                     model.setLocalArxivCategories(splitDraftList(draftArxivCategories))
                     Task {
                         await model.refreshArxivDatesAndFeed()
@@ -151,18 +151,14 @@ struct SettingsView: View {
                 } label: {
                     Label(isArxivFeedDirty ? "Save Categories" : "Saved", systemImage: isArxivFeedDirty ? "checkmark" : "checkmark.circle")
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(!isArxivFeedDirty)
 
-                Button {
+                SettingsActionButton(disabled: model.isRefreshingArxivDates) {
                     Task {
                         await model.refreshArxivDatesAndFeed()
                     }
                 } label: {
                     Label(model.isRefreshingArxivDates ? "Refreshing" : "Refresh arXiv", systemImage: "arrow.clockwise")
                 }
-                .buttonStyle(.bordered)
-                .disabled(model.isRefreshingArxivDates)
 
                 Spacer()
 
@@ -219,7 +215,7 @@ struct SettingsView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 8))
             }
             HStack {
-                Button {
+                SettingsActionButton(kind: .primary, disabled: !isRankingDirty) {
                     model.setLocalTagFilters(
                         whitelist: splitDraftList(draftWhitelistTags),
                         blacklist: splitDraftList(draftBlacklistTags)
@@ -228,8 +224,6 @@ struct SettingsView: View {
                 } label: {
                     Label(isRankingDirty ? "Save Ranking" : "Saved", systemImage: isRankingDirty ? "line.3.horizontal.decrease.circle" : "checkmark.circle")
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(!isRankingDirty)
 
                 Spacer()
 
@@ -241,30 +235,16 @@ struct SettingsView: View {
     }
 
     private func similarityCategoryRow(_ category: PaperCodexCore.Category) -> some View {
-        Button {
+        SettingsCategoryToggleRow(
+            title: categoryDisplayName(category),
+            selected: draftSimilarityCategoryIDs.contains(category.id)
+        ) {
             if draftSimilarityCategoryIDs.contains(category.id) {
                 draftSimilarityCategoryIDs.remove(category.id)
             } else {
                 draftSimilarityCategoryIDs.insert(category.id)
             }
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: draftSimilarityCategoryIDs.contains(category.id) ? "checkmark.square.fill" : "square")
-                    .foregroundStyle(draftSimilarityCategoryIDs.contains(category.id) ? Color.accentColor : Color.secondary)
-                Image(systemName: "folder")
-                    .foregroundStyle(.secondary)
-                Text(categoryDisplayName(category))
-                    .lineLimit(1)
-                Spacer(minLength: 0)
-            }
-            .font(.paperCodexSystem(size: 12, weight: .medium))
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(draftSimilarityCategoryIDs.contains(category.id) ? Color.accentColor.opacity(0.10) : Color(nsColor: .controlBackgroundColor))
-            .clipShape(RoundedRectangle(cornerRadius: 6))
         }
-        .buttonStyle(.plain)
     }
 
     private var codexEnrichmentSettings: some View {
@@ -273,7 +253,7 @@ struct SettingsView: View {
                 .toggleStyle(.checkbox)
             Toggle("Auto-enrich when saving to Library", isOn: $draftAutoEnrichOnSave)
                 .toggleStyle(.checkbox)
-            Button {
+            SettingsActionButton(kind: .primary, disabled: !isEnrichmentDirty) {
                 model.setLocalEnrichmentPreferences(
                     autoOpen: draftAutoEnrichOnOpen,
                     autoSave: draftAutoEnrichOnSave
@@ -281,8 +261,6 @@ struct SettingsView: View {
             } label: {
                 Label(isEnrichmentDirty ? "Save Enrichment" : "Saved", systemImage: isEnrichmentDirty ? "checkmark" : "checkmark.circle")
             }
-            .buttonStyle(.borderedProminent)
-            .disabled(!isEnrichmentDirty)
         }
     }
 
@@ -317,7 +295,7 @@ struct SettingsView: View {
             )
 
             HStack {
-                Button {
+                SettingsActionButton(kind: .primary, disabled: !isProcessingDirty) {
                     model.setDiscoverCodexSettings(
                         modelOverride: draftDiscoverCodexModel,
                         concurrency: draftDiscoverCodexConcurrency,
@@ -326,18 +304,14 @@ struct SettingsView: View {
                 } label: {
                     Label(isProcessingDirty ? "Save Processing" : "Saved", systemImage: isProcessingDirty ? "checkmark" : "checkmark.circle")
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(!isProcessingDirty)
 
-                Button {
+                SettingsActionButton(disabled: model.isRefreshingCodexModels) {
                     Task {
                         await model.refreshAvailableCodexModels()
                     }
                 } label: {
                     Label(model.isRefreshingCodexModels ? "Refreshing" : "Refresh Models", systemImage: "arrow.clockwise")
                 }
-                .buttonStyle(.bordered)
-                .disabled(model.isRefreshingCodexModels)
 
                 Spacer()
 
@@ -366,22 +340,20 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
                 HStack {
-                    Button {
+                    SettingsActionButton(kind: .primary) {
                         draftCodexSystemPrompt = model.codexSystemPrompt
                         isEditingCodexSystemPrompt = true
                     } label: {
                         Label("Edit Prompt", systemImage: "pencil")
                     }
-                    .buttonStyle(.borderedProminent)
                     .help("Edit System Prompt")
 
-                    Button {
+                    SettingsActionButton {
                         model.resetCodexSystemPrompt()
                         draftCodexSystemPrompt = model.codexSystemPrompt
                     } label: {
                         Label("Default", systemImage: "arrow.counterclockwise")
                     }
-                    .buttonStyle(.bordered)
                     .help("Restore Default System Prompt")
 
                     Spacer()
@@ -425,15 +397,13 @@ struct SettingsView: View {
 
                 Spacer()
 
-                Button {
+                SettingsActionButton(disabled: model.isInstallingCodexPlugin || !model.paperCodexMCPServerReady) {
                     Task {
                         await model.installOrUpdateCodexPlugin()
                     }
                 } label: {
                     Label(model.isInstallingCodexPlugin ? "Installing" : "Install / Update", systemImage: "puzzlepiece.extension")
                 }
-                .buttonStyle(.bordered)
-                .disabled(model.isInstallingCodexPlugin || !model.paperCodexMCPServerReady)
                 .help("Install or update the Paper Codex plugin in local Codex")
             }
         }
@@ -464,15 +434,13 @@ struct SettingsView: View {
 
                 Spacer()
 
-                Button {
+                SettingsActionButton(disabled: model.isRefreshingAgentRuntimeDiagnostics) {
                     Task {
                         await model.refreshAgentRuntimeDiagnostics()
                     }
                 } label: {
                     Label(model.isRefreshingAgentRuntimeDiagnostics ? "Checking" : "Check Runtimes", systemImage: "arrow.clockwise")
                 }
-                .buttonStyle(.bordered)
-                .disabled(model.isRefreshingAgentRuntimeDiagnostics)
             }
 
             VStack(alignment: .leading, spacing: 10) {
@@ -581,7 +549,7 @@ struct SettingsView: View {
             TextField("Model", text: $draftEmbeddingModel)
                 .textFieldStyle(.roundedBorder)
             HStack {
-                Button {
+                SettingsActionButton(kind: .primary, disabled: !isEmbeddingDirty) {
                     model.setEmbeddingProviderSettings(
                         enabled: draftEmbeddingEnabled,
                         baseURL: draftEmbeddingBaseURL,
@@ -591,10 +559,8 @@ struct SettingsView: View {
                 } label: {
                     Label(isEmbeddingDirty ? "Save Embedding" : "Saved", systemImage: isEmbeddingDirty ? "key" : "checkmark.circle")
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(!isEmbeddingDirty)
 
-                Button {
+                SettingsActionButton(disabled: model.isTestingEmbeddingProvider) {
                     Task {
                         await model.testEmbeddingProvider(
                             baseURL: draftEmbeddingBaseURL,
@@ -605,8 +571,6 @@ struct SettingsView: View {
                 } label: {
                     Label(model.isTestingEmbeddingProvider ? "Testing" : "Test", systemImage: "bolt.horizontal.circle")
                 }
-                .buttonStyle(.bordered)
-                .disabled(model.isTestingEmbeddingProvider)
 
                 Spacer()
 
@@ -631,36 +595,20 @@ struct SettingsView: View {
                                 .lineLimit(2)
                         }
                         Spacer()
-                        Button {
+                        PaperCodexIconButton(title: "Move Up", systemImage: "chevron.up") {
                             model.moveQuickPrompt(prompt, direction: -1)
-                        } label: {
-                            Image(systemName: "chevron.up")
                         }
-                        .buttonStyle(.borderless)
-                        .help("Move Up")
-                        Button {
+                        PaperCodexIconButton(title: "Move Down", systemImage: "chevron.down") {
                             model.moveQuickPrompt(prompt, direction: 1)
-                        } label: {
-                            Image(systemName: "chevron.down")
                         }
-                        .buttonStyle(.borderless)
-                        .help("Move Down")
-                        Button {
+                        PaperCodexIconButton(title: "Edit Prompt", systemImage: "pencil") {
                             editingPromptTitle = prompt.title
                             editingPromptContent = prompt.content
                             editingPrompt = prompt
-                        } label: {
-                            Image(systemName: "pencil")
                         }
-                        .buttonStyle(.borderless)
-                        .help("Edit Prompt")
-                        Button {
+                        PaperCodexIconButton(title: "Delete Prompt", systemImage: "trash", tint: .red) {
                             model.deleteQuickPrompt(prompt)
-                        } label: {
-                            Image(systemName: "trash")
                         }
-                        .buttonStyle(.borderless)
-                        .help("Delete Prompt")
                     }
                     .padding(10)
                     .background(Color(nsColor: .controlBackgroundColor))
@@ -677,7 +625,7 @@ struct SettingsView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                     .accessibilityLabel("New quick prompt editor")
                     .accessibilityValue("\(newPromptContent.count) characters")
-                Button {
+                SettingsActionButton(disabled: newPromptTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || newPromptContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) {
                     model.addQuickPrompt(title: newPromptTitle, content: newPromptContent)
                     if model.errorMessage == nil {
                         newPromptTitle = ""
@@ -686,8 +634,6 @@ struct SettingsView: View {
                 } label: {
                     Label("Add Prompt", systemImage: "plus")
                 }
-                .buttonStyle(.bordered)
-                .disabled(newPromptTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || newPromptContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
     }
@@ -720,19 +666,17 @@ struct SettingsView: View {
                     .foregroundStyle(.tertiary)
             }
             HStack {
-                Button(role: .destructive) {
+                SettingsActionButton(kind: .destructive, role: .destructive) {
                     isConfirmingClearCache = true
                 } label: {
                     Label("Clear arXiv Cache", systemImage: "trash")
                 }
-                .buttonStyle(.bordered)
 
-                Button {
+                SettingsActionButton {
                     model.refreshCacheStorageSummary()
                 } label: {
                     Label("Refresh Size", systemImage: "arrow.clockwise")
                 }
-                .buttonStyle(.bordered)
 
                 Text("Clears feed JSON, temporary PDFs, and unsaved opened papers.")
                     .font(.caption)
@@ -784,26 +728,25 @@ struct SettingsView: View {
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
                 Spacer()
-                Button("Cancel") {
+                SettingsActionButton {
                     draftCodexSystemPrompt = model.codexSystemPrompt
                     isEditingCodexSystemPrompt = false
+                } label: {
+                    Text("Cancel")
                 }
-                Button {
+                SettingsActionButton {
                     model.resetCodexSystemPrompt()
                     draftCodexSystemPrompt = model.codexSystemPrompt
                     isEditingCodexSystemPrompt = false
                 } label: {
                     Label("Default", systemImage: "arrow.counterclockwise")
                 }
-                .buttonStyle(.bordered)
-                Button {
+                SettingsActionButton(kind: .primary, disabled: draftCodexSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) {
                     model.setCodexSystemPrompt(draftCodexSystemPrompt)
                     isEditingCodexSystemPrompt = false
                 } label: {
                     Label("Save", systemImage: "checkmark")
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(draftCodexSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
         .padding(22)
@@ -826,15 +769,17 @@ struct SettingsView: View {
                 .accessibilityValue("\(editingPromptContent.count) characters")
             HStack {
                 Spacer()
-                Button("Cancel") {
+                SettingsActionButton {
                     editingPrompt = nil
+                } label: {
+                    Text("Cancel")
                 }
-                Button("Save") {
+                SettingsActionButton(kind: .primary, disabled: editingPromptTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || editingPromptContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) {
                     model.updateQuickPrompt(prompt, title: editingPromptTitle, content: editingPromptContent)
                     editingPrompt = nil
+                } label: {
+                    Text("Save")
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(editingPromptTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || editingPromptContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
         .padding(22)
@@ -852,13 +797,9 @@ struct SettingsView: View {
                     .textSelection(.enabled)
                     .lineLimit(2)
                 Spacer()
-                Button {
+                PaperCodexIconButton(title: "Reveal in Finder", systemImage: "folder") {
                     model.revealPath(value)
-                } label: {
-                    Image(systemName: "folder")
                 }
-                .buttonStyle(.borderless)
-                .help("Reveal in Finder")
             }
         }
     }
@@ -903,6 +844,214 @@ struct SettingsView: View {
             parentID = parent.parentID
         }
         return names.reversed().joined(separator: " / ")
+    }
+}
+
+private enum SettingsActionButtonKind {
+    case primary
+    case secondary
+    case destructive
+
+    var tint: Color {
+        switch self {
+        case .primary:
+            Color.accentColor
+        case .secondary:
+            Color.secondary
+        case .destructive:
+            Color.red
+        }
+    }
+}
+
+private struct SettingsCategoryToggleRow: View {
+    @State private var isHovering = false
+
+    var title: String
+    var selected: Bool
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Image(systemName: selected ? "checkmark.square.fill" : "square")
+                    .foregroundStyle(selected ? Color.accentColor : Color.secondary)
+                Image(systemName: "folder")
+                    .foregroundStyle(.secondary)
+                Text(title)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .font(.paperCodexSystem(size: 12, weight: .medium))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(SettingsSelectableRowButtonStyle(selected: selected, isHovering: isHovering))
+        .onHover { hovering in
+            withAnimation(PaperCodexMotion.hover) {
+                isHovering = hovering
+            }
+        }
+    }
+}
+
+private struct SettingsSelectableRowButtonStyle: ButtonStyle {
+    var selected: Bool
+    var isHovering: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        let isPressed = configuration.isPressed
+        configuration.label
+            .foregroundStyle(labelColor(isPressed: isPressed))
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(backgroundColor(isPressed: isPressed))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(borderColor(isPressed: isPressed), lineWidth: 1)
+            )
+            .scaleEffect(isPressed ? 0.985 : (isHovering ? 1.01 : 1), anchor: .center)
+            .animation(PaperCodexMotion.press, value: configuration.isPressed)
+            .animation(PaperCodexMotion.hover, value: isHovering)
+            .animation(PaperCodexMotion.selection, value: selected)
+    }
+
+    private func labelColor(isPressed: Bool) -> Color {
+        if selected || isPressed || isHovering {
+            return Color.primary.opacity(0.92)
+        }
+        return Color.primary.opacity(0.82)
+    }
+
+    private func backgroundColor(isPressed: Bool) -> Color {
+        if isPressed {
+            return Color.accentColor.opacity(0.16)
+        }
+        if selected {
+            return Color.accentColor.opacity(0.10)
+        }
+        return isHovering ? Color.accentColor.opacity(0.07) : Color(nsColor: .controlBackgroundColor)
+    }
+
+    private func borderColor(isPressed: Bool) -> Color {
+        if isPressed {
+            return Color.accentColor.opacity(0.44)
+        }
+        if selected {
+            return Color.accentColor.opacity(0.26)
+        }
+        return isHovering ? Color.accentColor.opacity(0.22) : Color.clear
+    }
+}
+
+private struct SettingsActionButton<Label: View>: View {
+    @State private var isHovering = false
+
+    var kind: SettingsActionButtonKind = .secondary
+    var disabled = false
+    var role: ButtonRole?
+    var action: () -> Void
+    @ViewBuilder var label: () -> Label
+
+    var body: some View {
+        Button(role: role, action: action) {
+            label()
+        }
+        .buttonStyle(SettingsActionButtonStyle(kind: kind, disabled: disabled, isHovering: isHovering))
+        .disabled(disabled)
+        .onHover { hovering in
+            withAnimation(PaperCodexMotion.hover) {
+                isHovering = hovering
+            }
+        }
+    }
+}
+
+private struct SettingsActionButtonStyle: ButtonStyle {
+    var kind: SettingsActionButtonKind
+    var disabled: Bool
+    var isHovering: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        let isPressed = configuration.isPressed && !disabled
+        configuration.label
+            .font(.paperCodexSystem(size: 12.5, weight: .semibold))
+            .lineLimit(1)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .foregroundStyle(foregroundColor(isPressed: isPressed))
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(backgroundColor(isPressed: isPressed))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(borderColor(isPressed: isPressed), lineWidth: 1)
+            )
+            .shadow(color: shadowColor(isPressed: isPressed), radius: isPressed ? 3 : 7, y: isPressed ? 1 : 3)
+            .scaleEffect(buttonScale(isPressed: isPressed), anchor: .center)
+            .animation(PaperCodexMotion.press, value: configuration.isPressed)
+            .animation(PaperCodexMotion.hover, value: isHovering)
+            .animation(PaperCodexMotion.hover, value: disabled)
+    }
+
+    private func foregroundColor(isPressed: Bool) -> Color {
+        if disabled {
+            return Color.secondary.opacity(0.48)
+        }
+        switch kind {
+        case .primary:
+            return .white
+        case .secondary, .destructive:
+            return isPressed || isHovering ? kind.tint : Color.primary.opacity(0.82)
+        }
+    }
+
+    private func backgroundColor(isPressed: Bool) -> Color {
+        if disabled {
+            return Color(nsColor: .controlBackgroundColor).opacity(0.56)
+        }
+        switch kind {
+        case .primary:
+            return Color.accentColor.opacity(isPressed ? 0.82 : (isHovering ? 0.96 : 0.90))
+        case .secondary, .destructive:
+            if isPressed {
+                return kind.tint.opacity(0.18)
+            }
+            return isHovering ? kind.tint.opacity(0.12) : Color(nsColor: .controlBackgroundColor)
+        }
+    }
+
+    private func borderColor(isPressed: Bool) -> Color {
+        if disabled {
+            return Color.black.opacity(0.06)
+        }
+        switch kind {
+        case .primary:
+            return Color.accentColor.opacity(isPressed ? 0.62 : (isHovering ? 0.48 : 0.34))
+        case .secondary, .destructive:
+            if isPressed {
+                return kind.tint.opacity(0.54)
+            }
+            return isHovering ? kind.tint.opacity(0.38) : Color.black.opacity(0.10)
+        }
+    }
+
+    private func shadowColor(isPressed: Bool) -> Color {
+        if disabled {
+            return .clear
+        }
+        return kind.tint.opacity(isPressed ? 0.10 : (isHovering ? 0.16 : 0))
+    }
+
+    private func buttonScale(isPressed: Bool) -> CGFloat {
+        if disabled {
+            return 1
+        }
+        return isPressed ? 0.97 : (isHovering ? 1.02 : 1)
     }
 }
 
