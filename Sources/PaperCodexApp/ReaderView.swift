@@ -72,16 +72,21 @@ struct ReaderView: View {
 
     @ViewBuilder
     private func pdfContent(for paper: Paper) -> some View {
-        if isPDFSplitVisible {
-            VSplitView {
+        Group {
+            if isPDFSplitVisible {
+                VSplitView {
+                    primaryPDFView(for: paper)
+                        .frame(minHeight: ReaderPDFLayout.minimumSplitPaneHeight, maxHeight: .infinity)
+                    secondaryPDFView(for: paper)
+                        .frame(minHeight: ReaderPDFLayout.minimumSplitPaneHeight, maxHeight: .infinity)
+                }
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            } else {
                 primaryPDFView(for: paper)
-                    .frame(minHeight: ReaderPDFLayout.minimumSplitPaneHeight, maxHeight: .infinity)
-                secondaryPDFView(for: paper)
-                    .frame(minHeight: ReaderPDFLayout.minimumSplitPaneHeight, maxHeight: .infinity)
+                    .transition(.opacity)
             }
-        } else {
-            primaryPDFView(for: paper)
         }
+        .animation(PaperCodexMotion.selection, value: isPDFSplitVisible)
     }
 
     private func primaryPDFView(for paper: Paper) -> some View {
@@ -115,8 +120,7 @@ struct ReaderView: View {
                     .foregroundStyle(.secondary)
                 Spacer()
                 Button {
-                    isPDFSplitVisible = false
-                    pdfSplitTarget = nil
+                    closePDFSplit()
                 } label: {
                     Image(systemName: "xmark")
                         .frame(width: 22, height: 22)
@@ -148,14 +152,25 @@ struct ReaderView: View {
     }
 
     private func openPDFSplit(_ target: PDFInternalLinkTarget) {
-        pdfSplitTarget = target
-        isPDFSplitVisible = true
+        withAnimation(PaperCodexMotion.selection) {
+            pdfSplitTarget = target
+            isPDFSplitVisible = true
+        }
+    }
+
+    private func closePDFSplit() {
+        withAnimation(PaperCodexMotion.selection) {
+            isPDFSplitVisible = false
+            pdfSplitTarget = nil
+        }
     }
 
     private func togglePDFSplit() {
-        isPDFSplitVisible.toggle()
-        if !isPDFSplitVisible {
-            pdfSplitTarget = nil
+        withAnimation(PaperCodexMotion.selection) {
+            isPDFSplitVisible.toggle()
+            if !isPDFSplitVisible {
+                pdfSplitTarget = nil
+            }
         }
     }
 }
@@ -296,6 +311,7 @@ private struct ReaderPDFToolbar: View {
                 tint: isSplitVisible ? .accentColor : .secondary,
                 action: onToggleSplit
             )
+            .keyboardShortcut("\\", modifiers: [.command, .shift])
 
             Spacer()
 

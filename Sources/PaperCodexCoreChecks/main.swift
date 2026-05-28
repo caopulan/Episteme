@@ -1972,6 +1972,13 @@ func runUILayoutSourceChecks() throws {
         "reader should support a top-bottom PDF split view for simultaneous source and link-target reading"
     )
     try check(
+        readerSource.contains(".keyboardShortcut(\"\\\\\", modifiers: [.command, .shift])")
+            && readerSource.contains("withAnimation(PaperCodexMotion.selection)")
+            && readerSource.contains(".animation(PaperCodexMotion.selection, value: isPDFSplitVisible)")
+            && readerSource.contains(".transition(.move(edge: .bottom).combined(with: .opacity))"),
+        "reader PDF split should have a direct keyboard shortcut and animated toggle feedback"
+    )
+    try check(
         !readerSource.contains(".frame(minWidth: 560)") && readerSource.contains(".frame(minWidth: ReaderPDFLayout.minimumPaneWidth"),
         "reader PDF pane should be allowed to resize with the split divider instead of holding a wide fixed minimum"
     )
