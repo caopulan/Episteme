@@ -57,6 +57,21 @@ public struct ReaderTabState: Codable, Equatable, Sendable {
         return activePaperID
     }
 
+    public func adjacentPaperID(from paperID: String? = nil, offset: Int) -> String? {
+        guard !tabs.isEmpty else {
+            return nil
+        }
+        let currentPaperID = paperID ?? activePaperID ?? tabs[0].paperID
+        guard let currentIndex = tabs.firstIndex(where: { $0.paperID == currentPaperID }) else {
+            return tabs[0].paperID
+        }
+        guard offset != 0 else {
+            return tabs[currentIndex].paperID
+        }
+        let nextIndex = (currentIndex + offset).positiveModulo(tabs.count)
+        return tabs[nextIndex].paperID
+    }
+
     @discardableResult
     public mutating func close(_ paperID: String) -> String? {
         guard let index = tabs.firstIndex(where: { $0.paperID == paperID }) else {
@@ -89,5 +104,12 @@ public struct ReaderTabState: Codable, Equatable, Sendable {
 
     public mutating func clearActivePaper() {
         activePaperID = nil
+    }
+}
+
+private extension Int {
+    func positiveModulo(_ divisor: Int) -> Int {
+        let remainder = self % divisor
+        return remainder >= 0 ? remainder : remainder + divisor
     }
 }

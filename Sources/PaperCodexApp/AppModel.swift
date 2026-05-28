@@ -3721,6 +3721,27 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func selectPreviousReaderTab() {
+        selectAdjacentReaderTab(offset: -1)
+    }
+
+    func selectNextReaderTab() {
+        selectAdjacentReaderTab(offset: 1)
+    }
+
+    private func selectAdjacentReaderTab(offset: Int) {
+        guard route == .reader,
+              readerTabState.tabs.count > 1,
+              let paperID = readerTabState.adjacentPaperID(
+                from: selectedPaper?.id ?? readerTabState.activePaperID,
+                offset: offset
+              ),
+              let tab = readerTabState.tabs.first(where: { $0.paperID == paperID }) else {
+            return
+        }
+        selectReaderTab(tab)
+    }
+
     func closeReaderTab(_ tab: ReaderPaperTab) {
         do {
             let wasActive = readerTabState.activePaperID == tab.paperID

@@ -348,6 +348,18 @@ struct PaperCodexCommands: Commands {
             .keyboardShortcut("3", modifiers: [.command, .option])
             .disabled(!canUseReaderPanelCommand)
 
+            Button("Select Previous Reader Tab") {
+                model.selectPreviousReaderTab()
+            }
+            .keyboardShortcut("[", modifiers: [.command, .shift])
+            .disabled(!canUseReaderTabSwitchCommand)
+
+            Button("Select Next Reader Tab") {
+                model.selectNextReaderTab()
+            }
+            .keyboardShortcut("]", modifiers: [.command, .shift])
+            .disabled(!canUseReaderTabSwitchCommand)
+
             Button("Read Selected Paper") {
                 model.openSelectedLibraryPaperForReading()
             }
@@ -417,5 +429,11 @@ struct PaperCodexCommands: Commands {
 
     private var canUseReaderPanelCommand: Bool {
         navigation.route == .reader && model.selectedPaper != nil
+    }
+
+    private var canUseReaderTabSwitchCommand: Bool {
+        navigation.route == .reader
+            && model.selectedPaper != nil
+            && model.readerTabState.tabs.count > 1
     }
 }

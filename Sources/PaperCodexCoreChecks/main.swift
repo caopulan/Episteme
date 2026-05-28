@@ -190,6 +190,9 @@ func runReaderTabStateChecks() throws {
 
     state.open(paperC)
     _ = state.select("paper-a")
+    try check(state.adjacentPaperID(offset: 1) == "paper-b", "reader tab state should find the next tab from the active tab")
+    try check(state.adjacentPaperID(offset: -1) == "paper-c", "reader tab state should wrap to the previous tab from the first tab")
+    try check(state.adjacentPaperID(from: "paper-c", offset: 1) == "paper-a", "reader tab state should wrap next from the last tab")
     let nextAfterClosingMiddle = state.close("paper-b")
     try check(nextAfterClosingMiddle == "paper-a", "closing an inactive tab should keep the current tab active")
     try check(state.tabs.map(\.paperID) == ["paper-a", "paper-c"], "closing a reader tab should remove only that tab")
@@ -1661,6 +1664,19 @@ func runUILayoutSourceChecks() throws {
             && chatSource.contains(".transition(.opacity.combined(with: .move(edge: .trailing)))")
             && chatSource.contains(".animation(PaperCodexMotion.selection, value: model.selectedSessionPanelTab)"),
         "Reader session panels should be keyboard-switchable and animate panel content changes"
+    )
+    try check(
+        rootViewSource.contains("Button(\"Select Previous Reader Tab\")")
+            && rootViewSource.contains(".keyboardShortcut(\"[\", modifiers: [.command, .shift])")
+            && rootViewSource.contains("Button(\"Select Next Reader Tab\")")
+            && rootViewSource.contains(".keyboardShortcut(\"]\", modifiers: [.command, .shift])")
+            && rootViewSource.contains("canUseReaderTabSwitchCommand")
+            && appModelSource.contains("func selectPreviousReaderTab()")
+            && appModelSource.contains("func selectNextReaderTab()")
+            && windowTabBarSource.contains("ScrollViewReader")
+            && windowTabBarSource.contains("scrollProxy.scrollTo(activePaperID, anchor: .center)")
+            && windowTabBarSource.contains(".animation(PaperCodexMotion.selection, value: model.readerTabState.activePaperID)"),
+        "Reader tabs should support keyboard switching and keep the active tab visibly centered"
     )
     if let panelPickerRange = chatSource.range(of: "Picker(\"Session Panel\""),
        let sessionPickerRange = chatSource.range(of: "Picker(\"Session\"") {

@@ -23,22 +23,34 @@ struct PaperCodexWindowTabBar: View {
                     selectHomeTab()
                 }
 
-                ScrollView(.horizontal) {
-                    HStack(alignment: .bottom, spacing: 0) {
-                        ForEach(model.readerTabState.tabs) { tab in
-                            PaperCodexReaderChromeTabItem(
-                                tab: tab,
-                                isActive: navigation.route == .reader
-                                    && (model.selectedPaper?.id == tab.paperID
-                                        || model.readerTabState.activePaperID == tab.paperID)
-                            )
+                ScrollViewReader { scrollProxy in
+                    ScrollView(.horizontal) {
+                        HStack(alignment: .bottom, spacing: 0) {
+                            ForEach(model.readerTabState.tabs) { tab in
+                                PaperCodexReaderChromeTabItem(
+                                    tab: tab,
+                                    isActive: navigation.route == .reader
+                                        && (model.selectedPaper?.id == tab.paperID
+                                            || model.readerTabState.activePaperID == tab.paperID)
+                                )
+                                .id(tab.paperID)
+                            }
+                        }
+                        .frame(maxHeight: .infinity, alignment: .bottom)
+                        .padding(.top, 8)
+                    }
+                    .scrollIndicators(.hidden)
+                    .frame(height: PaperCodexWindowChrome.tabBarHeight)
+                    .onChange(of: model.readerTabState.activePaperID) { _, activePaperID in
+                        guard let activePaperID else {
+                            return
+                        }
+                        withAnimation(PaperCodexMotion.selection) {
+                            scrollProxy.scrollTo(activePaperID, anchor: .center)
                         }
                     }
-                    .frame(maxHeight: .infinity, alignment: .bottom)
-                    .padding(.top, 8)
+                    .animation(PaperCodexMotion.selection, value: model.readerTabState.activePaperID)
                 }
-                .scrollIndicators(.hidden)
-                .frame(height: PaperCodexWindowChrome.tabBarHeight)
                 .layoutPriority(1)
 
                 if let paper = model.selectedPaper, !paper.isSaved {
