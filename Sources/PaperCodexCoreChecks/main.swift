@@ -1443,6 +1443,42 @@ func runUILayoutSourceChecks() throws {
     } else {
         throw CheckFailure(description: "reader chat composer source should remain inspectable")
     }
+    if let sessionNotesRange = chatSource.range(of: "private struct SessionNotesWorkspace: View"),
+       let sessionNotesEndRange = chatSource.range(of: "private enum ChatComposerLayout", range: sessionNotesRange.upperBound..<chatSource.endIndex) {
+        let sessionNotesSource = String(chatSource[sessionNotesRange.lowerBound..<sessionNotesEndRange.lowerBound])
+        try check(
+            sessionNotesSource.contains("private struct ChatPanelActionButton<Label: View>: View")
+                && sessionNotesSource.contains("private struct ChatPanelActionButtonStyle: ButtonStyle")
+                && sessionNotesSource.contains("private enum ChatPanelActionButtonKind")
+                && sessionNotesSource.contains(".buttonStyle(ChatPanelActionButtonStyle(")
+                && sessionNotesSource.contains("private struct SessionNoteListRowButtonStyle: ButtonStyle")
+                && sessionNotesSource.contains(".buttonStyle(SessionNoteListRowButtonStyle(")
+                && sessionNotesSource.contains("PaperCodexIconButton(title: \"New Note\"")
+                && sessionNotesSource.contains("PaperCodexIconButton(title: \"Delete Note\"")
+                && sessionNotesSource.contains("configuration.isPressed")
+                && sessionNotesSource.contains("PaperCodexMotion.press")
+                && !sessionNotesSource.contains(".buttonStyle(.borderedProminent)")
+                && !sessionNotesSource.contains(".buttonStyle(.bordered)")
+                && !sessionNotesSource.contains(".buttonStyle(.borderless)")
+                && !sessionNotesSource.contains(".buttonStyle(.plain)"),
+            "reader notes panel actions should provide immediate pressed feedback before note edits or deletes"
+        )
+    } else {
+        throw CheckFailure(description: "reader notes workspace source should remain inspectable")
+    }
+    if let messageBubbleRange = chatSource.range(of: "private struct MessageBubble: View"),
+       let messageBubbleEndRange = chatSource.range(of: "private struct GeneratedImageGallery", range: messageBubbleRange.upperBound..<chatSource.endIndex) {
+        let messageBubbleSource = String(chatSource[messageBubbleRange.lowerBound..<messageBubbleEndRange.lowerBound])
+        try check(
+            messageBubbleSource.contains("ChatPanelActionButton(disabled: isBusy)")
+                && chatSource.contains("private struct ChatPanelActionButtonStyle: ButtonStyle")
+                && chatSource.contains("PaperCodexMotion.press")
+                && !messageBubbleSource.contains(".buttonStyle(.bordered)"),
+            "chat failure recovery actions should give immediate pressed feedback before retrying or opening a new session"
+        )
+    } else {
+        throw CheckFailure(description: "chat message bubble source should remain inspectable")
+    }
     try check(
         discoverSource.contains("private struct SaveActionButtonStyle")
             && discoverSource.contains("private struct StableOpenButtonStyle")

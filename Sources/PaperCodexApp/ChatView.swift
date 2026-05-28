@@ -257,15 +257,17 @@ struct ChatView: View {
                 .textFieldStyle(.roundedBorder)
             HStack {
                 Spacer()
-                Button("Cancel") {
+                ChatPanelActionButton {
                     sessionPendingRename = nil
+                } label: {
+                    Text("Cancel")
                 }
-                Button("Save") {
+                ChatPanelActionButton(kind: .primary, disabled: renameSessionTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) {
                     model.renameSession(session, title: renameSessionTitle)
                     sessionPendingRename = nil
+                } label: {
+                    Text("Save")
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(renameSessionTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
         .padding(22)
@@ -622,13 +624,9 @@ private struct SessionNotesPanel: View {
                 .foregroundStyle(.secondary)
                 .frame(minWidth: 22, alignment: .trailing)
                 .contentTransition(.numericText())
-            Button {
+            PaperCodexIconButton(title: "New Note", systemImage: "plus", tint: .accentColor) {
                 clearNoteDraft()
-            } label: {
-                Label("New Note", systemImage: "plus")
             }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
@@ -693,12 +691,9 @@ private struct SessionNotesWorkspace: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
                 Spacer()
-                Button(action: onNew) {
-                    Image(systemName: "plus")
-                        .frame(width: 22, height: 22)
+                PaperCodexIconButton(title: "New Note", systemImage: "plus", tint: .accentColor) {
+                    onNew()
                 }
-                .buttonStyle(.borderless)
-                .help("New Note")
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
@@ -745,11 +740,11 @@ private struct SessionNotesWorkspace: View {
                     .font(.paperCodexSystem(size: 13, weight: .semibold))
                 Spacer()
                 if editingNoteID != nil {
-                    Button("Cancel") {
+                    ChatPanelActionButton {
                         onNew()
+                    } label: {
+                        Text("Cancel")
                     }
-                    .buttonStyle(.borderless)
-                    .controlSize(.small)
                 }
             }
             .padding(.horizontal, 14)
@@ -773,14 +768,15 @@ private struct SessionNotesWorkspace: View {
                     )
 
                 HStack {
-                    Button {
+                    ChatPanelActionButton(
+                        kind: .primary,
+                        disabled: noteTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                            && noteBody.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    ) {
                         onSave(paper)
                     } label: {
                         Label(editingNoteID == nil ? "Add Note" : "Save Note", systemImage: "checkmark")
                     }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(noteTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                        && noteBody.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
                     Spacer()
 
@@ -798,13 +794,15 @@ private struct SessionNotesWorkspace: View {
 }
 
 private struct SessionNoteListRow: View {
+    @State private var isHovering = false
+
     var note: PaperNote
     var isSelected: Bool
     var onSelect: () -> Void
     var onDelete: () -> Void
 
     var body: some View {
-        HStack(alignment: .top, spacing: 8) {
+        HStack(alignment: .center, spacing: 6) {
             Button(action: onSelect) {
                 VStack(alignment: .leading, spacing: 5) {
                     Text(note.title)
@@ -818,29 +816,198 @@ private struct SessionNoteListRow: View {
                             .lineLimit(2)
                     }
                 }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 7)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
-
-            Button(action: onDelete) {
-                Image(systemName: "trash")
-                    .font(.paperCodexSystem(size: 11))
-                    .frame(width: 20, height: 20)
+            .buttonStyle(SessionNoteListRowButtonStyle(selected: isSelected, isHovering: isHovering))
+            .onHover { hovering in
+                withAnimation(PaperCodexMotion.hover) {
+                    isHovering = hovering
+                }
             }
-            .buttonStyle(.borderless)
-            .foregroundStyle(.secondary)
-            .help("Delete Note")
+
+            PaperCodexIconButton(title: "Delete Note", systemImage: "trash", tint: .red) {
+                onDelete()
+            }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 9)
-        .background(isSelected ? Color.accentColor.opacity(0.12) : Color.clear)
-        .overlay(alignment: .leading) {
-            Rectangle()
-                .fill(isSelected ? Color.accentColor : Color.clear)
-                .frame(width: 3)
-        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3)
         .contentShape(Rectangle())
+    }
+}
+
+private enum ChatPanelActionButtonKind {
+    case primary
+    case secondary
+    case destructive
+
+    var tint: Color {
+        switch self {
+        case .primary:
+            Color.accentColor
+        case .secondary:
+            Color.secondary
+        case .destructive:
+            Color.red
+        }
+    }
+}
+
+private struct ChatPanelActionButton<Label: View>: View {
+    @State private var isHovering = false
+
+    var kind: ChatPanelActionButtonKind = .secondary
+    var disabled = false
+    var role: ButtonRole?
+    var action: () -> Void
+    @ViewBuilder var label: () -> Label
+
+    var body: some View {
+        Button(role: role, action: action) {
+            label()
+        }
+        .buttonStyle(ChatPanelActionButtonStyle(kind: kind, disabled: disabled, isHovering: isHovering))
+        .disabled(disabled)
+        .onHover { hovering in
+            withAnimation(PaperCodexMotion.hover) {
+                isHovering = hovering
+            }
+        }
+    }
+}
+
+private struct ChatPanelActionButtonStyle: ButtonStyle {
+    var kind: ChatPanelActionButtonKind
+    var disabled: Bool
+    var isHovering: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        let isPressed = configuration.isPressed && !disabled
+        configuration.label
+            .font(.paperCodexSystem(size: 12.5, weight: .semibold))
+            .lineLimit(1)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .foregroundStyle(foregroundColor(isPressed: isPressed))
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(backgroundColor(isPressed: isPressed))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(borderColor(isPressed: isPressed), lineWidth: 1)
+            )
+            .shadow(color: shadowColor(isPressed: isPressed), radius: isPressed ? 3 : 7, y: isPressed ? 1 : 3)
+            .scaleEffect(buttonScale(isPressed: isPressed), anchor: .center)
+            .animation(PaperCodexMotion.press, value: configuration.isPressed)
+            .animation(PaperCodexMotion.hover, value: isHovering)
+            .animation(PaperCodexMotion.hover, value: disabled)
+    }
+
+    private func foregroundColor(isPressed: Bool) -> Color {
+        if disabled {
+            return Color.secondary.opacity(0.48)
+        }
+        switch kind {
+        case .primary:
+            return .white
+        case .secondary, .destructive:
+            return isPressed || isHovering ? kind.tint : Color.primary.opacity(0.82)
+        }
+    }
+
+    private func backgroundColor(isPressed: Bool) -> Color {
+        if disabled {
+            return Color(nsColor: .controlBackgroundColor).opacity(0.55)
+        }
+        switch kind {
+        case .primary:
+            return Color.accentColor.opacity(isPressed ? 0.82 : (isHovering ? 0.96 : 0.90))
+        case .secondary, .destructive:
+            if isPressed {
+                return kind.tint.opacity(0.18)
+            }
+            return isHovering ? kind.tint.opacity(0.12) : Color(nsColor: .controlBackgroundColor)
+        }
+    }
+
+    private func borderColor(isPressed: Bool) -> Color {
+        if disabled {
+            return Color.black.opacity(0.06)
+        }
+        switch kind {
+        case .primary:
+            return Color.accentColor.opacity(isPressed ? 0.62 : (isHovering ? 0.48 : 0.34))
+        case .secondary, .destructive:
+            if isPressed {
+                return kind.tint.opacity(0.54)
+            }
+            return isHovering ? kind.tint.opacity(0.38) : Color.black.opacity(0.10)
+        }
+    }
+
+    private func shadowColor(isPressed: Bool) -> Color {
+        if disabled {
+            return .clear
+        }
+        return kind.tint.opacity(isPressed ? 0.10 : (isHovering ? 0.16 : 0))
+    }
+
+    private func buttonScale(isPressed: Bool) -> CGFloat {
+        if disabled {
+            return 1
+        }
+        return isPressed ? 0.97 : (isHovering ? 1.02 : 1)
+    }
+}
+
+private struct SessionNoteListRowButtonStyle: ButtonStyle {
+    var selected: Bool
+    var isHovering: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        let isPressed = configuration.isPressed
+        configuration.label
+            .background(
+                RoundedRectangle(cornerRadius: 7)
+                    .fill(backgroundColor(isPressed: isPressed))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 7)
+                    .stroke(borderColor(isPressed: isPressed), lineWidth: 1)
+            )
+            .overlay(alignment: .leading) {
+                if selected || isPressed {
+                    Capsule()
+                        .fill(Color.accentColor.opacity(selected ? 0.72 : 0.48))
+                        .frame(width: 3, height: 22)
+                        .padding(.leading, 3)
+                        .transition(.opacity.combined(with: .scale(scale: 0.86)))
+                }
+            }
+            .scaleEffect(isPressed ? 0.988 : (isHovering ? 1.008 : 1), anchor: .center)
+            .animation(PaperCodexMotion.press, value: configuration.isPressed)
+            .animation(PaperCodexMotion.hover, value: isHovering)
+            .animation(PaperCodexMotion.selection, value: selected)
+    }
+
+    private func backgroundColor(isPressed: Bool) -> Color {
+        if isPressed {
+            return Color.accentColor.opacity(0.16)
+        }
+        if selected {
+            return Color.accentColor.opacity(0.12)
+        }
+        return isHovering ? Color(nsColor: .textBackgroundColor) : Color.clear
+    }
+
+    private func borderColor(isPressed: Bool) -> Color {
+        if isPressed {
+            return Color.accentColor.opacity(0.38)
+        }
+        return isHovering ? Color.accentColor.opacity(0.20) : Color.clear
     }
 }
 
@@ -1433,23 +1600,17 @@ private struct MessageBubble: View {
                 }
                 if failureNotice != nil {
                     HStack(spacing: 8) {
-                        Button {
+                        ChatPanelActionButton(disabled: isBusy) {
                             onRetryFailure(message.id)
                         } label: {
                             Label("Retry", systemImage: "arrow.clockwise")
                         }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                        .disabled(isBusy)
 
-                        Button {
+                        ChatPanelActionButton(disabled: isBusy) {
                             onNewSession()
                         } label: {
                             Label("New Session", systemImage: "plus.bubble")
                         }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                        .disabled(isBusy)
                     }
                     .padding(.top, 2)
                 }
