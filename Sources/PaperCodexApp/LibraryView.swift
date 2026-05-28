@@ -25,6 +25,7 @@ struct LibraryView: View {
     @State private var tagPendingManagement: PaperTag?
     @State private var tagPendingDelete: PaperTag?
     @State private var draggedCategoryID: String?
+    @State private var liveCategoryDropKey: String?
     @State private var watchedFolderPendingRemoval: WatchedFolder?
     @State private var noteTitle = ""
     @State private var noteBody = ""
@@ -346,6 +347,7 @@ struct LibraryView: View {
                         model.moveCategory(droppedCategoryID, toParent: nil)
                     }
                     draggedCategoryID = nil
+                    liveCategoryDropKey = nil
                 }
             ) {
                 selectRootLibrary()
@@ -368,6 +370,7 @@ struct LibraryView: View {
                             categoryDragPayload: categoryDragPayload(for: item.category),
                             onDragCategory: {
                                 draggedCategoryID = item.category.id
+                                liveCategoryDropKey = nil
                             },
                             canDropCategory: { placement in
                                 guard let draggedCategoryID else {
@@ -376,6 +379,16 @@ struct LibraryView: View {
                                 return model.canDropCategory(
                                     draggedCategoryID,
                                     onto: item.category.id,
+                                    placement: placement
+                                )
+                            },
+                            onPreviewCategoryDrop: { placement in
+                                guard let draggedCategoryID else {
+                                    return
+                                }
+                                previewCategoryDrop(
+                                    draggedCategoryID,
+                                    relativeTo: item.category.id,
                                     placement: placement
                                 )
                             },
@@ -412,6 +425,7 @@ struct LibraryView: View {
                                     }
                                 }
                                 draggedCategoryID = nil
+                                liveCategoryDropKey = nil
                             }
                         )
                     }
@@ -548,6 +562,7 @@ struct LibraryView: View {
                         .contentShape(Rectangle())
                         .onDrag {
                             draggedCategoryID = nil
+                            liveCategoryDropKey = nil
                             return NSItemProvider(object: paperDragPayload(for: paper) as NSString)
                         } preview: {
                             PaperDragPreview(
@@ -1135,6 +1150,35 @@ struct LibraryView: View {
             model.movePapers(paperIDs, toCategory: categoryID)
         } else {
             model.copyPapers(paperIDs, toCategory: categoryID)
+        }
+    }
+
+    private func previewCategoryDrop(
+        _ draggedCategoryID: String,
+        relativeTo targetCategoryID: String,
+        placement: LibraryCategoryDropPlacement
+    ) {
+        guard draggedCategoryID != targetCategoryID else {
+            return
+        }
+        guard placement == .before || placement == .after else {
+            return
+        }
+        let dropKey = "\(draggedCategoryID)|\(targetCategoryID)|\(placement)"
+        guard liveCategoryDropKey != dropKey else {
+            return
+        }
+        guard model.canDropCategory(draggedCategoryID, onto: targetCategoryID, placement: placement) else {
+            return
+        }
+        liveCategoryDropKey = dropKey
+        withAnimation(.spring(response: 0.22, dampingFraction: 0.82)) {
+            model.reorderCategory(
+                draggedCategoryID,
+                relativeTo: targetCategoryID,
+                placement: placement,
+                postsNotice: false
+            )
         }
     }
 
@@ -2972,6 +3016,7 @@ private struct CategorySidebarRow: View {
     var categoryDragPayload: String
     var onDragCategory: () -> Void
     var canDropCategory: (LibraryCategoryDropPlacement) -> Bool
+    var onPreviewCategoryDrop: (LibraryCategoryDropPlacement) -> Void
     var onToggle: () -> Void
     var onSelect: () -> Void
     var onCreateChild: () -> Void
@@ -3108,6 +3153,7 @@ private struct CategorySidebarRow: View {
                 isTargeted: $isDropTargeted,
                 placement: $dropPlacement,
                 canDrop: canDropCategory,
+                onPreviewDrop: onPreviewCategoryDrop,
                 onDrop: loadDroppedItems(from:placement:)
             )
         )
@@ -3239,6 +3285,7 @@ private struct CategorySidebarDropDelegate: DropDelegate {
     @Binding var isTargeted: Bool
     @Binding var placement: LibraryCategoryDropPlacement?
     var canDrop: (LibraryCategoryDropPlacement) -> Bool
+    var onPreviewDrop: (LibraryCategoryDropPlacement) -> Void
     var onDrop: ([NSItemProvider], LibraryCategoryDropPlacement) -> Bool
 
     func validateDrop(info: DropInfo) -> Bool {
@@ -3246,11 +3293,15 @@ private struct CategorySidebarDropDelegate: DropDelegate {
     }
 
     func dropEntered(info: DropInfo) {
-        updateDropState(info: info)
+        if let validPlacement = updateDropState(info: info) {
+            onPreviewDrop(validPlacement)
+        }
     }
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
-        updateDropState(info: info)
+        if let validPlacement = updateDropState(info: info) {
+            onPreviewDrop(validPlacement)
+        }
         return placement == nil ? nil : DropProposal(operation: .move)
     }
 
@@ -3270,13 +3321,15 @@ private struct CategorySidebarDropDelegate: DropDelegate {
         return onDrop(info.itemProviders(for: LibraryLayout.categoryDropContentTypes), finalPlacement)
     }
 
-    private func updateDropState(info: DropInfo) {
+    private func updateDropState(info: DropInfo) -> LibraryCategoryDropPlacement? {
         if let validPlacement = validPlacement(for: info) {
             isTargeted = true
             placement = validPlacement
+            return validPlacement
         } else {
             isTargeted = false
             placement = nil
+            return nil
         }
     }
 

@@ -1080,12 +1080,16 @@ func runUILayoutSourceChecks() throws {
     )
     try check(
         librarySource.contains("@State private var draggedCategoryID")
+            && librarySource.contains("@State private var liveCategoryDropKey")
             && librarySource.contains("canDropCategory: { placement in")
             && librarySource.contains("model.canDropCategory(")
+            && librarySource.contains("onPreviewCategoryDrop")
             && librarySource.contains("LibraryRootFolderDropDelegate")
             && librarySource.contains("model.canMoveCategory(draggedCategoryID, toParent: nil)")
-            && appModelSource.contains("typealias LibraryCategoryDropPlacement = CategoryMovePlacement"),
-        "library folder dragging should reject invalid self/descendant targets and allow moving folders back to the top level"
+            && appModelSource.contains("func reorderCategory(")
+            && appModelSource.contains("postsNotice: Bool = true")
+            && appModelSource.contains("if postsNotice {"),
+        "library folder dragging should reject invalid targets, allow top-level moves, and reorder sibling folders live during hover"
     )
     try check(
         librarySource.contains("onTogglePinned")

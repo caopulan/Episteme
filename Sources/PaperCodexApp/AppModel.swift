@@ -3041,7 +3041,12 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func reorderCategory(_ categoryID: String, relativeTo targetCategoryID: String, placement: LibraryCategoryDropPlacement) {
+    func reorderCategory(
+        _ categoryID: String,
+        relativeTo targetCategoryID: String,
+        placement: LibraryCategoryDropPlacement,
+        postsNotice: Bool = true
+    ) {
         do {
             guard let repository else {
                 throw AppModelError.repositoryUnavailable
@@ -3061,7 +3066,9 @@ final class AppModel: ObservableObject {
             }
             try saveCategoryChanges(changedCategories, repository: repository)
             try reloadLibrary()
-            postNotice(kind: .success, title: "Category Reordered", message: category.name)
+            if postsNotice {
+                postNotice(kind: .success, title: "Category Reordered", message: category.name)
+            }
         } catch {
             errorMessage = String(describing: error)
         }
