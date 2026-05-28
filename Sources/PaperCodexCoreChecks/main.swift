@@ -14,6 +14,13 @@ func check(_ condition: @autoclosure () -> Bool, _ message: String) throws {
     }
 }
 
+func require<T>(_ value: T?, _ message: String) throws -> T {
+    guard let value else {
+        throw CheckFailure(description: message)
+    }
+    return value
+}
+
 func runModelsChecks() throws {
     let span = Span(
         id: Span.makeID(paperID: "paper-a", page: 5, blockIndex: 17),
@@ -890,6 +897,7 @@ func runUILayoutSourceChecks() throws {
     let librarySource = try String(contentsOf: libraryViewURL)
     let appModelURL = root.appendingPathComponent("Sources/PaperCodexApp/AppModel.swift")
     let appModelSource = try String(contentsOf: appModelURL)
+    let libraryFeatureStoreSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/LibraryFeatureStore.swift"))
 
     try check(
         librarySource.contains("static let splitPaneTopInset: CGFloat"),
@@ -1107,6 +1115,35 @@ func runUILayoutSourceChecks() throws {
         "library folder dragging should reject invalid targets, allow top-level moves, and preview live sibling reordering without database writes, duplicate dropUpdated work, or stale canceled previews"
     )
     try check(
+        libraryFeatureStoreSource.contains("struct LibrarySelection")
+            && libraryFeatureStoreSource.contains("@Published private var selection")
+            && libraryFeatureStoreSource.contains("func setSelection(")
+            && !libraryFeatureStoreSource.contains("@Published var selectedLibrarySurface")
+            && !libraryFeatureStoreSource.contains("@Published var librarySelectedCategoryID")
+            && !libraryFeatureStoreSource.contains("@Published var librarySelectedTagID")
+            && appModelSource.contains("func setLibrarySelection(")
+            && librarySource.contains("model.setLibrarySelection(surface: .papers, categoryID: nil, tagID: nil)")
+            && librarySource.contains("model.setLibrarySelection(surface: .papers, categoryID: categoryID, tagID: nil)")
+            && librarySource.contains("model.setLibrarySelection(surface: .papers, categoryID: nil, tagID: tagID)"),
+        "library route/tag/folder selection should update as one snapshot instead of firing several published changes per click"
+    )
+    let moveCategoryRange = try require(appModelSource.range(of: "func moveCategory(_ categoryID: String, toParent parentID: String?)"), "moveCategory source should exist")
+    let setCategoryPinnedRange = try require(appModelSource.range(of: "func setCategoryPinned("), "setCategoryPinned source should exist")
+    let categoryMoveSource = String(appModelSource[moveCategoryRange.lowerBound..<setCategoryPinnedRange.lowerBound])
+    try check(
+        categoryMoveSource.contains("libraryStore.applyCategories(updatedCategories)")
+            && !categoryMoveSource.contains("try reloadLibrary()"),
+        "folder move/reorder commits should update the in-memory library category snapshot instead of reloading the full library on drop"
+    )
+    try check(
+        librarySource.contains("GeometryReader { proxy in")
+            && librarySource.contains("isCompactLibraryContent(width: proxy.size.width)")
+            && librarySource.contains("if isCompactLibraryContent(width: proxy.size.width)")
+            && librarySource.contains("static let compactContentWidthThreshold")
+            && !librarySource.contains(".frame(minWidth: LibraryLayout.libraryPrimaryPaneMinimumWidth)\n            secondaryContentPane"),
+        "library split content should enter a compact layout before the primary middle pane is clipped"
+    )
+    try check(
         librarySource.contains("onTogglePinned")
             && librarySource.contains("pin.fill")
             && appModelSource.contains("func setCategoryPinned("),
@@ -1170,7 +1207,6 @@ func runUILayoutSourceChecks() throws {
     let windowTabBarSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/WindowChromeTabBar.swift"))
     let homeChromeSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/WindowChrome.swift"))
     let localThumbnailSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/LocalThumbnailImage.swift"))
-    let libraryFeatureStoreSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/LibraryFeatureStore.swift"))
     let libraryDerivedStateSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexCore/LibraryDerivedState.swift"))
     let readerFeatureStoreSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/ReaderFeatureStore.swift"))
     let discoverFeatureStoreSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/DiscoverFeatureStore.swift"))
@@ -1334,9 +1370,10 @@ func runUILayoutSourceChecks() throws {
     )
     try check(
         (appModelSource.contains("@Published var selectedLibrarySurface: LibrarySurface")
-            || libraryFeatureStoreSource.contains("@Published var selectedLibrarySurface: LibrarySurface"))
+            || libraryFeatureStoreSource.contains("@Published var selectedLibrarySurface: LibrarySurface")
+            || libraryFeatureStoreSource.contains("@Published private var selection"))
             && appModelSource.contains("func showRecentConversations()")
-            && appModelSource.contains("selectedLibrarySurface = .recentConversations")
+            && appModelSource.contains("setLibrarySelection(surface: .recentConversations, categoryID: nil, tagID: nil)")
             && !librarySource.contains("@State private var selectedLibrarySurface"),
         "Recent Conversations selection should be app-level navigation state instead of LibraryView local state"
     )

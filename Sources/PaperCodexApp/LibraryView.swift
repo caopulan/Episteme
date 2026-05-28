@@ -487,17 +487,26 @@ struct LibraryView: View {
     }
 
     private var contentPane: some View {
-        HSplitView {
-            primaryContentPane
-                .padding(.top, LibraryLayout.splitPaneTopInset)
-                .frame(minWidth: LibraryLayout.libraryPrimaryPaneMinimumWidth)
-            secondaryContentPane
-                .padding(.top, LibraryLayout.splitPaneTopInset)
-                .frame(
-                    minWidth: LibraryLayout.libraryInspectorMinimumWidth,
-                    idealWidth: LibraryLayout.libraryInspectorIdealWidth,
-                    maxWidth: LibraryLayout.libraryInspectorMaximumWidth
-                )
+        GeometryReader { proxy in
+            if isCompactLibraryContent(width: proxy.size.width) {
+                primaryContentPane
+                    .padding(.top, LibraryLayout.splitPaneTopInset)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                HSplitView {
+                    primaryContentPane
+                        .padding(.top, LibraryLayout.splitPaneTopInset)
+                        .frame(minWidth: LibraryLayout.libraryPrimaryPaneMinimumWidth)
+                    secondaryContentPane
+                        .padding(.top, LibraryLayout.splitPaneTopInset)
+                        .frame(
+                            minWidth: LibraryLayout.libraryInspectorMinimumWidth,
+                            idealWidth: LibraryLayout.libraryInspectorIdealWidth,
+                            maxWidth: LibraryLayout.libraryInspectorMaximumWidth
+                        )
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
         }
     }
 
@@ -1132,35 +1141,31 @@ struct LibraryView: View {
 
     private func selectRootLibrary() {
         applyFastLibrarySelection {
-            selectedLibrarySurface = .papers
-            selectedCategoryID = nil
-            selectedTagID = nil
+            model.setLibrarySelection(surface: .papers, categoryID: nil, tagID: nil)
         }
     }
 
     private func selectLibraryCategory(_ categoryID: String) {
         applyFastLibrarySelection {
-            selectedLibrarySurface = .papers
-            selectedCategoryID = categoryID
-            selectedTagID = nil
+            model.setLibrarySelection(surface: .papers, categoryID: categoryID, tagID: nil)
         }
     }
 
     private func selectLibraryTag(_ tagID: String) {
         applyFastLibrarySelection {
-            selectedLibrarySurface = .papers
-            selectedTagID = tagID
-            selectedCategoryID = nil
+            model.setLibrarySelection(surface: .papers, categoryID: nil, tagID: tagID)
         }
     }
 
     private func clearLibraryFilters() {
         applyFastLibrarySelection {
             searchText = ""
-            selectedCategoryID = nil
-            selectedTagID = nil
-            selectedLibrarySurface = .papers
+            model.setLibrarySelection(surface: .papers, categoryID: nil, tagID: nil)
         }
+    }
+
+    private func isCompactLibraryContent(width: CGFloat) -> Bool {
+        width < LibraryLayout.compactContentWidthThreshold
     }
 
     private func toggleCategoryCollapsed(_ categoryID: String) {
@@ -2083,6 +2088,7 @@ private enum LibraryLayout {
     static let libraryInspectorMinimumWidth: CGFloat = 220
     static let libraryInspectorIdealWidth: CGFloat = 300
     static let libraryInspectorMaximumWidth: CGFloat = 380
+    static let compactContentWidthThreshold: CGFloat = 860
     static let splitPaneTopInset: CGFloat = 0
     static let bulkActionBarOverlayYOffset: CGFloat = 148
     static let bulkActionBarOverlayOpacity = 0.66

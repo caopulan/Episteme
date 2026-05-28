@@ -1,6 +1,12 @@
 import Foundation
 import PaperCodexCore
 
+struct LibrarySelection: Equatable {
+    var surface: LibrarySurface
+    var categoryID: String?
+    var tagID: String?
+}
+
 @MainActor
 final class LibraryFeatureStore: ObservableObject {
     @Published var papers: [Paper] = []
@@ -11,12 +17,39 @@ final class LibraryFeatureStore: ObservableObject {
     @Published var paperTagsByID: [String: [PaperTag]] = [:]
     @Published var libraryDerivedState: PaperLibraryDerivedState = .empty
     @Published var selectedLibraryPaper: Paper?
-    @Published var selectedLibrarySurface: LibrarySurface = .papers
+    @Published private var selection = LibrarySelection(surface: .papers, categoryID: nil, tagID: nil)
     @Published var librarySearchText = ""
-    @Published var librarySelectedCategoryID: String?
-    @Published var librarySelectedTagID: String?
     @Published var paperThumbnailURLsByID: [String: [URL]] = [:]
     @Published var paperNotesByID: [String: [PaperNote]] = [:]
+
+    var selectedLibrarySurface: LibrarySurface {
+        get { selection.surface }
+        set {
+            setSelection(surface: newValue, categoryID: selection.categoryID, tagID: selection.tagID)
+        }
+    }
+
+    var librarySelectedCategoryID: String? {
+        get { selection.categoryID }
+        set {
+            setSelection(surface: selection.surface, categoryID: newValue, tagID: selection.tagID)
+        }
+    }
+
+    var librarySelectedTagID: String? {
+        get { selection.tagID }
+        set {
+            setSelection(surface: selection.surface, categoryID: selection.categoryID, tagID: newValue)
+        }
+    }
+
+    func setSelection(surface: LibrarySurface, categoryID: String?, tagID: String?) {
+        let nextSelection = LibrarySelection(surface: surface, categoryID: categoryID, tagID: tagID)
+        guard selection != nextSelection else {
+            return
+        }
+        selection = nextSelection
+    }
 
     func applySnapshot(
         papers: [Paper],
@@ -42,5 +75,15 @@ final class LibraryFeatureStore: ObservableObject {
         if let selectedPaperID {
             selectedLibraryPaper = papers.first { $0.id == selectedPaperID }
         }
+    }
+
+    func applyCategories(_ categories: [PaperCodexCore.Category]) {
+        self.categories = categories
+        libraryDerivedState = PaperLibraryDerivedState.build(
+            papers: papers,
+            categories: categories,
+            categoryIDsByPaperID: paperCategoryIDsByID,
+            tagsByPaperID: paperTagsByID
+        )
     }
 }

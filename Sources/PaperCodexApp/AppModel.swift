@@ -34,7 +34,7 @@ final class AppNavigation: ObservableObject {
     @Published var route: AppRoute = .library
 }
 
-enum LibrarySurface {
+enum LibrarySurface: Equatable {
     case recentConversations
     case papers
 }
@@ -435,6 +435,10 @@ final class AppModel: ObservableObject {
     var librarySelectedTagID: String? {
         get { libraryStore.librarySelectedTagID }
         set { libraryStore.librarySelectedTagID = newValue }
+    }
+
+    func setLibrarySelection(surface: LibrarySurface, categoryID: String?, tagID: String?) {
+        libraryStore.setSelection(surface: surface, categoryID: categoryID, tagID: tagID)
     }
 
     var readerReturnRoute: AppRoute {
@@ -1159,19 +1163,15 @@ final class AppModel: ObservableObject {
             case "app.reveal_paper":
                 let paper = try paperFromMCPCommand(command, repository: repository)
                 selectedLibraryPaper = paper
-                selectedLibrarySurface = .papers
+                setLibrarySelection(surface: .papers, categoryID: nil, tagID: nil)
                 route = .library
             case "app.open_folder":
                 let folderID = try mcpCommandArgument("folder_id", in: command)
-                librarySelectedCategoryID = folderID
-                librarySelectedTagID = nil
-                selectedLibrarySurface = .papers
+                setLibrarySelection(surface: .papers, categoryID: folderID, tagID: nil)
                 route = .library
             case "app.open_tag":
                 let tagID = try mcpCommandArgument("tag_id", in: command)
-                librarySelectedTagID = tagID
-                librarySelectedCategoryID = nil
-                selectedLibrarySurface = .papers
+                setLibrarySelection(surface: .papers, categoryID: nil, tagID: tagID)
                 route = .library
             case "app.jump_to_page":
                 let paper = try paperFromMCPCommand(command, repository: repository)
@@ -1640,7 +1640,7 @@ final class AppModel: ObservableObject {
     }
 
     func showRecentConversations() {
-        selectedLibrarySurface = .recentConversations
+        setLibrarySelection(surface: .recentConversations, categoryID: nil, tagID: nil)
         route = .library
         scheduleRecentSessionsRefresh()
     }
@@ -3034,7 +3034,7 @@ final class AppModel: ObservableObject {
                 return
             }
             try saveCategoryChanges(changedCategories, repository: repository)
-            try reloadLibrary()
+            libraryStore.applyCategories(updatedCategories)
             postNotice(kind: .success, title: "Category Moved", message: category.name)
         } catch {
             errorMessage = String(describing: error)
@@ -3065,7 +3065,7 @@ final class AppModel: ObservableObject {
                 return
             }
             try saveCategoryChanges(changedCategories, repository: repository)
-            try reloadLibrary()
+            libraryStore.applyCategories(updatedCategories)
             if postsNotice {
                 postNotice(kind: .success, title: "Category Reordered", message: category.name)
             }
@@ -3702,7 +3702,7 @@ final class AppModel: ObservableObject {
     func openPapersForReading(_ paperIDs: [String]) {
         do {
             readerReturnRoute = .library
-            selectedLibrarySurface = .papers
+            setLibrarySelection(surface: .papers, categoryID: librarySelectedCategoryID, tagID: librarySelectedTagID)
             try openPaperSet(paperIDs, opensReaderTabs: true, panelTab: .chat)
         } catch {
             errorMessage = String(describing: error)
@@ -3712,7 +3712,7 @@ final class AppModel: ObservableObject {
     func openPapersForChat(_ paperIDs: [String]) {
         do {
             readerReturnRoute = .library
-            selectedLibrarySurface = .papers
+            setLibrarySelection(surface: .papers, categoryID: librarySelectedCategoryID, tagID: librarySelectedTagID)
             try openPaperSet(paperIDs, opensReaderTabs: true, panelTab: .chat)
         } catch {
             errorMessage = String(describing: error)
@@ -3753,7 +3753,7 @@ final class AppModel: ObservableObject {
                 throw AppModelError.noSelectedPaper
             }
             readerReturnRoute = .library
-            selectedLibrarySurface = .recentConversations
+            setLibrarySelection(surface: .recentConversations, categoryID: nil, tagID: nil)
             selectedSessionPanelTab = .chat
             for paper in paperSet {
                 openOrUpdateReaderTab(paper)
@@ -4608,7 +4608,7 @@ final class AppModel: ObservableObject {
     }
 
     func goToLibrary() {
-        selectedLibrarySurface = .papers
+        setLibrarySelection(surface: .papers, categoryID: nil, tagID: nil)
         route = .library
     }
 
