@@ -1588,6 +1588,34 @@ private struct MessageBubble: View {
         return parsed.displayMarkdown
     }
 
+    private var chatBubbleContentWidth: CGFloat? {
+        let trimmedMarkdown = renderedMarkdown.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedMarkdown.isEmpty else {
+            return nil
+        }
+        if userSourceAttachment != nil || failureNotice != nil || trimmedMarkdown.contains("\n") || trimmedMarkdown.count > 120 {
+            return chatBubbleMaximumContentWidth
+        }
+
+        let displayText = chatBubbleWidthText(from: trimmedMarkdown)
+        guard !displayText.isEmpty else {
+            return nil
+        }
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: fontFamily.nsFont(size: messageFontSize)
+        ]
+        let measured = (displayText as NSString).boundingRect(
+            with: CGSize(width: chatBubbleMaximumContentWidth, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: attributes
+        )
+        return min(max(ceil(measured.width) + 2, 44), chatBubbleMaximumContentWidth)
+    }
+
+    private var chatBubbleMaximumContentWidth: CGFloat {
+        PaperCodexTypography.readableLineWidth - 26
+    }
+
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             if isUser {
@@ -1620,7 +1648,7 @@ private struct MessageBubble: View {
                             fontFamily: fontFamily,
                             onCitation: onCitation
                         )
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .frame(width: chatBubbleContentWidth, alignment: .leading)
                     }
                     let imageURLs = generatedImageURLs(in: message.content)
                     if !imageURLs.isEmpty {
@@ -1644,7 +1672,8 @@ private struct MessageBubble: View {
                     }
                 }
                 .padding(.horizontal, 13)
-                .padding(.vertical, 11)
+                .padding(.top, 10)
+                .padding(.bottom, 8)
                 .background(ChatMessageBubbleBackground(isUser: isUser))
             }
             .paperCodexReadableLineLimit(alignment: isUser ? .trailing : .leading)
@@ -1696,18 +1725,28 @@ private struct ChatMessageBubbleBackground: View {
 
     private var fill: Color {
         if isUser {
-            return Color.accentColor.opacity(0.13)
+            return Color.accentColor.opacity(0.08)
         }
         return PaperCodexSurface.text
     }
 
     private var stroke: Color {
-        isUser ? Color.accentColor.opacity(0.24) : Color.black.opacity(0.08)
+        isUser ? Color.accentColor.opacity(0.16) : Color.black.opacity(0.06)
     }
 
     private var shadow: Color {
         isUser ? Color.accentColor.opacity(0.10) : Color.black.opacity(0.05)
     }
+}
+
+private func chatBubbleWidthText(from markdown: String) -> String {
+    var text = markdown
+    text = text.replacingOccurrences(of: #"!\[[^\]]*\]\([^)]+\)"#, with: "", options: .regularExpression)
+    text = text.replacingOccurrences(of: #"\[([^\]]+)\]\([^)]+\)"#, with: "$1", options: .regularExpression)
+    text = text.replacingOccurrences(of: #"`([^`]+)`"#, with: "$1", options: .regularExpression)
+    text = text.replacingOccurrences(of: #"[*_#>~-]+"#, with: "", options: .regularExpression)
+    text = text.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+    return text.trimmingCharacters(in: .whitespacesAndNewlines)
 }
 
 private func generatedImageURLs(in markdown: String) -> [URL] {

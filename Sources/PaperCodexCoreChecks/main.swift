@@ -3087,6 +3087,7 @@ func runUIDesignSourceChecks() throws {
     let sidebarRowSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/SidebarRowButton.swift"))
     let tabBarSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/WindowChromeTabBar.swift"))
     let typographySource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/Typography.swift"))
+    let chatSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/ChatView.swift"))
 
     try check(
         designSystemSource.contains("enum PaperCodexSurface")
@@ -3114,6 +3115,26 @@ func runUIDesignSourceChecks() throws {
         typographySource.contains(".dynamicTypeSize(.medium ... .accessibility2)")
             && typographySource.contains("paperCodexReadableLineLimit"),
         "Paper Codex typography should preserve readable line length and avoid forcing a single Dynamic Type size"
+    )
+    if let messageBubbleRange = chatSource.range(of: "private struct MessageBubble: View"),
+       let messageBubbleEndRange = chatSource.range(of: "private struct ChatRoleBadge: View", range: messageBubbleRange.upperBound..<chatSource.endIndex) {
+        let messageBubbleSource = String(chatSource[messageBubbleRange.lowerBound..<messageBubbleEndRange.lowerBound])
+        try check(
+            messageBubbleSource.contains("private var chatBubbleContentWidth: CGFloat?")
+                && messageBubbleSource.contains(".frame(width: chatBubbleContentWidth, alignment: .leading)")
+                && messageBubbleSource.contains(".padding(.top, 10)")
+                && messageBubbleSource.contains(".padding(.bottom, 8)")
+                && !messageBubbleSource.contains(".padding(.vertical, 11)")
+                && !messageBubbleSource.contains(".frame(maxWidth: .infinity, alignment: .leading)"),
+            "message bubbles should be less bottom-heavy and shrink short messages instead of forcing equal-width bubbles"
+        )
+    } else {
+        throw CheckFailure(description: "message bubble source should remain inspectable")
+    }
+    try check(
+        chatSource.contains("return Color.accentColor.opacity(0.08)")
+            && chatSource.contains("isUser ? Color.accentColor.opacity(0.16) : Color.black.opacity(0.06)"),
+        "chat bubble color and border should stay quieter than the surrounding chrome"
     )
 }
 
