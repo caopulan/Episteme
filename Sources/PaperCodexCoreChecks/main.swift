@@ -1376,6 +1376,15 @@ func runUILayoutSourceChecks() throws {
         "shared toolbar and icon actions should provide immediate pressed feedback"
     )
     try check(
+        discoverSource.contains("private struct SaveActionButtonStyle")
+            && discoverSource.contains("private struct StableOpenButtonStyle")
+            && discoverSource.components(separatedBy: "configuration.isPressed").count - 1 >= 2
+            && discoverSource.components(separatedBy: "PaperCodexMotion.press").count - 1 >= 2
+            && discoverSource.contains(".buttonStyle(SaveActionButtonStyle(")
+            && discoverSource.contains(".buttonStyle(StableOpenButtonStyle("),
+        "Discover card save and open actions should provide immediate pressed feedback before busy work starts"
+    )
+    try check(
         saveToLibrarySource.contains("SaveToLibraryDestinationHeader")
             && saveToLibrarySource.contains("SaveToLibraryFolderPathChip")
             && saveToLibrarySource.contains("Choose destination")
