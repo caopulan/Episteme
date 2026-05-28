@@ -1830,6 +1830,7 @@ private struct ArxivCacheProgressStrip: View {
 
 private struct ArxivPaperCard: View {
     @State private var isHovering = false
+    @State private var isMediaHovering = false
 
     var paper: ArxivFeedPaper
     var enrichment: DiscoverPaperEnrichment?
@@ -1864,10 +1865,15 @@ private struct ArxivPaperCard: View {
                             .frame(maxWidth: .infinity)
                     }
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(DiscoverMediaButtonStyle(isHovering: isMediaHovering, disabled: imageURL == nil && isBusy))
                 .disabled(imageURL == nil && isBusy)
                 .help(imageURL == nil ? "Open cached PDF" : "Open image preview")
                 .clipShape(RoundedRectangle(cornerRadius: 6))
+                .onHover { hovering in
+                    withAnimation(PaperCodexMotion.hover) {
+                        isMediaHovering = hovering
+                    }
+                }
                 .padding(.horizontal, discoverMediaHorizontalPadding)
                 .padding(.top, discoverMediaHorizontalPadding)
                 .padding(.bottom, 8)
@@ -1941,6 +1947,64 @@ private struct ArxivPaperCard: View {
             withAnimation(.easeOut(duration: 0.14)) {
                 isHovering = hovering
             }
+        }
+    }
+
+    private struct DiscoverMediaButtonStyle: ButtonStyle {
+        var isHovering: Bool
+        var disabled: Bool
+
+        func makeBody(configuration: Configuration) -> some View {
+            let isPressed = configuration.isPressed && !disabled
+            configuration.label
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(overlayFill(isPressed: isPressed))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(borderColor(isPressed: isPressed), lineWidth: isPressed || isHovering ? 1.5 : 1)
+                )
+                .shadow(color: shadowColor(isPressed: isPressed), radius: isPressed ? 4 : 8, y: isPressed ? 1 : 3)
+                .scaleEffect(scale(isPressed: isPressed), anchor: .center)
+                .contentShape(RoundedRectangle(cornerRadius: 6))
+                .animation(PaperCodexMotion.press, value: configuration.isPressed)
+                .animation(PaperCodexMotion.hover, value: isHovering)
+                .animation(PaperCodexMotion.hover, value: disabled)
+        }
+
+        private func overlayFill(isPressed: Bool) -> Color {
+            if disabled {
+                return Color(nsColor: .textBackgroundColor).opacity(0.10)
+            }
+            if isPressed {
+                return Color.accentColor.opacity(0.14)
+            }
+            return isHovering ? Color.accentColor.opacity(0.06) : .clear
+        }
+
+        private func borderColor(isPressed: Bool) -> Color {
+            if disabled {
+                return Color.black.opacity(0.06)
+            }
+            if isPressed {
+                return Color.accentColor.opacity(0.58)
+            }
+            return isHovering ? Color.accentColor.opacity(0.36) : Color.black.opacity(0.08)
+        }
+
+        private func shadowColor(isPressed: Bool) -> Color {
+            if disabled {
+                return .clear
+            }
+            return isPressed || isHovering ? Color.accentColor.opacity(isPressed ? 0.10 : 0.16) : .clear
+        }
+
+        private func scale(isPressed: Bool) -> CGFloat {
+            if disabled {
+                return 1
+            }
+            return isPressed ? 0.992 : (isHovering ? 1.006 : 1)
         }
     }
 

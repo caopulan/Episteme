@@ -1407,6 +1407,21 @@ func runUILayoutSourceChecks() throws {
     } else {
         throw CheckFailure(description: "Discover resource link button source should remain inspectable")
     }
+    if let arxivCardRange = discoverSource.range(of: "private struct ArxivPaperCard: View"),
+       let cardFooterRange = discoverSource.range(of: "private var cardFooter", range: arxivCardRange.upperBound..<discoverSource.endIndex) {
+        let arxivCardSource = String(discoverSource[arxivCardRange.lowerBound..<cardFooterRange.lowerBound])
+        try check(
+            arxivCardSource.contains("@State private var isMediaHovering = false")
+                && arxivCardSource.contains(".buttonStyle(DiscoverMediaButtonStyle(")
+                && arxivCardSource.contains("private struct DiscoverMediaButtonStyle: ButtonStyle")
+                && arxivCardSource.contains("configuration.isPressed")
+                && arxivCardSource.contains("PaperCodexMotion.press")
+                && !arxivCardSource.contains(".buttonStyle(.plain)"),
+            "Discover and Search media preview buttons should provide immediate pressed feedback before opening PDFs or previews"
+        )
+    } else {
+        throw CheckFailure(description: "Discover media preview button source should remain inspectable")
+    }
     try check(
         discoverSource.contains("private struct SidebarFilterButtonStyle")
             && discoverSource.contains(".buttonStyle(SidebarFilterButtonStyle(")
