@@ -4,7 +4,6 @@ enum PaperCodexMotion {
     static let hover = Animation.easeOut(duration: 0.12)
     static let press = Animation.easeOut(duration: 0.05)
     static let selection = Animation.spring(response: 0.22, dampingFraction: 0.86)
-    static let route = Animation.easeOut(duration: 0.08)
 }
 
 struct PaperCodexToolbarButton: View {

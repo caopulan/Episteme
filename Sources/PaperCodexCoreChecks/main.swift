@@ -1169,6 +1169,18 @@ func runUILayoutSourceChecks() throws {
             && !appModelSource.contains("scheduleReaderContextClear()"),
         "routes should be persistently mounted, prewarmed, and preserve reader context across navigation"
     )
+    if let routeVisibilityRange = appSource.range(of: "private struct RouteVisibilityHost"),
+       let routeVisibilityEndRange = appSource.range(of: "private struct RouteTransitionPlaceholder", range: routeVisibilityRange.upperBound..<appSource.endIndex) {
+        let routeVisibilitySource = String(appSource[routeVisibilityRange.lowerBound..<routeVisibilityEndRange.lowerBound])
+        try check(
+            routeVisibilitySource.contains(".transaction { transaction in")
+                && routeVisibilitySource.contains("transaction.animation = nil")
+                && !routeVisibilitySource.contains(".animation(PaperCodexMotion.route, value: activeRoute)"),
+            "route content should switch immediately while navigation row press feedback acknowledges the click"
+        )
+    } else {
+        throw CheckFailure(description: "route visibility host source should remain inspectable")
+    }
     try check(
         appShellSource.contains("struct PrimaryNavigationSection")
             && appShellSource.contains("title: \"Library\"")
@@ -1595,14 +1607,14 @@ func runUILayoutSourceChecks() throws {
     )
     try check(
         actionButtonSource.contains("static let press = Animation.easeOut(duration: 0.05)")
-            && actionButtonSource.contains("static let route = Animation.easeOut(duration: 0.08)")
+            && !actionButtonSource.contains("static let route")
             && sidebarRowSource.contains("SidebarRowButtonStyle")
             && sidebarRowSource.contains("configuration.isPressed")
             && sidebarRowSource.contains("PaperCodexMotion.press")
             && sidebarRowSource.contains("selected || configuration.isPressed")
             && sidebarRowSource.contains(".buttonStyle(SidebarRowButtonStyle(")
             && !sidebarRowSource.contains(".buttonStyle(.plain)"),
-        "navigation rows should provide immediate press feedback and keep route transitions fast"
+        "navigation rows should provide immediate press feedback while route content switches without delayed fade motion"
     )
     if let recentRowRange = librarySource.range(of: "private struct RecentConversationRow: View"),
        let recentRowEndRange = librarySource.range(of: "private struct RecentConversationDetailPanel", range: recentRowRange.upperBound..<librarySource.endIndex) {

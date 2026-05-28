@@ -190,7 +190,9 @@ private struct RouteVisibilityHost<Content: View>: View {
             .allowsHitTesting(route == activeRoute)
             .accessibilityHidden(route != activeRoute)
             .zIndex(route == activeRoute ? 1 : 0)
-            .animation(PaperCodexMotion.route, value: activeRoute)
+            .transaction { transaction in
+                transaction.animation = nil
+            }
     }
 }
 
