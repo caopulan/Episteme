@@ -1509,6 +1509,28 @@ func runUILayoutSourceChecks() throws {
             && saveToLibrarySource.contains("New root folder"),
         "save-to-library should present folder destination selection as a clear tree picker with selected path chips"
     )
+    if let pathChipRange = saveToLibrarySource.range(of: "private struct SaveToLibraryFolderPathChip: View"),
+       let pathChipEndRange = saveToLibrarySource.range(of: "private struct SaveToLibraryFlowLayout", range: pathChipRange.upperBound..<saveToLibrarySource.endIndex),
+       let folderRowRange = saveToLibrarySource.range(of: "private struct SaveToLibraryFolderRow: View"),
+       let folderRowEndRange = saveToLibrarySource.range(of: "private struct SaveToLibraryTreeConnector", range: folderRowRange.upperBound..<saveToLibrarySource.endIndex) {
+        let pathChipSource = String(saveToLibrarySource[pathChipRange.lowerBound..<pathChipEndRange.lowerBound])
+        let folderRowSource = String(saveToLibrarySource[folderRowRange.lowerBound..<folderRowEndRange.lowerBound])
+        try check(
+            saveToLibrarySource.contains("private struct SaveToLibraryFolderPathChipStyle: ButtonStyle")
+                && saveToLibrarySource.contains("private struct SaveToLibraryFolderRowButtonStyle: ButtonStyle")
+                && saveToLibrarySource.contains("private struct SaveToLibraryFolderIconButtonStyle: ButtonStyle")
+                && pathChipSource.contains(".buttonStyle(SaveToLibraryFolderPathChipStyle(")
+                && folderRowSource.contains(".buttonStyle(SaveToLibraryFolderRowButtonStyle(")
+                && folderRowSource.contains(".buttonStyle(SaveToLibraryFolderIconButtonStyle(")
+                && saveToLibrarySource.contains("configuration.isPressed")
+                && saveToLibrarySource.contains("PaperCodexMotion.press")
+                && !pathChipSource.contains(".buttonStyle(.plain)")
+                && !folderRowSource.contains(".buttonStyle(.plain)"),
+            "save-to-library folder tree and selected path chips should provide immediate pressed feedback before selection or tree mutations"
+        )
+    } else {
+        throw CheckFailure(description: "save-to-library folder tree button source should remain inspectable")
+    }
     try check(
         windowTabBarSource.contains("PaperCodexWindowTabBar")
             && windowTabBarSource.contains("PaperCodexReaderChromeTabItem")

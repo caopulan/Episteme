@@ -532,6 +532,8 @@ private struct SaveToLibraryDestinationHeader: View {
 }
 
 private struct SaveToLibraryFolderPathChip: View {
+    @State private var isHovering = false
+
     var folder: SaveToLibrarySelectedFolderSummary
     var onRemove: () -> Void
 
@@ -547,14 +549,59 @@ private struct SaveToLibraryFolderPathChip: View {
                     .foregroundStyle(.secondary)
             }
             .font(.caption)
+        }
+        .buttonStyle(SaveToLibraryFolderPathChipStyle(isHovering: isHovering))
+        .help("Remove \(folder.path)")
+        .onHover { hovering in
+            withAnimation(PaperCodexMotion.hover) {
+                isHovering = hovering
+            }
+        }
+    }
+}
+
+private struct SaveToLibraryFolderPathChipStyle: ButtonStyle {
+    var isHovering: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        let isPressed = configuration.isPressed
+        configuration.label
             .padding(.horizontal, 8)
             .padding(.vertical, 5)
-            .background(Color.accentColor.opacity(0.12))
             .foregroundStyle(Color.primary)
-            .clipShape(RoundedRectangle(cornerRadius: 7))
+            .background(
+                RoundedRectangle(cornerRadius: 7)
+                    .fill(backgroundColor(isPressed: isPressed))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 7)
+                    .stroke(borderColor(isPressed: isPressed), lineWidth: 1)
+            )
+            .shadow(color: shadowColor(isPressed: isPressed), radius: isPressed ? 3 : 6, y: isPressed ? 1 : 2)
+            .scaleEffect(isPressed ? 0.965 : (isHovering ? 1.025 : 1), anchor: .center)
+            .animation(PaperCodexMotion.press, value: configuration.isPressed)
+            .animation(PaperCodexMotion.hover, value: isHovering)
+    }
+
+    private func backgroundColor(isPressed: Bool) -> Color {
+        if isPressed {
+            return Color.accentColor.opacity(0.21)
         }
-        .buttonStyle(.plain)
-        .help("Remove \(folder.path)")
+        return Color.accentColor.opacity(isHovering ? 0.16 : 0.12)
+    }
+
+    private func borderColor(isPressed: Bool) -> Color {
+        if isPressed {
+            return Color.accentColor.opacity(0.54)
+        }
+        return Color.accentColor.opacity(isHovering ? 0.34 : 0.18)
+    }
+
+    private func shadowColor(isPressed: Bool) -> Color {
+        guard isPressed || isHovering else {
+            return .clear
+        }
+        return Color.accentColor.opacity(isPressed ? 0.10 : 0.14)
     }
 }
 
@@ -635,7 +682,7 @@ private struct SaveToLibraryFolderRow: View {
                         .font(.paperCodexSystem(size: 9, weight: .bold))
                         .frame(width: 16, height: 24)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(SaveToLibraryFolderIconButtonStyle(tint: .secondary))
                 .help(isExpanded ? "Collapse" : "Expand")
             } else {
                 Color.clear
@@ -662,21 +709,16 @@ private struct SaveToLibraryFolderRow: View {
                 .padding(.horizontal, 10)
                 .padding(.vertical, 7)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(isSelected ? Color.accentColor.opacity(0.11) : (isHovering ? Color.primary.opacity(0.045) : Color.clear))
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 6)
-                        .stroke(isSelected ? Color.accentColor.opacity(0.25) : Color.clear, lineWidth: 1)
-                )
+                .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(SaveToLibraryFolderRowButtonStyle(isSelected: isSelected, isHovering: isHovering))
 
             Button(action: onCreateChild) {
                 Image(systemName: "plus")
                     .font(.paperCodexSystem(size: 11, weight: .semibold))
                     .frame(width: 22, height: 22)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(SaveToLibraryFolderIconButtonStyle(tint: .accentColor))
             .help("New subfolder")
 
             if let onRemoveNewCategory {
@@ -685,8 +727,7 @@ private struct SaveToLibraryFolderRow: View {
                         .font(.paperCodexSystem(size: 11, weight: .semibold))
                         .frame(width: 22, height: 22)
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
+                .buttonStyle(SaveToLibraryFolderIconButtonStyle(tint: .red))
                 .help("Remove new folder")
             }
         }
@@ -704,6 +745,88 @@ private struct SaveToLibraryFolderRow: View {
             )
             .allowsHitTesting(false)
         }
+    }
+}
+
+private struct SaveToLibraryFolderRowButtonStyle: ButtonStyle {
+    var isSelected: Bool
+    var isHovering: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        let isPressed = configuration.isPressed
+        configuration.label
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(backgroundColor(isPressed: isPressed))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(borderColor(isPressed: isPressed), lineWidth: 1)
+            )
+            .shadow(color: shadowColor(isPressed: isPressed), radius: isPressed ? 3 : 5, y: isPressed ? 1 : 2)
+            .scaleEffect(isPressed ? 0.988 : 1, anchor: .center)
+            .animation(PaperCodexMotion.press, value: configuration.isPressed)
+            .animation(PaperCodexMotion.hover, value: isHovering)
+            .animation(PaperCodexMotion.selection, value: isSelected)
+    }
+
+    private func backgroundColor(isPressed: Bool) -> Color {
+        if isSelected {
+            return Color.accentColor.opacity(isPressed ? 0.18 : 0.11)
+        }
+        if isPressed {
+            return Color.accentColor.opacity(0.10)
+        }
+        return isHovering ? Color.primary.opacity(0.045) : Color.clear
+    }
+
+    private func borderColor(isPressed: Bool) -> Color {
+        if isPressed {
+            return Color.accentColor.opacity(0.40)
+        }
+        return isSelected ? Color.accentColor.opacity(0.25) : Color.clear
+    }
+
+    private func shadowColor(isPressed: Bool) -> Color {
+        isPressed ? Color.accentColor.opacity(0.10) : .clear
+    }
+}
+
+private struct SaveToLibraryFolderIconButtonStyle: ButtonStyle {
+    var tint: Color
+
+    func makeBody(configuration: Configuration) -> some View {
+        let isPressed = configuration.isPressed
+        configuration.label
+            .foregroundStyle(iconColor(isPressed: isPressed))
+            .background(
+                Circle()
+                    .fill(backgroundColor(isPressed: isPressed))
+            )
+            .overlay(
+                Circle()
+                    .stroke(borderColor(isPressed: isPressed), lineWidth: isPressed ? 1 : 0)
+            )
+            .shadow(color: shadowColor(isPressed: isPressed), radius: 3, y: 1)
+            .scaleEffect(isPressed ? 0.88 : 1, anchor: .center)
+            .contentShape(Circle())
+            .animation(PaperCodexMotion.press, value: configuration.isPressed)
+    }
+
+    private func iconColor(isPressed: Bool) -> Color {
+        isPressed ? tint : tint.opacity(0.78)
+    }
+
+    private func backgroundColor(isPressed: Bool) -> Color {
+        isPressed ? tint.opacity(0.17) : Color.clear
+    }
+
+    private func borderColor(isPressed: Bool) -> Color {
+        isPressed ? tint.opacity(0.36) : Color.clear
+    }
+
+    private func shadowColor(isPressed: Bool) -> Color {
+        isPressed ? tint.opacity(0.10) : .clear
     }
 }
 
