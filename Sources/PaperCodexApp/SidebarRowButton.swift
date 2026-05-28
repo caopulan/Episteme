@@ -25,36 +25,71 @@ struct SidebarRowButton: View {
             .padding(.vertical, 7)
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
-            .background(rowBackground)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-            .shadow(color: isHovering ? Color.black.opacity(0.08) : .clear, radius: 7, y: 3)
-            .scaleEffect(isHovering ? 1.015 : 1, anchor: .center)
-            .overlay(alignment: .leading) {
-                if selected {
-                    Capsule()
-                        .fill(Color.accentColor.opacity(0.72))
-                        .frame(width: 3, height: 18)
-                        .padding(.leading, CGFloat(depth * 14) + 3)
-                        .transition(.opacity.combined(with: .scale(scale: 0.82)))
-                }
-            }
-            .animation(PaperCodexMotion.hover, value: isHovering)
-            .animation(PaperCodexMotion.selection, value: selected)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(SidebarRowButtonStyle(selected: selected, isHovering: isHovering, depth: depth))
         .onHover { hovering in
             withAnimation(PaperCodexMotion.hover) {
                 isHovering = hovering
             }
         }
     }
+}
 
-    private var rowBackground: some View {
+private struct SidebarRowButtonStyle: ButtonStyle {
+    var selected: Bool
+    var isHovering: Bool
+    var depth: Int
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background(rowBackground(isPressed: configuration.isPressed))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .shadow(color: shadowColor(isPressed: configuration.isPressed), radius: 7, y: 3)
+            .scaleEffect(configuration.isPressed ? 0.985 : (isHovering ? 1.015 : 1), anchor: .center)
+            .overlay(alignment: .leading) {
+                if selected || configuration.isPressed {
+                    Capsule()
+                        .fill(Color.accentColor.opacity(selected ? 0.72 : 0.52))
+                        .frame(width: 3, height: 18)
+                        .padding(.leading, CGFloat(depth * 14) + 3)
+                        .transition(.opacity.combined(with: .scale(scale: 0.82)))
+                }
+            }
+            .animation(PaperCodexMotion.press, value: configuration.isPressed)
+            .animation(PaperCodexMotion.hover, value: isHovering)
+            .animation(PaperCodexMotion.selection, value: selected)
+    }
+
+    private func rowBackground(isPressed: Bool) -> some View {
         RoundedRectangle(cornerRadius: 8)
-            .fill(selected ? Color.accentColor.opacity(0.14) : (isHovering ? Color(nsColor: .textBackgroundColor) : Color.clear))
+            .fill(rowFill(isPressed: isPressed))
             .overlay(
                 RoundedRectangle(cornerRadius: 8)
-                    .stroke(isHovering ? Color.accentColor.opacity(0.25) : Color.clear, lineWidth: 1)
+                    .stroke(rowStroke(isPressed: isPressed), lineWidth: 1)
             )
+    }
+
+    private func rowFill(isPressed: Bool) -> Color {
+        if selected {
+            return Color.accentColor.opacity(0.14)
+        }
+        if isPressed {
+            return Color.accentColor.opacity(0.10)
+        }
+        return isHovering ? Color(nsColor: .textBackgroundColor) : Color.clear
+    }
+
+    private func rowStroke(isPressed: Bool) -> Color {
+        if isPressed {
+            return Color.accentColor.opacity(0.38)
+        }
+        return isHovering ? Color.accentColor.opacity(0.25) : Color.clear
+    }
+
+    private func shadowColor(isPressed: Bool) -> Color {
+        if isPressed {
+            return Color.accentColor.opacity(0.12)
+        }
+        return isHovering ? Color.black.opacity(0.08) : .clear
     }
 }

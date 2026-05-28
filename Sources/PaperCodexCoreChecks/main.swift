@@ -1050,6 +1050,7 @@ func runUILayoutSourceChecks() throws {
     let readerFeatureStoreSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/ReaderFeatureStore.swift"))
     let discoverFeatureStoreSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/DiscoverFeatureStore.swift"))
     let actionButtonSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/PaperCodexActionButton.swift"))
+    let sidebarRowSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/SidebarRowButton.swift"))
     let libraryCategoryAssignmentSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexCore/LibraryCategoryAssignment.swift"))
     let agentRuntimeSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexCore/AgentRuntime.swift"))
     let codexAgentRuntimeSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexCore/CodexAgentRuntime.swift"))
@@ -1406,6 +1407,17 @@ func runUILayoutSourceChecks() throws {
         "reader tabs should animate tab insertions and removals"
     )
     try check(
+        actionButtonSource.contains("static let press = Animation.easeOut(duration: 0.05)")
+            && actionButtonSource.contains("static let route = Animation.easeOut(duration: 0.08)")
+            && sidebarRowSource.contains("SidebarRowButtonStyle")
+            && sidebarRowSource.contains("configuration.isPressed")
+            && sidebarRowSource.contains("PaperCodexMotion.press")
+            && sidebarRowSource.contains("selected || configuration.isPressed")
+            && sidebarRowSource.contains(".buttonStyle(SidebarRowButtonStyle(")
+            && !sidebarRowSource.contains(".buttonStyle(.plain)"),
+        "navigation rows should provide immediate press feedback and keep route transitions fast"
+    )
+    try check(
         homeChromeSource.contains("static let sidebarTopPadding: CGFloat = 28")
             && librarySource.contains("static let splitPaneTopInset: CGFloat = 0")
             && librarySource.contains(".padding(.top, 14)")
@@ -1570,7 +1582,6 @@ func runUILayoutSourceChecks() throws {
     )
     let rootViewSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/PaperCodexApp.swift"))
     let typographySource = (try? String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/Typography.swift"))) ?? ""
-    let sidebarRowSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/SidebarRowButton.swift"))
     let sidebarSplitSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/SidebarSplitLayout.swift"))
     let windowChromeSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/WindowChrome.swift"))
     let buildScriptSource = try String(contentsOf: root.appendingPathComponent("scripts/build-app-bundle.sh"))
