@@ -1385,6 +1385,14 @@ func runUILayoutSourceChecks() throws {
         "Discover card save and open actions should provide immediate pressed feedback before busy work starts"
     )
     try check(
+        discoverSource.contains("private struct SidebarFilterButtonStyle")
+            && discoverSource.contains(".buttonStyle(SidebarFilterButtonStyle(")
+            && discoverSource.contains("selected || configuration.isPressed")
+            && discoverSource.components(separatedBy: "configuration.isPressed").count - 1 >= 3
+            && discoverSource.components(separatedBy: "PaperCodexMotion.press").count - 1 >= 3,
+        "Discover and Search sidebar filter buttons should provide immediate pressed feedback before list recalculation"
+    )
+    try check(
         saveToLibrarySource.contains("SaveToLibraryDestinationHeader")
             && saveToLibrarySource.contains("SaveToLibraryFolderPathChip")
             && saveToLibrarySource.contains("Choose destination")

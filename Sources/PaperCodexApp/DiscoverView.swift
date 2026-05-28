@@ -1145,25 +1145,61 @@ private struct SidebarFilterButton: View {
             .padding(.vertical, 6)
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
-            .background(rowBackground)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-            .shadow(color: isHovering ? Color.black.opacity(0.06) : .clear, radius: 5, y: 2)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(SidebarFilterButtonStyle(selected: selected, isHovering: isHovering))
         .onHover { hovering in
             withAnimation(.easeOut(duration: 0.12)) {
                 isHovering = hovering
             }
         }
     }
+}
 
-    private var rowBackground: some View {
+private struct SidebarFilterButtonStyle: ButtonStyle {
+    var selected: Bool
+    var isHovering: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        let isPressed = configuration.isPressed
+        let showsSelectionFeedback = selected || configuration.isPressed
+        configuration.label
+            .background(rowBackground(isPressed: isPressed, showsSelectionFeedback: showsSelectionFeedback))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .shadow(color: shadowColor(isPressed: isPressed), radius: isPressed ? 3 : 5, y: isPressed ? 1 : 2)
+            .scaleEffect(isPressed ? 0.982 : (isHovering && !selected ? 1.01 : 1), anchor: .center)
+            .animation(PaperCodexMotion.press, value: configuration.isPressed)
+            .animation(PaperCodexMotion.hover, value: isHovering)
+            .animation(PaperCodexMotion.selection, value: selected)
+    }
+
+    private func rowBackground(isPressed: Bool, showsSelectionFeedback: Bool) -> some View {
         RoundedRectangle(cornerRadius: 8)
-            .fill(selected ? Color.accentColor.opacity(0.12) : (isHovering ? Color(nsColor: .textBackgroundColor) : Color.clear))
+            .fill(rowFill(isPressed: isPressed, showsSelectionFeedback: showsSelectionFeedback))
             .overlay(
                 RoundedRectangle(cornerRadius: 8)
-                    .stroke(isHovering ? Color.accentColor.opacity(0.20) : Color.clear, lineWidth: 1)
+                    .stroke(rowStroke(isPressed: isPressed), lineWidth: 1)
             )
+    }
+
+    private func rowFill(isPressed: Bool, showsSelectionFeedback: Bool) -> Color {
+        if showsSelectionFeedback {
+            return Color.accentColor.opacity(isPressed ? 0.16 : 0.12)
+        }
+        return isHovering ? Color(nsColor: .textBackgroundColor) : Color.clear
+    }
+
+    private func rowStroke(isPressed: Bool) -> Color {
+        if isPressed {
+            return Color.accentColor.opacity(0.42)
+        }
+        return isHovering ? Color.accentColor.opacity(0.20) : Color.clear
+    }
+
+    private func shadowColor(isPressed: Bool) -> Color {
+        if isPressed {
+            return Color.accentColor.opacity(0.10)
+        }
+        return isHovering ? Color.black.opacity(0.06) : .clear
     }
 }
 
