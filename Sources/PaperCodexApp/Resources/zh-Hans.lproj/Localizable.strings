@@ -181,6 +181,8 @@
 "Open PDF Split" = "打开 PDF 分屏";
 "Close PDF Split" = "关闭 PDF 分屏";
 "Close Split" = "关闭分屏";
+"Preparing split view" = "正在准备分屏";
+"Preparing link preview" = "正在准备链接预览";
 "Back to Library" = "返回文库";
 "Cached paper" = "已缓存论文";
 "Close tab" = "关闭标签";

@@ -3,9 +3,13 @@ import SwiftUI
 
 struct ReaderView: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isShowingAddPaperToSessionSheet = false
     @State private var isPDFSplitVisible = false
     @State private var pdfSplitTarget: PDFInternalLinkTarget?
+    @State private var pendingPDFSplitTarget: PDFInternalLinkTarget?
+    @State private var isPDFSplitContentReady = false
+    @State private var pdfSplitOpenGeneration = 0
 
     var body: some View {
         HSplitView {
@@ -16,8 +20,7 @@ struct ReaderView: View {
         }
         .background(Color(nsColor: .windowBackgroundColor))
         .onChange(of: model.selectedPaper?.id) { _, _ in
-            isPDFSplitVisible = false
-            pdfSplitTarget = nil
+            resetPDFSplit()
         }
         .sheet(isPresented: $isShowingAddPaperToSessionSheet) {
             AddPaperToSessionSheet(
@@ -80,13 +83,17 @@ struct ReaderView: View {
                     secondaryPDFView(for: paper)
                         .frame(minHeight: ReaderPDFLayout.minimumSplitPaneHeight, maxHeight: .infinity)
                 }
-                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .transition(.asymmetric(
+                    insertion: .move(edge: .bottom).combined(with: .opacity),
+                    removal: .opacity
+                ))
             } else {
                 primaryPDFView(for: paper)
                     .transition(.opacity)
             }
         }
-        .animation(PaperCodexMotion.selection, value: isPDFSplitVisible)
+        .animation(PaperCodexMotion.accessible(PaperCodexMotion.pdfSplitOpen, reduceMotion: reduceMotion), value: isPDFSplitVisible)
+        .animation(PaperCodexMotion.accessible(PaperCodexMotion.pdfSplitContent, reduceMotion: reduceMotion), value: isPDFSplitContentReady)
     }
 
     private func primaryPDFView(for paper: Paper) -> some View {
@@ -132,44 +139,98 @@ struct ReaderView: View {
             .padding(.vertical, 5)
             .background(Color(nsColor: .windowBackgroundColor))
             Divider()
-            PDFKitView(
-                filePath: paper.filePath,
-                jumpTarget: nil,
-                readingContextID: "split-\(paper.id)",
-                readingPosition: nil,
-                command: nil,
-                internalLinkTarget: pdfSplitTarget,
-                onSelection: { selection in
-                    model.updateSelection(selection)
-                },
-                onReadingPositionChange: { _ in },
-                onDocumentStatusChange: { _ in },
-                onInternalLinkSplit: { target in
-                    openPDFSplit(target)
+            ZStack {
+                if isPDFSplitContentReady {
+                    PDFKitView(
+                        filePath: paper.filePath,
+                        jumpTarget: nil,
+                        readingContextID: "split-\(paper.id)",
+                        readingPosition: nil,
+                        command: nil,
+                        internalLinkTarget: pdfSplitTarget,
+                        onSelection: { selection in
+                            model.updateSelection(selection)
+                        },
+                        onReadingPositionChange: { _ in },
+                        onDocumentStatusChange: { _ in },
+                        onInternalLinkSplit: { target in
+                            openPDFSplit(target)
+                        }
+                    )
+                    .transition(.opacity)
+                } else {
+                    PDFSplitPreparingView(target: pendingPDFSplitTarget ?? pdfSplitTarget)
+                        .transition(.opacity)
                 }
-            )
+            }
+            .background(Color(nsColor: .textBackgroundColor))
         }
     }
 
     private func openPDFSplit(_ target: PDFInternalLinkTarget) {
-        withAnimation(PaperCodexMotion.selection) {
-            pdfSplitTarget = target
-            isPDFSplitVisible = true
+        guard !isPDFSplitVisible else {
+            if isPDFSplitContentReady {
+                PaperCodexMotion.perform(PaperCodexMotion.pdfSplitContent, reduceMotion: reduceMotion) {
+                    pdfSplitTarget = target
+                }
+            } else {
+                pendingPDFSplitTarget = target
+            }
+            return
         }
+        beginPDFSplitOpen(target: target)
     }
 
     private func closePDFSplit() {
-        withAnimation(PaperCodexMotion.selection) {
+        pdfSplitOpenGeneration += 1
+        PaperCodexMotion.perform(PaperCodexMotion.pdfSplitOpen, reduceMotion: reduceMotion) {
             isPDFSplitVisible = false
-            pdfSplitTarget = nil
+            isPDFSplitContentReady = false
         }
+        pendingPDFSplitTarget = nil
+        pdfSplitTarget = nil
+    }
+
+    private func resetPDFSplit() {
+        pdfSplitOpenGeneration += 1
+        isPDFSplitVisible = false
+        isPDFSplitContentReady = false
+        pendingPDFSplitTarget = nil
+        pdfSplitTarget = nil
     }
 
     private func togglePDFSplit() {
-        withAnimation(PaperCodexMotion.selection) {
-            isPDFSplitVisible.toggle()
-            if !isPDFSplitVisible {
-                pdfSplitTarget = nil
+        if isPDFSplitVisible {
+            closePDFSplit()
+        } else {
+            beginPDFSplitOpen(target: nil)
+        }
+    }
+
+    private func beginPDFSplitOpen(target: PDFInternalLinkTarget?) {
+        pdfSplitOpenGeneration += 1
+        let generation = pdfSplitOpenGeneration
+        pendingPDFSplitTarget = target
+        isPDFSplitContentReady = false
+        pdfSplitTarget = nil
+
+        PaperCodexMotion.perform(PaperCodexMotion.pdfSplitOpen, reduceMotion: reduceMotion) {
+            isPDFSplitVisible = true
+        }
+        schedulePDFSplitContentMount(generation: generation)
+    }
+
+    private func schedulePDFSplitContentMount(generation: Int) {
+        let delay = reduceMotion ? 0 : ReaderPDFLayout.splitContentMountDelay
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+            guard generation == pdfSplitOpenGeneration, isPDFSplitVisible else {
+                return
+            }
+            let target = pendingPDFSplitTarget
+            PaperCodexMotion.perform(PaperCodexMotion.pdfSplitContent, reduceMotion: reduceMotion) {
+                pdfSplitTarget = target
+                pendingPDFSplitTarget = nil
+                isPDFSplitContentReady = true
             }
         }
     }
@@ -178,6 +239,23 @@ struct ReaderView: View {
 private enum ReaderPDFLayout {
     static let minimumPaneWidth: CGFloat = 360
     static let minimumSplitPaneHeight: CGFloat = 220
+    static let splitContentMountDelay: TimeInterval = 0.20
+}
+
+private struct PDFSplitPreparingView: View {
+    var target: PDFInternalLinkTarget?
+
+    var body: some View {
+        VStack(spacing: 8) {
+            ProgressView()
+                .controlSize(.small)
+            Text(LocalizedStringKey(target == nil ? "Preparing split view" : "Preparing link preview"))
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(nsColor: .textBackgroundColor))
+    }
 }
 
 private struct AddPaperToSessionSheet: View {

@@ -2560,10 +2560,18 @@ func runUILayoutSourceChecks() throws {
     )
     try check(
         readerSource.contains(".keyboardShortcut(\"\\\\\", modifiers: [.command, .shift])")
-            && readerSource.contains("withAnimation(PaperCodexMotion.selection)")
-            && readerSource.contains(".animation(PaperCodexMotion.selection, value: isPDFSplitVisible)")
-            && readerSource.contains(".transition(.move(edge: .bottom).combined(with: .opacity))"),
+            && readerSource.contains("PaperCodexMotion.perform(PaperCodexMotion.pdfSplitOpen")
+            && readerSource.contains(".animation(PaperCodexMotion.accessible(PaperCodexMotion.pdfSplitOpen")
+            && readerSource.contains("insertion: .move(edge: .bottom).combined(with: .opacity)"),
         "reader PDF split should have a direct keyboard shortcut and animated toggle feedback"
+    )
+    try check(
+        readerSource.contains("isPDFSplitContentReady")
+            && readerSource.contains("pendingPDFSplitTarget")
+            && readerSource.contains("splitContentMountDelay")
+            && readerSource.contains("PDFSplitPreparingView")
+            && readerSource.contains("schedulePDFSplitContentMount"),
+        "reader PDF split should stage PDFKit mounting until after the split shell opens so Open Split feels smooth"
     )
     try check(
         !readerSource.contains(".frame(minWidth: 560)") && readerSource.contains(".frame(minWidth: ReaderPDFLayout.minimumPaneWidth"),

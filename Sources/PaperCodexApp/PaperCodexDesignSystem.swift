@@ -44,6 +44,8 @@ enum PaperCodexMotion {
     static let hover = Animation.easeOut(duration: 0.12)
     static let press = Animation.easeOut(duration: 0.05)
     static let selection = Animation.spring(response: 0.22, dampingFraction: 0.86)
+    static let pdfSplitOpen = Animation.easeInOut(duration: 0.24)
+    static let pdfSplitContent = Animation.easeOut(duration: 0.16)
 
     static func accessible(_ animation: Animation, reduceMotion: Bool) -> Animation? {
         reduceMotion ? nil : animation
