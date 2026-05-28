@@ -1143,6 +1143,38 @@ func runUILayoutSourceChecks() throws {
             && !librarySource.contains(".frame(minWidth: LibraryLayout.libraryPrimaryPaneMinimumWidth)\n            secondaryContentPane"),
         "library split content should enter a compact layout before the primary middle pane is clipped"
     )
+    let selectLibraryPaperRange = try require(appModelSource.range(of: "func selectLibraryPaper(_ paper: Paper)"), "selectLibraryPaper source should exist")
+    let showDiscoverRange = try require(appModelSource.range(of: "func showDiscover()"), "showDiscover source should exist")
+    let selectLibraryPaperSource = String(appModelSource[selectLibraryPaperRange.lowerBound..<showDiscoverRange.lowerBound])
+    try check(
+        !selectLibraryPaperSource.contains("loadPaperNotes(for: paper)"),
+        "plain paper selection should not synchronously fetch notes on click"
+    )
+    let loadPaperNotesRange = try require(appModelSource.range(of: "func loadPaperNotes(for paper: Paper"), "loadPaperNotes source should exist")
+    let saveNoteRange = try require(appModelSource.range(of: "func saveNote(paperID:"), "saveNote source should exist")
+    let loadPaperNotesSource = String(appModelSource[loadPaperNotesRange.lowerBound..<saveNoteRange.lowerBound])
+    try check(
+        appModelSource.contains("paperNotesLoadTasks")
+            && loadPaperNotesSource.contains("Task.detached(priority: .userInitiated)")
+            && loadPaperNotesSource.contains("PaperRepository(databasePath: databasePath)")
+            && !loadPaperNotesSource.contains("paperNotesByID[paper.id] = try repository.fetchNotes"),
+        "paper note reads should run off the main actor so clicking a paper stays responsive"
+    )
+    let libraryMetadataRange = try require(appModelSource.range(of: "func libraryArxivMetadata(for paper: Paper)"), "libraryArxivMetadata source should exist")
+    let nonEmptyRange = try require(appModelSource.range(of: "private func nonEmpty"), "nonEmpty helper source should exist")
+    let libraryMetadataSource = String(appModelSource[libraryMetadataRange.lowerBound..<nonEmptyRange.lowerBound])
+    try check(
+        !libraryMetadataSource.contains("try? arxivCache.loadPaper")
+            && !libraryMetadataSource.contains("try? localDiscoverCache.loadEnrichment"),
+        "library inspector metadata should not synchronously read arXiv cache files from the SwiftUI body"
+    )
+    try check(
+        librarySource.contains("@State private var selectedPaperRevealRequestID")
+            && librarySource.contains("selectedPaperRevealRequestID = UUID()")
+            && librarySource.contains("guard selectedPaperRevealRequestID != nil")
+            && !librarySource.contains(".onChange(of: model.selectedLibraryPaper?.id) { _, selectedPaperID in\n                        guard isPaperListFocused"),
+        "paper clicks should not trigger animated scroll-to-center; only keyboard navigation should request reveal"
+    )
     try check(
         librarySource.contains("onTogglePinned")
             && librarySource.contains("pin.fill")

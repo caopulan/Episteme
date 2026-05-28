@@ -34,6 +34,7 @@ struct LibraryView: View {
     @State private var noteBody = ""
     @State private var editingNoteID: String?
     @State private var selectedRecentSessionID: String?
+    @State private var selectedPaperRevealRequestID: UUID?
     @State private var isInspectorReadButtonHovering = false
     @AppStorage("PaperCodexLibrarySortOption") private var librarySortRawValue = LibrarySortOption.addedNewest.rawValue
     @AppStorage("PaperCodexLibrarySortAscending") private var librarySortAscending = false
@@ -626,6 +627,10 @@ struct LibraryView: View {
                         )
                     )
                     .onChange(of: model.selectedLibraryPaper?.id) { _, selectedPaperID in
+                        guard selectedPaperRevealRequestID != nil else {
+                            return
+                        }
+                        selectedPaperRevealRequestID = nil
                         guard isPaperListFocused,
                               let selectedPaperID,
                               listState.paperIDs.contains(selectedPaperID) else {
@@ -740,10 +745,10 @@ struct LibraryView: View {
                     }
                     .padding(.trailing, 4)
                     .onAppear {
-                        model.loadPaperNotes(for: paper)
+                        loadPaperNotesAfterSelectionSettles(for: paper)
                     }
                     .onChange(of: paper.id) { _, _ in
-                        model.loadPaperNotes(for: paper)
+                        loadPaperNotesAfterSelectionSettles(for: paper)
                     }
                 }
             } else {
@@ -1011,6 +1016,7 @@ struct LibraryView: View {
         let nextPaper = visiblePapers[nextIndex]
         clearPaperMultiSelection()
         lastSelectedPaperID = nextPaper.id
+        selectedPaperRevealRequestID = UUID()
         model.selectLibraryPaper(nextPaper)
         isPaperListFocused = true
     }
@@ -1129,6 +1135,16 @@ struct LibraryView: View {
         editingNoteID = nil
         noteTitle = ""
         noteBody = ""
+    }
+
+    private func loadPaperNotesAfterSelectionSettles(for paper: Paper) {
+        Task { @MainActor in
+            await Task.yield()
+            guard model.selectedLibraryPaper?.id == paper.id else {
+                return
+            }
+            model.loadPaperNotes(for: paper)
+        }
     }
 
     private func applyFastLibrarySelection(_ update: () -> Void) {

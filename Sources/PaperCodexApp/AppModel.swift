@@ -781,6 +781,7 @@ final class AppModel: ObservableObject {
     private var cacheStorageSummaryTask: Task<Void, Never>?
     private var libraryThumbnailRefreshTask: Task<Void, Never>?
     private var routeDeferredWorkTask: Task<Void, Never>?
+    private var paperNotesLoadTasks: [String: Task<Void, Never>] = [:]
     private var mcpService: PaperCodexMCPService?
     private var mcpServer: PaperCodexMCPServer?
     private var mcpEndpoint: PaperCodexMCPEndpoint?
@@ -1070,6 +1071,7 @@ final class AppModel: ObservableObject {
         cacheStorageSummaryTask?.cancel()
         libraryThumbnailRefreshTask?.cancel()
         routeDeferredWorkTask?.cancel()
+        paperNotesLoadTasks.values.forEach { $0.cancel() }
         mcpCommandPollingTask?.cancel()
         mcpServer?.stop()
     }
@@ -1519,7 +1521,6 @@ final class AppModel: ObservableObject {
 
     func selectLibraryPaper(_ paper: Paper) {
         selectedLibraryPaper = paper
-        loadPaperNotes(for: paper)
     }
 
     func showDiscover() {
@@ -2523,8 +2524,7 @@ final class AppModel: ObservableObject {
         }
         let feedPaper = arxivFeed?.papers.first { $0.id == canonicalID }
             ?? arxivSearchFeed?.papers.first { $0.id == canonicalID }
-            ?? (try? arxivCache.loadPaper(arxivID: canonicalID))
-        let enrichment = discoverEnrichmentsByID[canonicalID] ?? (try? localDiscoverCache.loadEnrichment(arxivID: canonicalID))
+        let enrichment = discoverEnrichmentsByID[canonicalID]
         guard feedPaper != nil || enrichment != nil else {
             return nil
         }
@@ -3452,17 +3452,34 @@ final class AppModel: ObservableObject {
     }
 
     func loadPaperNotes(for paper: Paper, force: Bool = false) {
-        do {
-            guard force || !loadedPaperNotesPaperIDs.contains(paper.id) else {
-                return
+        guard force || !loadedPaperNotesPaperIDs.contains(paper.id) else {
+            return
+        }
+        if !force && paperNotesLoadTasks[paper.id] != nil {
+            return
+        }
+        let paperID = paper.id
+        let databasePath = supportRoot.appendingPathComponent("store.sqlite").path
+        paperNotesLoadTasks[paperID]?.cancel()
+        paperNotesLoadTasks[paperID] = Task { [weak self] in
+            do {
+                let notes = try await Task.detached(priority: .userInitiated) {
+                    let repository = try PaperRepository(databasePath: databasePath)
+                    return try repository.fetchNotes(paperID: paperID)
+                }.value
+                guard let self, !Task.isCancelled else {
+                    return
+                }
+                self.paperNotesByID[paperID] = notes
+                self.loadedPaperNotesPaperIDs.insert(paperID)
+                self.paperNotesLoadTasks[paperID] = nil
+            } catch {
+                guard let self, !Task.isCancelled, !isCancellationError(error) else {
+                    return
+                }
+                self.paperNotesLoadTasks[paperID] = nil
+                self.errorMessage = String(describing: error)
             }
-            guard let repository else {
-                throw AppModelError.repositoryUnavailable
-            }
-            paperNotesByID[paper.id] = try repository.fetchNotes(paperID: paper.id)
-            loadedPaperNotesPaperIDs.insert(paper.id)
-        } catch {
-            errorMessage = String(describing: error)
         }
     }
 
