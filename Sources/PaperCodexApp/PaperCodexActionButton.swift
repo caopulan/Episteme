@@ -1,12 +1,7 @@
 import SwiftUI
 
-enum PaperCodexMotion {
-    static let hover = Animation.easeOut(duration: 0.12)
-    static let press = Animation.easeOut(duration: 0.05)
-    static let selection = Animation.spring(response: 0.22, dampingFraction: 0.86)
-}
-
 struct PaperCodexToolbarButton: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isHovering = false
 
     var title: String
@@ -24,14 +19,14 @@ struct PaperCodexToolbarButton: View {
                 Image(systemName: systemImage)
             }
             .font(.paperCodexSystem(size: 12.5, weight: .semibold))
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
+            .padding(.horizontal, PaperCodexHitTarget.toolbarButtonHorizontalPadding)
+            .padding(.vertical, PaperCodexHitTarget.toolbarButtonVerticalPadding)
         }
-        .buttonStyle(PaperCodexToolbarButtonStyle(tint: tint, disabled: disabled, isHovering: isHovering))
+        .buttonStyle(PaperCodexToolbarButtonStyle(tint: tint, disabled: disabled, isHovering: isHovering, reduceMotion: reduceMotion))
         .disabled(disabled)
         .help(title)
         .onHover { hovering in
-            withAnimation(.easeOut(duration: 0.12)) {
+            PaperCodexMotion.perform(PaperCodexMotion.hover, reduceMotion: reduceMotion) {
                 isHovering = hovering
             }
         }
@@ -42,24 +37,25 @@ private struct PaperCodexToolbarButtonStyle: ButtonStyle {
     var tint: Color
     var disabled: Bool
     var isHovering: Bool
+    var reduceMotion: Bool
 
     func makeBody(configuration: Configuration) -> some View {
         let isPressed = configuration.isPressed && !disabled
         configuration.label
             .foregroundStyle(foregroundColor(isPressed: isPressed))
             .background(
-                RoundedRectangle(cornerRadius: 8)
+                RoundedRectangle(cornerRadius: PaperCodexCornerRadius.control)
                     .fill(backgroundColor(isPressed: isPressed))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 8)
+                        RoundedRectangle(cornerRadius: PaperCodexCornerRadius.control)
                             .stroke(borderColor(isPressed: isPressed), lineWidth: 1)
                     )
             )
             .shadow(color: shadowColor(isPressed: isPressed), radius: isPressed ? 4 : 7, y: isPressed ? 1 : 3)
-            .scaleEffect(buttonScale(isPressed: isPressed), anchor: .center)
-            .animation(PaperCodexMotion.press, value: configuration.isPressed)
-            .animation(PaperCodexMotion.hover, value: isHovering)
-            .animation(PaperCodexMotion.hover, value: disabled)
+            .scaleEffect(reduceMotion ? 1 : buttonScale(isPressed: isPressed), anchor: .center)
+            .animation(PaperCodexMotion.accessible(PaperCodexMotion.press, reduceMotion: reduceMotion), value: configuration.isPressed)
+            .animation(PaperCodexMotion.accessible(PaperCodexMotion.hover, reduceMotion: reduceMotion), value: isHovering)
+            .animation(PaperCodexMotion.accessible(PaperCodexMotion.hover, reduceMotion: reduceMotion), value: disabled)
     }
 
     private func foregroundColor(isPressed: Bool) -> Color {
@@ -71,12 +67,12 @@ private struct PaperCodexToolbarButtonStyle: ButtonStyle {
 
     private func backgroundColor(isPressed: Bool) -> Color {
         if disabled {
-            return Color(nsColor: .controlBackgroundColor).opacity(0.55)
+            return PaperCodexSurface.control.opacity(0.55)
         }
         if isPressed {
             return tint.opacity(0.18)
         }
-        return isHovering ? tint.opacity(0.12) : Color(nsColor: .controlBackgroundColor)
+        return isHovering ? tint.opacity(0.12) : PaperCodexSurface.control
     }
 
     private func borderColor(isPressed: Bool) -> Color {
@@ -105,6 +101,7 @@ private struct PaperCodexToolbarButtonStyle: ButtonStyle {
 }
 
 struct PaperCodexIconButton: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isHovering = false
 
     var title: String
@@ -117,15 +114,17 @@ struct PaperCodexIconButton: View {
         Button(action: action) {
             Image(systemName: systemImage)
                 .font(.paperCodexSystem(size: 12, weight: .semibold))
-                .frame(width: 26, height: 26)
-                .contentShape(Circle())
+                .frame(width: PaperCodexHitTarget.toolbarIconSize, height: PaperCodexHitTarget.toolbarIconSize)
+                .contentShape(Rectangle())
         }
-        .buttonStyle(PaperCodexIconButtonStyle(tint: tint, disabled: disabled, isHovering: isHovering))
+        .buttonStyle(PaperCodexIconButtonStyle(tint: tint, disabled: disabled, isHovering: isHovering, reduceMotion: reduceMotion))
         .disabled(disabled)
         .help(title)
         .accessibilityLabel(title)
         .onHover { hovering in
-            isHovering = hovering
+            PaperCodexMotion.perform(PaperCodexMotion.hover, reduceMotion: reduceMotion) {
+                isHovering = hovering
+            }
         }
     }
 }
@@ -134,6 +133,7 @@ private struct PaperCodexIconButtonStyle: ButtonStyle {
     var tint: Color
     var disabled: Bool
     var isHovering: Bool
+    var reduceMotion: Bool
 
     func makeBody(configuration: Configuration) -> some View {
         let isPressed = configuration.isPressed && !disabled
@@ -148,11 +148,11 @@ private struct PaperCodexIconButtonStyle: ButtonStyle {
                     .stroke(iconBorder(isPressed: isPressed), lineWidth: 1)
             )
             .shadow(color: iconShadow(isPressed: isPressed), radius: isPressed ? 3 : 6, y: isPressed ? 1 : 2)
-            .scaleEffect(iconScale(isPressed: isPressed), anchor: .center)
-            .contentShape(Circle())
-            .animation(PaperCodexMotion.press, value: configuration.isPressed)
-            .animation(PaperCodexMotion.hover, value: isHovering)
-            .animation(PaperCodexMotion.hover, value: disabled)
+            .scaleEffect(reduceMotion ? 1 : iconScale(isPressed: isPressed), anchor: .center)
+            .contentShape(Rectangle())
+            .animation(PaperCodexMotion.accessible(PaperCodexMotion.press, reduceMotion: reduceMotion), value: configuration.isPressed)
+            .animation(PaperCodexMotion.accessible(PaperCodexMotion.hover, reduceMotion: reduceMotion), value: isHovering)
+            .animation(PaperCodexMotion.accessible(PaperCodexMotion.hover, reduceMotion: reduceMotion), value: disabled)
     }
 
     private func iconColor(isPressed: Bool) -> Color {
@@ -164,7 +164,7 @@ private struct PaperCodexIconButtonStyle: ButtonStyle {
 
     private func iconBackground(isPressed: Bool) -> Color {
         if disabled {
-            return Color(nsColor: .controlBackgroundColor).opacity(0.40)
+            return PaperCodexSurface.control.opacity(0.40)
         }
         if isPressed {
             return tint.opacity(0.20)

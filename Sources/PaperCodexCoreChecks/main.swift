@@ -1242,6 +1242,7 @@ func runUILayoutSourceChecks() throws {
     let libraryDerivedStateSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexCore/LibraryDerivedState.swift"))
     let readerFeatureStoreSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/ReaderFeatureStore.swift"))
     let discoverFeatureStoreSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/DiscoverFeatureStore.swift"))
+    let designSystemSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/PaperCodexDesignSystem.swift"))
     let actionButtonSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/PaperCodexActionButton.swift"))
     let sidebarRowSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/SidebarRowButton.swift"))
     let libraryCategoryAssignmentSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexCore/LibraryCategoryAssignment.swift"))
@@ -1845,10 +1846,10 @@ func runUILayoutSourceChecks() throws {
     )
     try check(
         windowTabBarSource.contains("private var tabScale")
-            && windowTabBarSource.components(separatedBy: ".scaleEffect(tabScale").count - 1 >= 2
-            && windowTabBarSource.components(separatedBy: "PaperCodexMotion.hover").count - 1 >= 2
+            && windowTabBarSource.components(separatedBy: ".scaleEffect(reduceMotion ? 1 : tabScale").count - 1 >= 2
+            && windowTabBarSource.components(separatedBy: "PaperCodexMotion.accessible(PaperCodexMotion.hover").count - 1 >= 2
             && windowTabBarSource.contains("PaperCodexIconButton(title: \"Save to Library\""),
-        "window chrome tabs and the save-to-library control should use the shared interaction motion affordances"
+        "window chrome tabs and the save-to-library control should use shared interaction affordances while respecting Reduce Motion"
     )
     try check(
         windowTabBarSource.contains("private struct PaperCodexChromeTabButtonStyle: ButtonStyle")
@@ -1863,12 +1864,12 @@ func runUILayoutSourceChecks() throws {
     try check(
         windowTabBarSource.contains("readerTabIDs")
             && windowTabBarSource.contains(".transition(.asymmetric(")
-            && windowTabBarSource.contains(".animation(PaperCodexMotion.selection, value: readerTabIDs)"),
-        "reader tabs should animate tab insertions and removals"
+            && windowTabBarSource.contains(".animation(PaperCodexMotion.accessible(PaperCodexMotion.selection, reduceMotion: reduceMotion), value: readerTabIDs)"),
+        "reader tabs should animate tab insertions and removals unless Reduce Motion is enabled"
     )
     try check(
-        actionButtonSource.contains("static let press = Animation.easeOut(duration: 0.05)")
-            && !actionButtonSource.contains("static let route")
+        designSystemSource.contains("static let press = Animation.easeOut(duration: 0.05)")
+            && !designSystemSource.contains("static let route")
             && sidebarRowSource.contains("SidebarRowButtonStyle")
             && sidebarRowSource.contains("configuration.isPressed")
             && sidebarRowSource.contains("PaperCodexMotion.press")
@@ -2225,7 +2226,7 @@ func runUILayoutSourceChecks() throws {
             && appModelSource.contains("func selectNextReaderTab()")
             && windowTabBarSource.contains("ScrollViewReader")
             && windowTabBarSource.contains("scrollProxy.scrollTo(activePaperID, anchor: .center)")
-            && windowTabBarSource.contains(".animation(PaperCodexMotion.selection, value: model.readerTabState.activePaperID)"),
+            && windowTabBarSource.contains(".animation(PaperCodexMotion.accessible(PaperCodexMotion.selection, reduceMotion: reduceMotion), value: model.readerTabState.activePaperID)"),
         "Reader tabs should support keyboard switching and keep the active tab visibly centered"
     )
     if let panelPickerRange = chatSource.range(of: "Picker(\"Session Panel\""),
@@ -3075,6 +3076,44 @@ func runUILayoutSourceChecks() throws {
     try check(
         settingsViewSource.contains("revealPath("),
         "settings should reveal library and cache paths in Finder"
+    )
+}
+
+func runUIDesignSourceChecks() throws {
+    let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+    let designSystemURL = root.appendingPathComponent("Sources/PaperCodexApp/PaperCodexDesignSystem.swift")
+    let designSystemSource = try String(contentsOf: designSystemURL)
+    let actionButtonSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/PaperCodexActionButton.swift"))
+    let sidebarRowSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/SidebarRowButton.swift"))
+    let tabBarSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/WindowChromeTabBar.swift"))
+    let typographySource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/Typography.swift"))
+
+    try check(
+        designSystemSource.contains("enum PaperCodexSurface")
+            && designSystemSource.contains("enum PaperCodexSpacing")
+            && designSystemSource.contains("enum PaperCodexCornerRadius")
+            && designSystemSource.contains("enum PaperCodexHitTarget")
+            && designSystemSource.contains("enum PaperCodexMotion"),
+        "Paper Codex should centralize UI surface, spacing, radius, hit-target, and motion tokens"
+    )
+    try check(
+        designSystemSource.contains("static func accessible(")
+            && actionButtonSource.contains("@Environment(\\.accessibilityReduceMotion)")
+            && sidebarRowSource.contains("@Environment(\\.accessibilityReduceMotion)")
+            && tabBarSource.contains("@Environment(\\.accessibilityReduceMotion)"),
+        "shared interactive components should respect Reduce Motion through PaperCodexMotion.accessible"
+    )
+    try check(
+        actionButtonSource.contains("PaperCodexHitTarget.toolbarIconSize")
+            && actionButtonSource.contains("PaperCodexHitTarget.toolbarButtonVerticalPadding")
+            && sidebarRowSource.contains("PaperCodexSpacing.sidebarRowVertical")
+            && tabBarSource.contains("PaperCodexCornerRadius.control"),
+        "shared controls should use Paper Codex design tokens instead of scattering local measurements"
+    )
+    try check(
+        typographySource.contains(".dynamicTypeSize(.medium ... .accessibility2)")
+            && typographySource.contains("paperCodexReadableLineLimit"),
+        "Paper Codex typography should preserve readable line length and avoid forcing a single Dynamic Type size"
     )
 }
 
@@ -6129,6 +6168,10 @@ do {
     if selectedChecks.isEmpty || selectedChecks.contains("ui-layout-source") {
         try runUILayoutSourceChecks()
         print("ui-layout-source: pass")
+    }
+    if selectedChecks.isEmpty || selectedChecks.contains("ui-design-source") {
+        try runUIDesignSourceChecks()
+        print("ui-design-source: pass")
     }
     if selectedChecks.isEmpty || selectedChecks.contains("repository") {
         try runRepositoryChecks()

@@ -1647,7 +1647,7 @@ private struct MessageBubble: View {
                 .padding(.vertical, 11)
                 .background(ChatMessageBubbleBackground(isUser: isUser))
             }
-            .frame(maxWidth: 760, alignment: isUser ? .trailing : .leading)
+            .paperCodexReadableLineLimit(alignment: isUser ? .trailing : .leading)
 
             if !isUser {
                 Spacer(minLength: 44)
@@ -1685,10 +1685,10 @@ private struct ChatMessageBubbleBackground: View {
     var isUser: Bool
 
     var body: some View {
-        RoundedRectangle(cornerRadius: 8)
+        RoundedRectangle(cornerRadius: PaperCodexCornerRadius.control)
             .fill(fill)
             .overlay(
-                RoundedRectangle(cornerRadius: 8)
+                RoundedRectangle(cornerRadius: PaperCodexCornerRadius.control)
                     .stroke(stroke, lineWidth: 1)
             )
             .shadow(color: shadow, radius: isUser ? 7 : 6, y: 3)
@@ -1698,7 +1698,7 @@ private struct ChatMessageBubbleBackground: View {
         if isUser {
             return Color.accentColor.opacity(0.13)
         }
-        return Color(nsColor: .textBackgroundColor)
+        return PaperCodexSurface.text
     }
 
     private var stroke: Color {

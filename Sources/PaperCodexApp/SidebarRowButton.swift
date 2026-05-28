@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct SidebarRowButton: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isHovering = false
 
     var title: String
@@ -20,15 +21,15 @@ struct SidebarRowButton: View {
                     .lineLimit(1)
                 Spacer()
             }
-            .padding(.leading, CGFloat(depth * 14) + 9)
-            .padding(.trailing, 9 + trailingReserve)
-            .padding(.vertical, 7)
+            .padding(.leading, CGFloat(depth * 14) + PaperCodexSpacing.sidebarRowLeading)
+            .padding(.trailing, PaperCodexSpacing.sidebarRowTrailing + trailingReserve)
+            .padding(.vertical, PaperCodexSpacing.sidebarRowVertical)
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
         }
-        .buttonStyle(SidebarRowButtonStyle(selected: selected, isHovering: isHovering, depth: depth))
+        .buttonStyle(SidebarRowButtonStyle(selected: selected, isHovering: isHovering, depth: depth, reduceMotion: reduceMotion))
         .onHover { hovering in
-            withAnimation(PaperCodexMotion.hover) {
+            PaperCodexMotion.perform(PaperCodexMotion.hover, reduceMotion: reduceMotion) {
                 isHovering = hovering
             }
         }
@@ -39,13 +40,14 @@ private struct SidebarRowButtonStyle: ButtonStyle {
     var selected: Bool
     var isHovering: Bool
     var depth: Int
+    var reduceMotion: Bool
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .background(rowBackground(isPressed: configuration.isPressed))
-            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .clipShape(RoundedRectangle(cornerRadius: PaperCodexCornerRadius.control))
             .shadow(color: shadowColor(isPressed: configuration.isPressed), radius: 7, y: 3)
-            .scaleEffect(configuration.isPressed ? 0.985 : (isHovering ? 1.015 : 1), anchor: .center)
+            .scaleEffect(reduceMotion ? 1 : (configuration.isPressed ? 0.985 : (isHovering ? 1.015 : 1)), anchor: .center)
             .overlay(alignment: .leading) {
                 if selected || configuration.isPressed {
                     Capsule()
@@ -55,16 +57,16 @@ private struct SidebarRowButtonStyle: ButtonStyle {
                         .transition(.opacity.combined(with: .scale(scale: 0.82)))
                 }
             }
-            .animation(PaperCodexMotion.press, value: configuration.isPressed)
-            .animation(PaperCodexMotion.hover, value: isHovering)
-            .animation(PaperCodexMotion.selection, value: selected)
+            .animation(PaperCodexMotion.accessible(PaperCodexMotion.press, reduceMotion: reduceMotion), value: configuration.isPressed)
+            .animation(PaperCodexMotion.accessible(PaperCodexMotion.hover, reduceMotion: reduceMotion), value: isHovering)
+            .animation(PaperCodexMotion.accessible(PaperCodexMotion.selection, reduceMotion: reduceMotion), value: selected)
     }
 
     private func rowBackground(isPressed: Bool) -> some View {
-        RoundedRectangle(cornerRadius: 8)
+        RoundedRectangle(cornerRadius: PaperCodexCornerRadius.control)
             .fill(rowFill(isPressed: isPressed))
             .overlay(
-                RoundedRectangle(cornerRadius: 8)
+                RoundedRectangle(cornerRadius: PaperCodexCornerRadius.control)
                     .stroke(rowStroke(isPressed: isPressed), lineWidth: 1)
             )
     }
@@ -76,7 +78,7 @@ private struct SidebarRowButtonStyle: ButtonStyle {
         if isPressed {
             return Color.accentColor.opacity(0.10)
         }
-        return isHovering ? Color(nsColor: .textBackgroundColor) : Color.clear
+        return isHovering ? PaperCodexSurface.text : Color.clear
     }
 
     private func rowStroke(isPressed: Bool) -> Color {

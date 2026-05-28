@@ -3,6 +3,7 @@ import PaperCodexCore
 import SwiftUI
 
 struct PaperCodexWindowTabBar: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var navigation: AppNavigation
     @State private var isWindowFullscreen = false
@@ -49,12 +50,12 @@ struct PaperCodexWindowTabBar: View {
                         guard let activePaperID else {
                             return
                         }
-                        withAnimation(PaperCodexMotion.selection) {
+                        PaperCodexMotion.perform(PaperCodexMotion.selection, reduceMotion: reduceMotion) {
                             scrollProxy.scrollTo(activePaperID, anchor: .center)
                         }
                     }
-                    .animation(PaperCodexMotion.selection, value: model.readerTabState.activePaperID)
-                    .animation(PaperCodexMotion.selection, value: readerTabIDs)
+                    .animation(PaperCodexMotion.accessible(PaperCodexMotion.selection, reduceMotion: reduceMotion), value: model.readerTabState.activePaperID)
+                    .animation(PaperCodexMotion.accessible(PaperCodexMotion.selection, reduceMotion: reduceMotion), value: readerTabIDs)
                 }
                 .layoutPriority(1)
 
@@ -107,6 +108,7 @@ struct PaperCodexWindowTabBar: View {
 }
 
 private struct PaperCodexHomeChromeTab: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isHovering = false
 
     var isActive: Bool
@@ -118,10 +120,10 @@ private struct PaperCodexHomeChromeTab: View {
             Image(systemName: isActive ? "house.fill" : "house")
                 .font(.paperCodexSystem(size: 13, weight: .semibold))
                 .foregroundStyle(isActive ? Color.accentColor : Color.secondary)
-                .frame(width: 44, height: 34)
+                .frame(width: PaperCodexHitTarget.chromeHomeTabWidth, height: PaperCodexHitTarget.chromeTabHeight)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(PaperCodexChromeTabButtonStyle(isActive: isActive, isHovering: isHovering))
+        .buttonStyle(PaperCodexChromeTabButtonStyle(isActive: isActive, isHovering: isHovering, reduceMotion: reduceMotion))
         .background(tabBackground)
         .overlay(alignment: .bottom) {
             if isActive {
@@ -136,13 +138,13 @@ private struct PaperCodexHomeChromeTab: View {
                 .stroke(tabBorder, lineWidth: isActive ? 1 : 0.8)
         )
         .clipShape(chromeTabShape)
-        .scaleEffect(tabScale, anchor: .bottom)
-        .animation(PaperCodexMotion.hover, value: isHovering)
-        .animation(PaperCodexMotion.selection, value: isActive)
+        .scaleEffect(reduceMotion ? 1 : tabScale, anchor: .bottom)
+        .animation(PaperCodexMotion.accessible(PaperCodexMotion.hover, reduceMotion: reduceMotion), value: isHovering)
+        .animation(PaperCodexMotion.accessible(PaperCodexMotion.selection, reduceMotion: reduceMotion), value: isActive)
         .help(helpText)
         .accessibilityLabel("Home")
         .onHover { hovering in
-            withAnimation(PaperCodexMotion.hover) {
+            PaperCodexMotion.perform(PaperCodexMotion.hover, reduceMotion: reduceMotion) {
                 isHovering = hovering
             }
         }
@@ -181,6 +183,7 @@ private struct PaperCodexHomeChromeTab: View {
 }
 
 private struct PaperCodexReaderChromeTabItem: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @EnvironmentObject private var model: AppModel
     var tab: ReaderPaperTab
     var isActive: Bool
@@ -212,7 +215,7 @@ private struct PaperCodexReaderChromeTabItem: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
             }
-            .buttonStyle(PaperCodexChromeTabButtonStyle(isActive: isActive, isHovering: isHovering))
+            .buttonStyle(PaperCodexChromeTabButtonStyle(isActive: isActive, isHovering: isHovering, reduceMotion: reduceMotion))
             .help(tab.detail.isEmpty ? tab.title : "\(tab.title)\n\(tab.detail)")
 
             Button {
@@ -221,10 +224,10 @@ private struct PaperCodexReaderChromeTabItem: View {
                 Image(systemName: "xmark")
                     .font(.paperCodexSystem(size: 10, weight: .bold))
                     .foregroundStyle(isActive ? Color.secondary : Color.secondary.opacity(0.58))
-                    .frame(width: 18, height: 18)
+                    .frame(width: PaperCodexHitTarget.chromeCloseButtonSize, height: PaperCodexHitTarget.chromeCloseButtonSize)
                     .contentShape(Circle())
             }
-            .buttonStyle(PaperCodexChromeTabCloseButtonStyle(isActive: isActive, isHovering: isHovering))
+            .buttonStyle(PaperCodexChromeTabCloseButtonStyle(isActive: isActive, isHovering: isHovering, reduceMotion: reduceMotion))
             .help("Close tab")
         }
         .padding(.leading, 10)
@@ -245,16 +248,16 @@ private struct PaperCodexReaderChromeTabItem: View {
         )
         .clipShape(chromeTabShape)
         .shadow(
-            color: isActive ? Color.black.opacity(0.10) : Color.clear,
+            color: isActive && !reduceMotion ? Color.black.opacity(0.10) : Color.clear,
             radius: isActive ? 5 : 0,
             x: 0,
             y: 1
         )
-        .scaleEffect(tabScale, anchor: .bottom)
-        .animation(PaperCodexMotion.hover, value: isHovering)
-        .animation(PaperCodexMotion.selection, value: isActive)
+        .scaleEffect(reduceMotion ? 1 : tabScale, anchor: .bottom)
+        .animation(PaperCodexMotion.accessible(PaperCodexMotion.hover, reduceMotion: reduceMotion), value: isHovering)
+        .animation(PaperCodexMotion.accessible(PaperCodexMotion.selection, reduceMotion: reduceMotion), value: isActive)
         .onHover { hovering in
-            withAnimation(PaperCodexMotion.hover) {
+            PaperCodexMotion.perform(PaperCodexMotion.hover, reduceMotion: reduceMotion) {
                 isHovering = hovering
             }
         }
@@ -295,19 +298,20 @@ private struct PaperCodexReaderChromeTabItem: View {
 private struct PaperCodexChromeTabButtonStyle: ButtonStyle {
     var isActive: Bool
     var isHovering: Bool
+    var reduceMotion: Bool
 
     func makeBody(configuration: Configuration) -> some View {
         let isPressed = configuration.isPressed
         configuration.label
             .opacity(isPressed ? 0.84 : 1)
-            .scaleEffect(isPressed ? 0.972 : 1, anchor: .bottom)
+            .scaleEffect(reduceMotion ? 1 : (isPressed ? 0.972 : 1), anchor: .bottom)
             .background(
-                RoundedRectangle(cornerRadius: 7)
+                RoundedRectangle(cornerRadius: PaperCodexCornerRadius.control)
                     .fill(pressFill(isPressed: isPressed))
             )
-            .animation(PaperCodexMotion.press, value: configuration.isPressed)
-            .animation(PaperCodexMotion.hover, value: isHovering)
-            .animation(PaperCodexMotion.selection, value: isActive)
+            .animation(PaperCodexMotion.accessible(PaperCodexMotion.press, reduceMotion: reduceMotion), value: configuration.isPressed)
+            .animation(PaperCodexMotion.accessible(PaperCodexMotion.hover, reduceMotion: reduceMotion), value: isHovering)
+            .animation(PaperCodexMotion.accessible(PaperCodexMotion.selection, reduceMotion: reduceMotion), value: isActive)
     }
 
     private func pressFill(isPressed: Bool) -> Color {
@@ -321,6 +325,7 @@ private struct PaperCodexChromeTabButtonStyle: ButtonStyle {
 private struct PaperCodexChromeTabCloseButtonStyle: ButtonStyle {
     var isActive: Bool
     var isHovering: Bool
+    var reduceMotion: Bool
 
     func makeBody(configuration: Configuration) -> some View {
         let isPressed = configuration.isPressed
@@ -333,10 +338,10 @@ private struct PaperCodexChromeTabCloseButtonStyle: ButtonStyle {
                 Circle()
                     .stroke(borderColor(isPressed: isPressed), lineWidth: isPressed || isHovering ? 1 : 0)
             )
-            .scaleEffect(isPressed ? 0.88 : (isHovering ? 1.06 : 1), anchor: .center)
-            .animation(PaperCodexMotion.press, value: configuration.isPressed)
-            .animation(PaperCodexMotion.hover, value: isHovering)
-            .animation(PaperCodexMotion.selection, value: isActive)
+            .scaleEffect(reduceMotion ? 1 : (isPressed ? 0.88 : (isHovering ? 1.06 : 1)), anchor: .center)
+            .animation(PaperCodexMotion.accessible(PaperCodexMotion.press, reduceMotion: reduceMotion), value: configuration.isPressed)
+            .animation(PaperCodexMotion.accessible(PaperCodexMotion.hover, reduceMotion: reduceMotion), value: isHovering)
+            .animation(PaperCodexMotion.accessible(PaperCodexMotion.selection, reduceMotion: reduceMotion), value: isActive)
     }
 
     private func backgroundFill(isPressed: Bool) -> Color {
@@ -355,12 +360,12 @@ private struct PaperCodexChromeTabCloseButtonStyle: ButtonStyle {
 }
 
 private enum PaperCodexChromeTabStyle {
-    static let cornerRadius: CGFloat = 9
-    static let barBackground = Color(nsColor: .windowBackgroundColor)
-    static let activeBackground = Color(nsColor: .textBackgroundColor)
-    static let inactiveBackground = Color(nsColor: .controlBackgroundColor).opacity(0.36)
-    static let inactiveHoverBackground = Color(nsColor: .controlBackgroundColor).opacity(0.70)
-    static let divider = Color.primary.opacity(0.13)
+    static let cornerRadius: CGFloat = PaperCodexCornerRadius.chromeTab
+    static let barBackground = PaperCodexSurface.window
+    static let activeBackground = PaperCodexSurface.text
+    static let inactiveBackground = PaperCodexSurface.control.opacity(0.36)
+    static let inactiveHoverBackground = PaperCodexSurface.control.opacity(0.70)
+    static let divider = PaperCodexSurface.separator
     static let activeBorder = Color.primary.opacity(0.16)
     static let inactiveBorder = Color.primary.opacity(0.10)
 }
