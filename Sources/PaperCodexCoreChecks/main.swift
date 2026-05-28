@@ -1384,6 +1384,20 @@ func runUILayoutSourceChecks() throws {
             && !actionButtonSource.contains(".buttonStyle(.plain)"),
         "shared toolbar and icon actions should provide immediate pressed feedback"
     )
+    if let readerHeaderButtonRange = chatSource.range(of: "private struct ReaderChatHeaderActionButton: View"),
+       let readerHeaderButtonEndRange = chatSource.range(of: "private struct SessionNotesPanel", range: readerHeaderButtonRange.upperBound..<chatSource.endIndex) {
+        let readerHeaderButtonSource = String(chatSource[readerHeaderButtonRange.lowerBound..<readerHeaderButtonEndRange.lowerBound])
+        try check(
+            readerHeaderButtonSource.contains("private struct ReaderChatHeaderActionButtonStyle: ButtonStyle")
+                && readerHeaderButtonSource.contains(".buttonStyle(ReaderChatHeaderActionButtonStyle(")
+                && readerHeaderButtonSource.contains("configuration.isPressed")
+                && readerHeaderButtonSource.contains("PaperCodexMotion.press")
+                && !readerHeaderButtonSource.contains(".buttonStyle(.plain)"),
+            "reader chat header actions should provide immediate pressed feedback before session operations"
+        )
+    } else {
+        throw CheckFailure(description: "reader chat header button source should remain inspectable")
+    }
     try check(
         discoverSource.contains("private struct SaveActionButtonStyle")
             && discoverSource.contains("private struct StableOpenButtonStyle")
