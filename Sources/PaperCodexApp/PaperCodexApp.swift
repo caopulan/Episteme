@@ -324,6 +324,12 @@ struct PaperCodexCommands: Commands {
             }
             .keyboardShortcut("f", modifiers: [.command])
 
+            Button("Focus Chat Composer") {
+                model.requestChatComposerFocus()
+            }
+            .keyboardShortcut("l", modifiers: [.command])
+            .disabled(!canUseReaderChatCommand)
+
             Button("Read Selected Paper") {
                 model.openSelectedLibraryPaperForReading()
             }
@@ -384,6 +390,10 @@ struct PaperCodexCommands: Commands {
     }
 
     private var canUseReaderPDFCommand: Bool {
+        navigation.route == .reader && model.selectedPaper != nil
+    }
+
+    private var canUseReaderChatCommand: Bool {
         navigation.route == .reader && model.selectedPaper != nil
     }
 }

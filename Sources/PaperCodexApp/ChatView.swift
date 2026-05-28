@@ -20,6 +20,7 @@ struct ChatView: View {
     @State private var sessionPendingRename: PaperSession?
     @State private var renameSessionTitle = ""
     @State private var selectedGeneratedImageURL: URL?
+    @State private var composerFocusRequestID: UUID?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -49,6 +50,9 @@ struct ChatView: View {
         }
         .onChange(of: model.selectedSession?.id) { _, _ in
             selectedGeneratedImageURL = nil
+        }
+        .onChange(of: model.chatComposerFocusRequestID) { _, requestID in
+            composerFocusRequestID = requestID
         }
     }
 
@@ -300,6 +304,7 @@ struct ChatView: View {
                     ComposerTextView(
                         text: composerDraftBinding,
                         isEnabled: canEditComposer,
+                        focusRequestID: composerFocusRequestID,
                         onSubmit: sendDraft
                     )
                         .frame(height: composerTextHeight)
@@ -1602,6 +1607,7 @@ private struct MarkdownMessageView: View {
 private struct ComposerTextView: NSViewRepresentable {
     @Binding var text: String
     var isEnabled: Bool
+    var focusRequestID: UUID?
     var onSubmit: () -> Void
 
     func makeCoordinator() -> Coordinator {
@@ -1648,11 +1654,13 @@ private struct ComposerTextView: NSViewRepresentable {
         if textView.string != text {
             textView.string = text
         }
+        context.coordinator.focusIfNeeded(textView, focusRequestID: focusRequestID)
     }
 
     final class Coordinator: NSObject, NSTextViewDelegate {
         @Binding var text: String
         var onSubmit: () -> Void
+        private var lastHandledFocusRequestID: UUID?
 
         init(text: Binding<String>, onSubmit: @escaping () -> Void) {
             _text = text
@@ -1668,6 +1676,22 @@ private struct ComposerTextView: NSViewRepresentable {
 
         func submit() {
             onSubmit()
+        }
+
+        func focusIfNeeded(_ textView: SendingTextView, focusRequestID: UUID?) {
+            guard let focusRequestID, focusRequestID != lastHandledFocusRequestID else {
+                return
+            }
+            lastHandledFocusRequestID = focusRequestID
+            DispatchQueue.main.async { [weak textView] in
+                guard let textView else {
+                    return
+                }
+                textView.window?.makeFirstResponder(textView)
+                let insertionPoint = NSRange(location: textView.string.utf16.count, length: 0)
+                textView.setSelectedRange(insertionPoint)
+                textView.scrollRangeToVisible(insertionPoint)
+            }
         }
     }
 

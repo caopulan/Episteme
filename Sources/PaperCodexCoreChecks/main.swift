@@ -2162,6 +2162,18 @@ func runUILayoutSourceChecks() throws {
         "chat composer should let IME marked text handle Return before submitting"
     )
     try check(
+        rootViewSource.contains("Button(\"Focus Chat Composer\")")
+            && rootViewSource.contains(".keyboardShortcut(\"l\", modifiers: [.command])")
+            && appModelSource.contains("@Published var chatComposerFocusRequestID")
+            && appModelSource.contains("func requestChatComposerFocus()")
+            && appModelSource.contains("selectedSessionPanelTab = .chat")
+            && chatSource.contains("focusRequestID: composerFocusRequestID")
+            && chatSource.contains(".onChange(of: model.chatComposerFocusRequestID)")
+            && chatSource.contains("window?.makeFirstResponder(textView)")
+            && chatSource.contains("scrollRangeToVisible"),
+        "Cmd-L should focus the Reader chat composer and switch back to the Chat tab"
+    )
+    try check(
         appModelSource.contains("appendCodexCancellationMessage"),
         "cancelling Codex should leave a visible trace in the session"
     )

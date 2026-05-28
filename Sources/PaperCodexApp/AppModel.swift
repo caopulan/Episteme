@@ -352,6 +352,7 @@ private func isCancellationError(_ error: any Error) -> Bool {
 final class AppModel: ObservableObject {
     let navigation = AppNavigation()
     @Published var searchFocusRequestID = UUID()
+    @Published var chatComposerFocusRequestID = UUID()
 
     var route: AppRoute {
         get { navigation.route }
@@ -1519,6 +1520,14 @@ final class AppModel: ObservableObject {
             }
         }
         searchFocusRequestID = UUID()
+    }
+
+    func requestChatComposerFocus() {
+        guard route == .reader, selectedPaper != nil else {
+            return
+        }
+        selectedSessionPanelTab = .chat
+        chatComposerFocusRequestID = UUID()
     }
 
     private func startDiscoverCacheWarmupIfNeeded() {
