@@ -35,6 +35,8 @@ struct LibraryView: View {
     @State private var editingNoteID: String?
     @State private var selectedRecentSessionID: String?
     @State private var selectedPaperRevealRequestID: UUID?
+    @State private var inspectorDetailsPaperID: String?
+    @State private var inspectorDetailsRequestID: UUID?
     @State private var isInspectorReadButtonHovering = false
     @AppStorage("PaperCodexLibrarySortOption") private var librarySortRawValue = LibrarySortOption.addedNewest.rawValue
     @AppStorage("PaperCodexLibrarySortAscending") private var librarySortAscending = false
@@ -150,6 +152,18 @@ struct LibraryView: View {
         }
         .onChange(of: model.recentSessions.map(\.id)) { _, _ in
             pruneRecentSessionSelection()
+        }
+        .onChange(of: model.selectedLibraryPaper?.id) { _, _ in
+            if let paper = model.selectedLibraryPaper {
+                scheduleInspectorDetailsAfterSelectionSettles(for: paper)
+            } else {
+                scheduleInspectorDetailsAfterSelectionSettles(for: nil)
+            }
+        }
+        .onAppear {
+            if let paper = model.selectedLibraryPaper {
+                scheduleInspectorDetailsAfterSelectionSettles(for: paper)
+            }
         }
         .alert("Delete selected papers?", isPresented: $isConfirmingBulkDelete) {
             Button("Delete", role: .destructive) {
@@ -691,9 +705,8 @@ struct LibraryView: View {
                 .font(.paperCodexSystem(size: 20, weight: .semibold))
 
             if let paper = model.selectedLibraryPaper {
-                let metadata = model.libraryArxivMetadata(for: paper)
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
+                    LazyVStack(alignment: .leading, spacing: 16) {
                         VStack(alignment: .leading, spacing: 6) {
                             HStack(alignment: .top, spacing: 8) {
                                 Text(paper.title)
@@ -717,11 +730,6 @@ struct LibraryView: View {
                                 .textSelection(.enabled)
                         }
 
-                        if let metadata {
-                            paperMetadataSection(for: paper, metadata: metadata)
-                            Divider()
-                        }
-
                         Button {
                             model.openPaper(paper)
                         } label: {
@@ -736,20 +744,23 @@ struct LibraryView: View {
                             }
                         }
 
-                        Divider()
-                        categoryAssignments(for: paper)
-                        Divider()
-                        tagAssignments(for: paper)
-                        Divider()
-                        paperNotesSection(for: paper)
+                        if inspectorDetailsPaperID == paper.id {
+                            Divider()
+
+                            let metadata = model.libraryArxivMetadata(for: paper)
+                            if let metadata {
+                                paperMetadataSection(for: paper, metadata: metadata)
+                                Divider()
+                            }
+
+                            categoryAssignments(for: paper)
+                            Divider()
+                            tagAssignments(for: paper)
+                            Divider()
+                            paperNotesSection(for: paper)
+                        }
                     }
                     .padding(.trailing, 4)
-                    .onAppear {
-                        loadPaperNotesAfterSelectionSettles(for: paper)
-                    }
-                    .onChange(of: paper.id) { _, _ in
-                        loadPaperNotesAfterSelectionSettles(for: paper)
-                    }
                 }
             } else {
                 ContentUnavailableView("Select Paper", systemImage: "sidebar.right")
@@ -991,7 +1002,7 @@ struct LibraryView: View {
         } else {
             clearPaperMultiSelection()
             lastSelectedPaperID = paper.id
-            model.selectLibraryPaper(paper)
+            focusLibraryPaper(paper)
         }
     }
 
@@ -1017,7 +1028,7 @@ struct LibraryView: View {
         clearPaperMultiSelection()
         lastSelectedPaperID = nextPaper.id
         selectedPaperRevealRequestID = UUID()
-        model.selectLibraryPaper(nextPaper)
+        focusLibraryPaper(nextPaper)
         isPaperListFocused = true
     }
 
@@ -1048,7 +1059,7 @@ struct LibraryView: View {
         if visibleSelection.count > 1 {
             selectedPaperIDs = visibleSelection
             lastSelectedPaperID = focusedPaper.id
-            model.selectLibraryPaper(focusedPaper)
+            focusLibraryPaper(focusedPaper)
             return
         }
 
@@ -1056,13 +1067,13 @@ struct LibraryView: View {
         if let remainingID = visibleSelection.first,
            let remainingPaper = sortedPapers.first(where: { $0.id == remainingID }) {
             lastSelectedPaperID = remainingID
-            model.selectLibraryPaper(remainingPaper)
+            focusLibraryPaper(remainingPaper)
         } else if visibleIDs.contains(focusedPaper.id) {
             lastSelectedPaperID = focusedPaper.id
-            model.selectLibraryPaper(focusedPaper)
+            focusLibraryPaper(focusedPaper)
         } else {
             lastSelectedPaperID = nil
-            model.selectedLibraryPaper = nil
+            clearFocusedLibraryPaper()
         }
     }
 
@@ -1137,12 +1148,32 @@ struct LibraryView: View {
         noteBody = ""
     }
 
-    private func loadPaperNotesAfterSelectionSettles(for paper: Paper) {
+    private func focusLibraryPaper(_ paper: Paper) {
+        applyFastLibrarySelection {
+            model.selectLibraryPaper(paper)
+        }
+    }
+
+    private func clearFocusedLibraryPaper() {
+        applyFastLibrarySelection {
+            model.selectedLibraryPaper = nil
+        }
+    }
+
+    private func scheduleInspectorDetailsAfterSelectionSettles(for paper: Paper?) {
+        inspectorDetailsPaperID = nil
+        let requestID = UUID()
+        inspectorDetailsRequestID = requestID
+        guard let paper else {
+            return
+        }
         Task { @MainActor in
-            await Task.yield()
-            guard model.selectedLibraryPaper?.id == paper.id else {
+            try? await Task.sleep(nanoseconds: LibraryLayout.inspectorDetailSettleDelayNanoseconds)
+            guard inspectorDetailsRequestID == requestID,
+                  model.selectedLibraryPaper?.id == paper.id else {
                 return
             }
+            inspectorDetailsPaperID = paper.id
             model.loadPaperNotes(for: paper)
         }
     }
@@ -2110,6 +2141,7 @@ private enum LibraryLayout {
     static let bulkActionBarOverlayOpacity = 0.66
     static let paperRowThumbnailLimit = 3
     static let paperRowThumbnailMaxPixelSize = 128
+    static let inspectorDetailSettleDelayNanoseconds: UInt64 = 80_000_000
     static let categoryTreeRowSpacing: CGFloat = 0
     static let categoryTreeConnectorHeight: CGFloat = 32
     static let categoryTreeIndentWidth: CGFloat = 22

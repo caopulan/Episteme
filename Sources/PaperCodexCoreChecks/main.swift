@@ -1176,6 +1176,13 @@ func runUILayoutSourceChecks() throws {
         "paper clicks should not trigger animated scroll-to-center; only keyboard navigation should request reveal"
     )
     try check(
+        librarySource.contains("@State private var inspectorDetailsPaperID")
+            && librarySource.contains("scheduleInspectorDetailsAfterSelectionSettles(for: paper)")
+            && librarySource.contains("inspectorDetailsPaperID == paper.id")
+            && librarySource.contains("inspectorDetailSettleDelayNanoseconds"),
+        "library inspector should defer heavy per-paper details until selection settles so row selection can paint first"
+    )
+    try check(
         librarySource.contains("onTogglePinned")
             && librarySource.contains("pin.fill")
             && appModelSource.contains("func setCategoryPinned("),
