@@ -1984,6 +1984,21 @@ func runUILayoutSourceChecks() throws {
         "PDFKit view should accept explicit toolbar commands"
     )
     try check(
+        rootViewSource.contains("Button(\"Previous PDF Page\")")
+            && rootViewSource.contains(".keyboardShortcut(.upArrow, modifiers: [.command])")
+            && rootViewSource.contains("Button(\"Next PDF Page\")")
+            && rootViewSource.contains(".keyboardShortcut(.downArrow, modifiers: [.command])")
+            && rootViewSource.contains("Button(\"Zoom PDF In\")")
+            && rootViewSource.contains(".keyboardShortcut(\"=\", modifiers: [.command])")
+            && rootViewSource.contains("Button(\"Zoom PDF Out\")")
+            && rootViewSource.contains(".keyboardShortcut(\"-\", modifiers: [.command])")
+            && rootViewSource.contains("Button(\"Fit PDF Width\")")
+            && rootViewSource.contains(".keyboardShortcut(\"0\", modifiers: [.command])")
+            && rootViewSource.contains("canUseReaderPDFCommand")
+            && appModelSource.contains("func sendPDFKitCommand(_ kind: PDFKitCommandKind)"),
+        "Reader PDF paging and zooming should have direct keyboard commands"
+    )
+    try check(
         pdfKitSource.contains("applyManualZoom(multiplier:")
             && pdfKitSource.contains("resolvedScaleFactor()")
             && pdfKitSource.contains("clampedManualScale")

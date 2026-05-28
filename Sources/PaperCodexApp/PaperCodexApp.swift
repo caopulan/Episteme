@@ -338,6 +338,38 @@ struct PaperCodexCommands: Commands {
 
             Divider()
 
+            Button("Previous PDF Page") {
+                model.sendPDFKitCommand(.previousPage)
+            }
+            .keyboardShortcut(.upArrow, modifiers: [.command])
+            .disabled(!canUseReaderPDFCommand)
+
+            Button("Next PDF Page") {
+                model.sendPDFKitCommand(.nextPage)
+            }
+            .keyboardShortcut(.downArrow, modifiers: [.command])
+            .disabled(!canUseReaderPDFCommand)
+
+            Button("Zoom PDF In") {
+                model.sendPDFKitCommand(.zoomIn)
+            }
+            .keyboardShortcut("=", modifiers: [.command])
+            .disabled(!canUseReaderPDFCommand)
+
+            Button("Zoom PDF Out") {
+                model.sendPDFKitCommand(.zoomOut)
+            }
+            .keyboardShortcut("-", modifiers: [.command])
+            .disabled(!canUseReaderPDFCommand)
+
+            Button("Fit PDF Width") {
+                model.sendPDFKitCommand(.fitWidth)
+            }
+            .keyboardShortcut("0", modifiers: [.command])
+            .disabled(!canUseReaderPDFCommand)
+
+            Divider()
+
             Button("Settings") {
                 model.showSettings()
             }
@@ -349,5 +381,9 @@ struct PaperCodexCommands: Commands {
         navigation.route == .library
             && model.selectedLibrarySurface == .papers
             && model.canOpenSelectedLibraryPaper
+    }
+
+    private var canUseReaderPDFCommand: Bool {
+        navigation.route == .reader && model.selectedPaper != nil
     }
 }
