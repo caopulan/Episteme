@@ -4793,13 +4793,14 @@ func runAgentCommandBuilderChecks() throws {
     try check(
         hermes.arguments == [
             "chat",
+            "--quiet",
             "--query", "Summarize",
             "--provider", "kimi",
             "--model", "kimi-k2",
             "--skills", "/tmp/session-a/skills/papercodex-agent-workspace",
             "--source", "papercodex"
         ],
-        "Hermes adapter should build a provider/model/skills query command"
+        "Hermes adapter should build a quiet provider/model/skills query command so only the final answer reaches chat"
     )
 
     let openClaw = OpenClawRuntimeAdapter(executablePath: "/opt/homebrew/bin/openclaw").nonInteractiveCommand(

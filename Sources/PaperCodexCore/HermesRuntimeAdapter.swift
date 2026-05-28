@@ -32,6 +32,7 @@ public struct HermesRuntimeAdapter: Sendable {
     ) -> AgentRuntimeCommand {
         var arguments = [
             "chat",
+            "--quiet",
             "--query", prompt
         ]
         if let provider = normalized(provider) {
