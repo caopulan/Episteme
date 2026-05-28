@@ -2792,6 +2792,14 @@ func runUILayoutSourceChecks() throws {
         discoverSource.contains("activeFilterChips"),
         "Discover should show removable active filter chips"
     )
+    try check(
+        discoverSource.contains("private let discoverRouteToolbarMinHeight: CGFloat")
+            && discoverSource.contains(".frame(maxWidth: .infinity, minHeight: discoverRouteToolbarMinHeight, alignment: .topLeading)")
+            && discoverSource.contains("DiscoverRouteLoadingPlaceholder")
+            && discoverSource.contains("model.isLoadingArxivFeed && model.arxivFeed == nil")
+            && discoverSource.contains("model.isSearchingArxivSearch && model.arxivSearchFeed == nil"),
+        "Explore and Search should keep a stable toolbar and lightweight loading shell so route switches do not visually jump"
+    )
     if let searchRowRange = discoverSource.range(of: "private var searchAndActionRow: some View"),
        let filterButtonRange = discoverSource.range(of: "private func filterButton", range: searchRowRange.upperBound..<discoverSource.endIndex) {
         let searchRowSource = String(discoverSource[searchRowRange.lowerBound..<filterButtonRange.lowerBound])

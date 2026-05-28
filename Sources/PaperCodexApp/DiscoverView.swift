@@ -4,6 +4,7 @@ import PaperCodexCore
 import SwiftUI
 
 private let discoverMediaHorizontalPadding: CGFloat = 14
+private let discoverRouteToolbarMinHeight: CGFloat = 126
 
 private enum DiscoverImagePreloadPolicy {
     static let visiblePaperLimit = 36
@@ -305,9 +306,12 @@ struct DiscoverView: View {
             let visiblePapers = papers
             toolbar
 
-            if model.isSearchingDiscover && model.arxivFeed == nil {
-                ProgressView()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            if (model.isLoadingArxivFeed && model.arxivFeed == nil)
+                || (model.isSearchingDiscover && model.arxivFeed == nil) {
+                DiscoverRouteLoadingPlaceholder(
+                    title: "Loading Explore",
+                    detail: "Preparing cached papers and previews"
+                )
             } else if visiblePapers.isEmpty {
                 ContentUnavailableView("No Papers", systemImage: "doc.text.magnifyingglass")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -535,6 +539,7 @@ struct DiscoverView: View {
                 }
             }
         }
+        .frame(maxWidth: .infinity, minHeight: discoverRouteToolbarMinHeight, alignment: .topLeading)
     }
 
     private var searchAndActionRow: some View {
@@ -824,8 +829,10 @@ struct ArxivSearchView: View {
             toolbar
 
             if model.isSearchingArxivSearch && model.arxivSearchFeed == nil {
-                ProgressView()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                DiscoverRouteLoadingPlaceholder(
+                    title: "Searching arXiv",
+                    detail: "Results will appear in this space"
+                )
             } else if papers.isEmpty {
                 ContentUnavailableView("No Papers", systemImage: "doc.text.magnifyingglass")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -966,6 +973,7 @@ struct ArxivSearchView: View {
                 ArxivCacheProgressStrip(progress: progress)
             }
         }
+        .frame(maxWidth: .infinity, minHeight: discoverRouteToolbarMinHeight, alignment: .topLeading)
     }
 
     private func requiredCategoryBinding(for category: String) -> Binding<Bool> {
@@ -1295,6 +1303,106 @@ private struct ArxivSearchYearField: View {
                 .frame(width: 70)
         }
         .controlSize(.small)
+    }
+}
+
+private struct DiscoverRouteLoadingPlaceholder: View {
+    var title: String
+    var detail: String
+
+    var body: some View {
+        GeometryReader { proxy in
+            let columnCount = placeholderColumnCount(for: proxy.size.width)
+            let rows = Array(0..<3)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .controlSize(.small)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(LocalizedStringKey(title))
+                                .font(.paperCodexSystem(size: 13, weight: .semibold))
+                            Text(LocalizedStringKey(detail))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(.horizontal, 10)
+
+                    LazyVStack(alignment: .leading, spacing: 14) {
+                        ForEach(rows, id: \.self) { _ in
+                            HStack(alignment: .top, spacing: 16) {
+                                ForEach(0..<columnCount, id: \.self) { _ in
+                                    DiscoverRouteLoadingCard()
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.bottom, 8)
+                }
+                .padding(.top, 8)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .transition(.opacity)
+    }
+
+    private func placeholderColumnCount(for width: CGFloat) -> Int {
+        if width >= 1120 {
+            return 3
+        }
+        if width >= 760 {
+            return 2
+        }
+        return 1
+    }
+}
+
+private struct DiscoverRouteLoadingCard: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            RoundedRectangle(cornerRadius: 7)
+                .fill(Color(nsColor: .separatorColor).opacity(0.16))
+                .aspectRatio(1.65, contentMode: .fit)
+                .overlay(alignment: .bottomLeading) {
+                    HStack(spacing: 5) {
+                        Circle()
+                            .fill(Color.accentColor.opacity(0.22))
+                            .frame(width: 8, height: 8)
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(Color.accentColor.opacity(0.18))
+                            .frame(width: 70, height: 6)
+                    }
+                    .padding(10)
+                }
+
+            VStack(alignment: .leading, spacing: 7) {
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(Color.primary.opacity(0.14))
+                    .frame(height: 10)
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(Color.primary.opacity(0.10))
+                    .frame(width: 190, height: 9)
+                HStack(spacing: 8) {
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Color.accentColor.opacity(0.14))
+                        .frame(width: 56, height: 11)
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Color.orange.opacity(0.14))
+                        .frame(width: 76, height: 11)
+                }
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.black.opacity(0.08), lineWidth: 1)
+        )
     }
 }
 
