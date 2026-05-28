@@ -1430,6 +1430,21 @@ func runUILayoutSourceChecks() throws {
             && discoverSource.components(separatedBy: "PaperCodexMotion.press").count - 1 >= 3,
         "Discover and Search sidebar filter buttons should provide immediate pressed feedback before list recalculation"
     )
+    if let filterChipRange = discoverSource.range(of: "private struct DiscoverFilterChip: View"),
+       let filterChipEndRange = discoverSource.range(of: "private struct ArxivSearchYearField", range: filterChipRange.upperBound..<discoverSource.endIndex) {
+        let filterChipSource = String(discoverSource[filterChipRange.lowerBound..<filterChipEndRange.lowerBound])
+        try check(
+            filterChipSource.contains("@State private var isHovering = false")
+                && filterChipSource.contains(".buttonStyle(DiscoverFilterChipStyle(")
+                && filterChipSource.contains("private struct DiscoverFilterChipStyle: ButtonStyle")
+                && filterChipSource.contains("configuration.isPressed")
+                && filterChipSource.contains("PaperCodexMotion.press")
+                && !filterChipSource.contains(".buttonStyle(.plain)"),
+            "Discover and Search active filter chips should provide immediate pressed feedback before list recalculation"
+        )
+    } else {
+        throw CheckFailure(description: "Discover active filter chip source should remain inspectable")
+    }
     try check(
         saveToLibrarySource.contains("SaveToLibraryDestinationHeader")
             && saveToLibrarySource.contains("SaveToLibraryFolderPathChip")

@@ -1204,6 +1204,8 @@ private struct SidebarFilterButtonStyle: ButtonStyle {
 }
 
 private struct DiscoverFilterChip: View {
+    @State private var isHovering = false
+
     var title: String
     var onRemove: () -> Void
 
@@ -1213,11 +1215,55 @@ private struct DiscoverFilterChip: View {
                 .font(.caption.weight(.medium))
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
-                .background(Color.accentColor.opacity(0.10), in: Capsule())
         }
-        .buttonStyle(.plain)
-        .foregroundStyle(Color.accentColor)
+        .buttonStyle(DiscoverFilterChipStyle(isHovering: isHovering))
         .help("Remove \(title) filter")
+        .onHover { hovering in
+            withAnimation(PaperCodexMotion.hover) {
+                isHovering = hovering
+            }
+        }
+    }
+}
+
+private struct DiscoverFilterChipStyle: ButtonStyle {
+    var isHovering: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        let isPressed = configuration.isPressed
+        configuration.label
+            .foregroundStyle(Color.accentColor.opacity(isPressed ? 1 : (isHovering ? 0.96 : 0.88)))
+            .background(
+                Capsule()
+                    .fill(backgroundFill(isPressed: isPressed))
+            )
+            .overlay(
+                Capsule()
+                    .stroke(borderColor(isPressed: isPressed), lineWidth: isPressed || isHovering ? 1 : 0)
+            )
+            .shadow(color: shadowColor(isPressed: isPressed), radius: isPressed ? 3 : 5, y: isPressed ? 1 : 2)
+            .scaleEffect(isPressed ? 0.965 : (isHovering ? 1.025 : 1), anchor: .center)
+            .contentShape(Capsule())
+            .animation(PaperCodexMotion.press, value: configuration.isPressed)
+            .animation(PaperCodexMotion.hover, value: isHovering)
+    }
+
+    private func backgroundFill(isPressed: Bool) -> Color {
+        if isPressed {
+            return Color.accentColor.opacity(0.18)
+        }
+        return Color.accentColor.opacity(isHovering ? 0.14 : 0.10)
+    }
+
+    private func borderColor(isPressed: Bool) -> Color {
+        if isPressed {
+            return Color.accentColor.opacity(0.56)
+        }
+        return Color.accentColor.opacity(isHovering ? 0.36 : 0)
+    }
+
+    private func shadowColor(isPressed: Bool) -> Color {
+        isPressed || isHovering ? Color.accentColor.opacity(isPressed ? 0.10 : 0.13) : .clear
     }
 }
 
