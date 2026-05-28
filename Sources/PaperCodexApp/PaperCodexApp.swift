@@ -1,6 +1,5 @@
 import SwiftUI
 
-private let routeMountDelayNanoseconds: UInt64 = 16_000_000
 private let routeCacheWarmupDelayNanoseconds: UInt64 = 120_000_000
 private let persistentRouteOrder: [AppRoute] = [.library, .discover, .search, .settings, .reader]
 
@@ -27,7 +26,6 @@ struct RootView: View {
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var navigation: AppNavigation
     @State private var mountedRoutes: Set<AppRoute> = [.library]
-    @State private var routeMountTask: Task<Void, Never>?
     @State private var routeCacheWarmupTask: Task<Void, Never>?
     @State private var isShowingSaveToLibrarySheet = false
 
@@ -72,7 +70,7 @@ struct RootView: View {
             model.refreshMCPActiveContextSnapshot()
         }
         .onChange(of: navigation.route) { _, newRoute in
-            scheduleRouteMount(to: newRoute)
+            mountRoute(newRoute)
             model.refreshMCPActiveContextSnapshot()
         }
         .onChange(of: model.selectedPaper?.id) { _, _ in
@@ -85,8 +83,6 @@ struct RootView: View {
             model.refreshMCPActiveContextSnapshot()
         }
         .onDisappear {
-            routeMountTask?.cancel()
-            routeMountTask = nil
             routeCacheWarmupTask?.cancel()
             routeCacheWarmupTask = nil
         }
@@ -149,22 +145,6 @@ struct RootView: View {
         }
     }
 
-    private func scheduleRouteMount(to route: AppRoute) {
-        guard !mountedRoutes.contains(route) else {
-            return
-        }
-        routeMountTask?.cancel()
-        routeMountTask = Task { @MainActor in
-            await Task.yield()
-            try? await Task.sleep(nanoseconds: routeMountDelayNanoseconds)
-            guard !Task.isCancelled else {
-                return
-            }
-            mountRoute(route)
-            routeMountTask = nil
-        }
-    }
-
     private func scheduleRouteCacheWarmup() {
         routeCacheWarmupTask?.cancel()
         routeCacheWarmupTask = Task { @MainActor in
@@ -206,8 +186,6 @@ private struct RouteVisibilityHost<Content: View>: View {
         content()
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .opacity(route == activeRoute ? 1 : 0)
-            .offset(y: route == activeRoute ? 0 : 4)
-            .scaleEffect(route == activeRoute ? 1 : 0.996, anchor: .center)
             .allowsHitTesting(route == activeRoute)
             .accessibilityHidden(route != activeRoute)
             .zIndex(route == activeRoute ? 1 : 0)

@@ -1131,7 +1131,7 @@ func runUILayoutSourceChecks() throws {
             && appSource.contains("RouteTransitionPlaceholder")
             && appSource.contains("RouteVisibilityHost")
             && appSource.contains("mountedRoutes.contains(navigation.route)")
-            && appSource.contains("scheduleRouteMount")
+            && appSource.contains("mountRoute(newRoute)")
             && appSource.contains("scheduleRouteCacheWarmup")
             && appSource.contains("RouteVisibilityHost(route: route, activeRoute: navigation.route) {\n                        routedContent(for: route)\n                    }\n                    .frame(maxWidth: .infinity, maxHeight: .infinity)")
             && appSource.contains("content()\n            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)\n            .opacity(route == activeRoute ? 1 : 0)")
@@ -1400,6 +1400,12 @@ func runUILayoutSourceChecks() throws {
         "window chrome tabs and the save-to-library control should use the shared interaction motion affordances"
     )
     try check(
+        windowTabBarSource.contains("readerTabIDs")
+            && windowTabBarSource.contains(".transition(.asymmetric(")
+            && windowTabBarSource.contains(".animation(PaperCodexMotion.selection, value: readerTabIDs)"),
+        "reader tabs should animate tab insertions and removals"
+    )
+    try check(
         homeChromeSource.contains("static let sidebarTopPadding: CGFloat = 28")
             && librarySource.contains("static let splitPaneTopInset: CGFloat = 0")
             && librarySource.contains(".padding(.top, 14)")
@@ -1579,6 +1585,14 @@ func runUILayoutSourceChecks() throws {
     try check(
         rootViewSource.contains(".windowStyle(.hiddenTitleBar)"),
         "app window should hide the standard title bar"
+    )
+    try check(
+        rootViewSource.contains("mountRoute(newRoute)")
+            && !rootViewSource.contains("scheduleRouteMount(to: newRoute)")
+            && !rootViewSource.contains("private let routeMountDelayNanoseconds")
+            && !rootViewSource.contains(".offset(y: route == activeRoute")
+            && !rootViewSource.contains(".scaleEffect(route == activeRoute"),
+        "top-level route switching should mount the requested page synchronously and avoid geometry-changing page transitions"
     )
     try check(
         rootViewSource.contains("WindowChromeConfigurator()"),

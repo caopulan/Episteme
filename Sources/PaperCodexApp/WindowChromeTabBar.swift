@@ -34,6 +34,10 @@ struct PaperCodexWindowTabBar: View {
                                             || model.readerTabState.activePaperID == tab.paperID)
                                 )
                                 .id(tab.paperID)
+                                .transition(.asymmetric(
+                                    insertion: .move(edge: .trailing).combined(with: .opacity),
+                                    removal: .scale(scale: 0.96, anchor: .bottom).combined(with: .opacity)
+                                ))
                             }
                         }
                         .frame(maxHeight: .infinity, alignment: .bottom)
@@ -50,6 +54,7 @@ struct PaperCodexWindowTabBar: View {
                         }
                     }
                     .animation(PaperCodexMotion.selection, value: model.readerTabState.activePaperID)
+                    .animation(PaperCodexMotion.selection, value: readerTabIDs)
                 }
                 .layoutPriority(1)
 
@@ -86,6 +91,10 @@ struct PaperCodexWindowTabBar: View {
         case .reader:
             return "Home (Library, 探索, 搜索, Settings, Recent Conversations)"
         }
+    }
+
+    private var readerTabIDs: [String] {
+        model.readerTabState.tabs.map(\.paperID)
     }
 
     private func selectHomeTab() {
