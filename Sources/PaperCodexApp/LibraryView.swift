@@ -2281,6 +2281,8 @@ private struct RecentConversationRowButtonStyle: ButtonStyle {
 }
 
 private struct RecentConversationDetailPanel: View {
+    @State private var isOpenButtonHovering = false
+
     var session: PaperSession?
     var papers: [Paper]
     var onOpen: (PaperSession) -> Void
@@ -2314,7 +2316,12 @@ private struct RecentConversationDetailPanel: View {
                             Label("Open Session", systemImage: "arrow.forward.circle")
                                 .frame(maxWidth: .infinity)
                         }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(RecentConversationDetailOpenButtonStyle(isHovering: isOpenButtonHovering))
+                        .onHover { hovering in
+                            withAnimation(PaperCodexMotion.hover) {
+                                isOpenButtonHovering = hovering
+                            }
+                        }
 
                         Divider()
 
@@ -2360,6 +2367,45 @@ private struct RecentConversationDetailPanel: View {
         formatter.unitsStyle = .short
         return formatter
     }()
+}
+
+private struct RecentConversationDetailOpenButtonStyle: ButtonStyle {
+    var isHovering: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        let isPressed = configuration.isPressed
+        configuration.label
+            .font(.paperCodexSystem(size: 13, weight: .semibold))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .foregroundStyle(Color.white)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(backgroundColor(isPressed: isPressed))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color.accentColor.opacity(isPressed ? 0.64 : 0.36), lineWidth: 1)
+            )
+            .shadow(color: Color.accentColor.opacity(shadowOpacity(isPressed: isPressed)), radius: isPressed ? 4 : 7, y: isPressed ? 1 : 3)
+            .scaleEffect(isPressed ? 0.985 : (isHovering ? 1.012 : 1), anchor: .center)
+            .animation(PaperCodexMotion.press, value: configuration.isPressed)
+            .animation(PaperCodexMotion.hover, value: isHovering)
+    }
+
+    private func backgroundColor(isPressed: Bool) -> Color {
+        if isPressed {
+            return Color.accentColor.opacity(0.86)
+        }
+        return Color.accentColor.opacity(isHovering ? 0.96 : 0.92)
+    }
+
+    private func shadowOpacity(isPressed: Bool) -> Double {
+        if isPressed {
+            return 0.14
+        }
+        return isHovering ? 0.22 : 0.16
+    }
 }
 
 private struct BulkLibraryActionBar: View {

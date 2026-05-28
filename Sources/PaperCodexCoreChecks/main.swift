@@ -1620,6 +1620,21 @@ func runUILayoutSourceChecks() throws {
     } else {
         throw CheckFailure(description: "recent conversation row source should remain inspectable")
     }
+    if let recentDetailRange = librarySource.range(of: "private struct RecentConversationDetailPanel: View"),
+       let recentDetailEndRange = librarySource.range(of: "private struct BulkLibraryActionBar", range: recentDetailRange.upperBound..<librarySource.endIndex) {
+        let recentDetailSource = String(librarySource[recentDetailRange.lowerBound..<recentDetailEndRange.lowerBound])
+        try check(
+            recentDetailSource.contains("@State private var isOpenButtonHovering = false")
+                && recentDetailSource.contains("private struct RecentConversationDetailOpenButtonStyle: ButtonStyle")
+                && recentDetailSource.contains(".buttonStyle(RecentConversationDetailOpenButtonStyle(")
+                && recentDetailSource.contains("configuration.isPressed")
+                && recentDetailSource.contains("PaperCodexMotion.press")
+                && !recentDetailSource.contains(".buttonStyle(.borderedProminent)"),
+            "recent conversation detail Open Session should provide immediate pressed feedback before opening the reader"
+        )
+    } else {
+        throw CheckFailure(description: "recent conversation detail source should remain inspectable")
+    }
     try check(
         homeChromeSource.contains("static let sidebarTopPadding: CGFloat = 28")
             && librarySource.contains("static let splitPaneTopInset: CGFloat = 0")
