@@ -325,23 +325,14 @@ struct ChatView: View {
                         Image(systemName: sendButtonIcon)
                             .font(.paperCodexSystem(size: 20, weight: .semibold))
                             .frame(width: 36, height: 36)
-                            .foregroundStyle(sendButtonColor)
-                            .background(
-                                Circle()
-                                    .fill(sendButtonBackground)
-                            )
-                            .overlay(
-                                Circle()
-                                    .stroke(sendButtonBorder, lineWidth: 1)
-                            )
-                            .shadow(color: sendButtonShadow, radius: 8, y: 3)
-                            .scaleEffect(isSendButtonHovered && canUseSendButton ? 1.06 : 1)
-                            .animation(PaperCodexMotion.hover, value: isSendButtonHovered)
-                            .animation(PaperCodexMotion.hover, value: canUseSendButton)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(ChatSendButtonStyle(tint: sendButtonColor, isEnabled: canUseSendButton, isHovering: isSendButtonHovered))
                     .disabled(!canUseSendButton)
-                    .onHover { isSendButtonHovered = $0 }
+                    .onHover { hovering in
+                        withAnimation(PaperCodexMotion.hover) {
+                            isSendButtonHovered = hovering
+                        }
+                    }
                     .help(sendButtonHelp)
                 }
             }
@@ -391,27 +382,6 @@ struct ChatView: View {
         return .accentColor
     }
 
-    private var sendButtonBackground: Color {
-        if !canUseSendButton {
-            return Color(nsColor: .controlBackgroundColor).opacity(0.45)
-        }
-        return sendButtonColor.opacity(isSendButtonHovered ? 0.18 : 0.11)
-    }
-
-    private var sendButtonBorder: Color {
-        guard canUseSendButton else {
-            return Color.clear
-        }
-        return sendButtonColor.opacity(isSendButtonHovered ? 0.42 : 0.18)
-    }
-
-    private var sendButtonShadow: Color {
-        guard canUseSendButton, isSendButtonHovered else {
-            return Color.clear
-        }
-        return sendButtonColor.opacity(0.20)
-    }
-
     private var sendButtonHelp: String {
         if isCurrentSessionSending {
             return "Stop Agent"
@@ -428,6 +398,72 @@ struct ChatView: View {
         Task {
             await model.sendMessage(message)
         }
+    }
+}
+
+private struct ChatSendButtonStyle: ButtonStyle {
+    var tint: Color
+    var isEnabled: Bool
+    var isHovering: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        let isPressed = configuration.isPressed && isEnabled
+        configuration.label
+            .foregroundStyle(iconColor(isPressed: isPressed))
+            .background(
+                Circle()
+                    .fill(backgroundColor(isPressed: isPressed))
+            )
+            .overlay(
+                Circle()
+                    .stroke(borderColor(isPressed: isPressed), lineWidth: 1)
+            )
+            .shadow(color: shadowColor(isPressed: isPressed), radius: isPressed ? 4 : 8, y: isPressed ? 1 : 3)
+            .scaleEffect(scale(isPressed: isPressed), anchor: .center)
+            .animation(PaperCodexMotion.press, value: configuration.isPressed)
+            .animation(PaperCodexMotion.hover, value: isHovering)
+            .animation(PaperCodexMotion.hover, value: isEnabled)
+    }
+
+    private func iconColor(isPressed: Bool) -> Color {
+        if !isEnabled {
+            return Color.secondary.opacity(0.45)
+        }
+        return isPressed || isHovering ? tint : tint.opacity(0.92)
+    }
+
+    private func backgroundColor(isPressed: Bool) -> Color {
+        if !isEnabled {
+            return Color(nsColor: .controlBackgroundColor).opacity(0.45)
+        }
+        if isPressed {
+            return tint.opacity(0.24)
+        }
+        return tint.opacity(isHovering ? 0.18 : 0.11)
+    }
+
+    private func borderColor(isPressed: Bool) -> Color {
+        if !isEnabled {
+            return Color.clear
+        }
+        if isPressed {
+            return tint.opacity(0.62)
+        }
+        return tint.opacity(isHovering ? 0.42 : 0.18)
+    }
+
+    private func shadowColor(isPressed: Bool) -> Color {
+        guard isEnabled, isPressed || isHovering else {
+            return .clear
+        }
+        return tint.opacity(isPressed ? 0.14 : 0.20)
+    }
+
+    private func scale(isPressed: Bool) -> CGFloat {
+        guard isEnabled else {
+            return 1
+        }
+        return isPressed ? 0.90 : (isHovering ? 1.06 : 1)
     }
 }
 

@@ -1398,6 +1398,20 @@ func runUILayoutSourceChecks() throws {
     } else {
         throw CheckFailure(description: "reader chat header button source should remain inspectable")
     }
+    if let composerRange = chatSource.range(of: "private var composer: some View"),
+       let composerEndRange = chatSource.range(of: "private var composerTopDivider", range: composerRange.upperBound..<chatSource.endIndex) {
+        let composerSource = String(chatSource[composerRange.lowerBound..<composerEndRange.lowerBound])
+        try check(
+            chatSource.contains("private struct ChatSendButtonStyle: ButtonStyle")
+                && composerSource.contains(".buttonStyle(ChatSendButtonStyle(")
+                && chatSource.contains("configuration.isPressed && isEnabled")
+                && chatSource.contains("PaperCodexMotion.press")
+                && !composerSource.contains(".buttonStyle(.plain)"),
+            "reader chat send and stop button should provide immediate pressed feedback before agent work starts or cancels"
+        )
+    } else {
+        throw CheckFailure(description: "reader chat composer source should remain inspectable")
+    }
     try check(
         discoverSource.contains("private struct SaveActionButtonStyle")
             && discoverSource.contains("private struct StableOpenButtonStyle")
