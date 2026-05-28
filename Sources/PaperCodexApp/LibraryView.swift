@@ -459,7 +459,6 @@ struct LibraryView: View {
                         )
                     }
                 }
-                .animation(.spring(response: 0.22, dampingFraction: 0.86), value: categoryTree.visibleItems.map(\.id))
             }
         }
     }
@@ -3329,15 +3328,15 @@ private struct LibraryRootFolderDropDelegate: DropDelegate {
     var onDrop: ([NSItemProvider]) -> Bool
 
     func validateDrop(info: DropInfo) -> Bool {
-        info.hasItemsConforming(to: LibraryLayout.categoryDropContentTypes) && canDrop(info: info)
+        info.hasItemsConforming(to: LibraryLayout.categoryDropContentTypes) && canDropCategory()
     }
 
     func dropEntered(info: DropInfo) {
-        isTargeted = canDrop(info: info)
+        isTargeted = updateDropState(info: info)
     }
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
-        isTargeted = canDrop(info: info)
+        isTargeted = updateDropState(info: info)
         return isTargeted ? DropProposal(operation: .move) : nil
     }
 
@@ -3346,7 +3345,7 @@ private struct LibraryRootFolderDropDelegate: DropDelegate {
     }
 
     func performDrop(info: DropInfo) -> Bool {
-        guard canDrop(info: info) else {
+        guard canDropCategory() else {
             isTargeted = false
             return false
         }
@@ -3354,8 +3353,11 @@ private struct LibraryRootFolderDropDelegate: DropDelegate {
         return onDrop(info.itemProviders(for: LibraryLayout.categoryDropContentTypes))
     }
 
-    private func canDrop(info _: DropInfo) -> Bool {
-        canDropCategory()
+    private func updateDropState(info _: DropInfo) -> Bool {
+        if isTargeted {
+            return true
+        }
+        return canDropCategory()
     }
 }
 
@@ -3372,16 +3374,11 @@ private struct CategorySidebarDropDelegate: DropDelegate {
     }
 
     func dropEntered(info: DropInfo) {
-        if let validPlacement = updateDropState(info: info) {
-            onPreviewDrop(validPlacement)
-        }
+        _ = updateDropState(info: info)
     }
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
-        if let validPlacement = updateDropState(info: info) {
-            onPreviewDrop(validPlacement)
-        }
-        return placement == nil ? nil : DropProposal(operation: .move)
+        updateDropState(info: info) == nil ? nil : DropProposal(operation: .move)
     }
 
     func dropExited(info: DropInfo) {
@@ -3402,15 +3399,20 @@ private struct CategorySidebarDropDelegate: DropDelegate {
     }
 
     private func updateDropState(info: DropInfo) -> LibraryCategoryDropPlacement? {
-        if let validPlacement = validPlacement(for: info) {
-            isTargeted = true
-            placement = validPlacement
-            return validPlacement
-        } else {
+        let candidatePlacement = placement(for: info)
+        if isTargeted, placement == candidatePlacement {
+            return candidatePlacement
+        }
+        guard canDrop(candidatePlacement) else {
             isTargeted = false
             placement = nil
             return nil
         }
+        let validPlacement = candidatePlacement
+        isTargeted = true
+        placement = validPlacement
+        onPreviewDrop(validPlacement)
+        return validPlacement
     }
 
     private func validPlacement(for info: DropInfo) -> LibraryCategoryDropPlacement? {

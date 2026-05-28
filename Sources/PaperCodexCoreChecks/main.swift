@@ -1090,15 +1090,21 @@ func runUILayoutSourceChecks() throws {
             && librarySource.contains("categoryDragCommitTarget = CategoryDragDropTarget")
             && librarySource.contains("onCategoryDropExited")
             && librarySource.contains("scheduleCategoryDragPreviewReset()")
+            && librarySource.contains("if isTargeted, placement == candidatePlacement")
+            && librarySource.contains("onPreviewDrop(validPlacement)")
+            && !librarySource.contains("if let validPlacement = updateDropState(info: info) {\n            onPreviewDrop(validPlacement)")
             && librarySource.contains("CategoryMovePlanner.reorderedCategories(")
             && librarySource.contains("categoryDragPreviewCategories = previewCategories")
             && !librarySource.contains("postsNotice: false")
+            && !librarySource.contains("visibleItems.map(\\.id)")
             && librarySource.contains("LibraryRootFolderDropDelegate")
+            && librarySource.contains("if isTargeted {\n            return true\n        }")
+            && librarySource.contains("return canDropCategory()")
             && librarySource.contains("CategoryMovePlanner.canMoveCategory(")
             && appModelSource.contains("func reorderCategory(")
             && appModelSource.contains("postsNotice: Bool = true")
             && appModelSource.contains("if postsNotice {"),
-        "library folder dragging should reject invalid targets, allow top-level moves, and preview live sibling reordering without database writes or stale canceled previews during hover"
+        "library folder dragging should reject invalid targets, allow top-level moves, and preview live sibling reordering without database writes, duplicate dropUpdated work, or stale canceled previews"
     )
     try check(
         librarySource.contains("onTogglePinned")
