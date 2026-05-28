@@ -1481,6 +1481,16 @@ func runUILayoutSourceChecks() throws {
         "window chrome tabs and the save-to-library control should use the shared interaction motion affordances"
     )
     try check(
+        windowTabBarSource.contains("private struct PaperCodexChromeTabButtonStyle: ButtonStyle")
+            && windowTabBarSource.contains("private struct PaperCodexChromeTabCloseButtonStyle: ButtonStyle")
+            && windowTabBarSource.contains(".buttonStyle(PaperCodexChromeTabButtonStyle(")
+            && windowTabBarSource.contains(".buttonStyle(PaperCodexChromeTabCloseButtonStyle(")
+            && windowTabBarSource.contains("configuration.isPressed")
+            && windowTabBarSource.contains("PaperCodexMotion.press")
+            && !windowTabBarSource.contains(".buttonStyle(.plain)"),
+        "window chrome tabs should provide immediate pressed feedback for route and reader-tab switching"
+    )
+    try check(
         windowTabBarSource.contains("readerTabIDs")
             && windowTabBarSource.contains(".transition(.asymmetric(")
             && windowTabBarSource.contains(".animation(PaperCodexMotion.selection, value: readerTabIDs)"),
