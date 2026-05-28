@@ -1532,6 +1532,21 @@ func runUILayoutSourceChecks() throws {
     } else {
         throw CheckFailure(description: "Discover quick range button source should remain inspectable")
     }
+    if let processSheetRange = discoverSource.range(of: "private struct DiscoverProcessActionSheet: View"),
+       let processSheetEndRange = discoverSource.range(of: "private struct DiscoverProcessActionRow", range: processSheetRange.upperBound..<discoverSource.endIndex) {
+        let processSheetSource = String(discoverSource[processSheetRange.lowerBound..<processSheetEndRange.lowerBound])
+        try check(
+            processSheetSource.contains("@State private var isProcessButtonHovering = false")
+                && processSheetSource.contains("private struct DiscoverProcessFooterButtonStyle: ButtonStyle")
+                && processSheetSource.contains(".buttonStyle(DiscoverProcessFooterButtonStyle(")
+                && processSheetSource.contains("configuration.isPressed")
+                && processSheetSource.contains("PaperCodexMotion.press")
+                && !processSheetSource.contains(".buttonStyle(.borderedProminent)"),
+            "Discover and Search process confirmation should provide immediate pressed feedback before starting long processing"
+        )
+    } else {
+        throw CheckFailure(description: "Discover process action sheet source should remain inspectable")
+    }
     try check(
         saveToLibrarySource.contains("SaveToLibraryDestinationHeader")
             && saveToLibrarySource.contains("SaveToLibraryFolderPathChip")

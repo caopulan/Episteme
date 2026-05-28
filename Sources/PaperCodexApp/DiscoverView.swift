@@ -1584,6 +1584,8 @@ private struct DiscoverProcessActionSheet: View {
     @State private var selectedActions: Set<DiscoverProcessAction>
     @State private var draftModelOverride: String
     @State private var draftReasoningEffort: CodexReasoningEffort
+    @State private var isCancelButtonHovering = false
+    @State private var isProcessButtonHovering = false
 
     init(
         paperCount: Int,
@@ -1617,6 +1619,10 @@ private struct DiscoverProcessActionSheet: View {
     private var codexDefaultModelLabel: String {
         let trimmed = defaultModelID.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? "Codex default" : "Codex default (\(trimmed))"
+    }
+
+    private var canProcessResults: Bool {
+        !selectedOrderedActions.isEmpty && paperCount > 0
     }
 
     var body: some View {
@@ -1711,22 +1717,141 @@ private struct DiscoverProcessActionSheet: View {
 
             HStack {
                 Spacer()
-                Button("Cancel") {
+                Button {
                     onCancel()
                     dismiss()
+                } label: {
+                    Label("Cancel", systemImage: "xmark")
                 }
-                Button("Process Results") {
+                .buttonStyle(DiscoverProcessFooterButtonStyle(kind: .secondary, isHovering: isCancelButtonHovering, disabled: false))
+                .onHover { hovering in
+                    withAnimation(PaperCodexMotion.hover) {
+                        isCancelButtonHovering = hovering
+                    }
+                }
+
+                Button {
                     onConfirm(selectedOrderedActions, draftModelOverride, draftReasoningEffort)
                     dismiss()
+                } label: {
+                    Label("Process Results", systemImage: "sparkles")
                 }
                 .keyboardShortcut(.defaultAction)
-                .buttonStyle(.borderedProminent)
-                .disabled(selectedOrderedActions.isEmpty || paperCount == 0)
+                .buttonStyle(DiscoverProcessFooterButtonStyle(kind: .primary, isHovering: isProcessButtonHovering, disabled: !canProcessResults))
+                .disabled(!canProcessResults)
+                .onHover { hovering in
+                    withAnimation(PaperCodexMotion.hover) {
+                        isProcessButtonHovering = hovering
+                    }
+                }
             }
             .padding(20)
         }
         .frame(minWidth: 560, minHeight: 500)
         .onAppear(perform: onRefreshModels)
+    }
+}
+
+private enum DiscoverProcessFooterButtonKind {
+    case secondary
+    case primary
+}
+
+private struct DiscoverProcessFooterButtonStyle: ButtonStyle {
+    var kind: DiscoverProcessFooterButtonKind
+    var isHovering: Bool
+    var disabled: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        let isPressed = configuration.isPressed && !disabled
+        configuration.label
+            .font(.paperCodexSystem(size: 13, weight: .semibold))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .foregroundStyle(foregroundColor(isPressed: isPressed))
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(backgroundColor(isPressed: isPressed))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(borderColor(isPressed: isPressed), lineWidth: 1)
+            )
+            .shadow(color: shadowColor(isPressed: isPressed), radius: isPressed ? 4 : 7, y: isPressed ? 1 : 3)
+            .scaleEffect(buttonScale(isPressed: isPressed), anchor: .center)
+            .animation(PaperCodexMotion.press, value: configuration.isPressed)
+            .animation(PaperCodexMotion.hover, value: isHovering)
+            .animation(PaperCodexMotion.hover, value: disabled)
+    }
+
+    private var tint: Color {
+        switch kind {
+        case .secondary:
+            .secondary
+        case .primary:
+            .indigo
+        }
+    }
+
+    private func foregroundColor(isPressed: Bool) -> Color {
+        if disabled {
+            return Color.secondary.opacity(0.48)
+        }
+        switch kind {
+        case .secondary:
+            return isPressed || isHovering ? Color.primary.opacity(0.90) : Color.primary.opacity(0.74)
+        case .primary:
+            return .white
+        }
+    }
+
+    private func backgroundColor(isPressed: Bool) -> Color {
+        if disabled {
+            return Color(nsColor: .controlBackgroundColor).opacity(0.56)
+        }
+        switch kind {
+        case .secondary:
+            if isPressed {
+                return Color.primary.opacity(0.10)
+            }
+            return isHovering ? Color.primary.opacity(0.07) : Color(nsColor: .controlBackgroundColor)
+        case .primary:
+            if isPressed {
+                return tint.opacity(0.82)
+            }
+            return tint.opacity(isHovering ? 0.96 : 0.90)
+        }
+    }
+
+    private func borderColor(isPressed: Bool) -> Color {
+        if disabled {
+            return Color.black.opacity(0.06)
+        }
+        switch kind {
+        case .secondary:
+            return Color.black.opacity(isPressed ? 0.16 : (isHovering ? 0.12 : 0.08))
+        case .primary:
+            return tint.opacity(isPressed ? 0.62 : (isHovering ? 0.48 : 0.34))
+        }
+    }
+
+    private func shadowColor(isPressed: Bool) -> Color {
+        if disabled {
+            return .clear
+        }
+        switch kind {
+        case .secondary:
+            return isPressed || isHovering ? Color.black.opacity(isPressed ? 0.06 : 0.08) : .clear
+        case .primary:
+            return tint.opacity(isPressed ? 0.14 : (isHovering ? 0.22 : 0.16))
+        }
+    }
+
+    private func buttonScale(isPressed: Bool) -> CGFloat {
+        if disabled {
+            return 1
+        }
+        return isPressed ? 0.972 : (isHovering ? 1.014 : 1)
     }
 }
 
