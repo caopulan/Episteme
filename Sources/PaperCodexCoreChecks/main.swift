@@ -1081,15 +1081,24 @@ func runUILayoutSourceChecks() throws {
     try check(
         librarySource.contains("@State private var draggedCategoryID")
             && librarySource.contains("@State private var liveCategoryDropKey")
+            && librarySource.contains("@State private var categoryDragPreviewCategories")
+            && librarySource.contains("@State private var categoryDragCommitTarget")
+            && librarySource.contains("LibraryCategoryTreeSnapshot(\n            categories: sidebarCategories")
             && librarySource.contains("canDropCategory: { placement in")
-            && librarySource.contains("model.canDropCategory(")
+            && librarySource.contains("CategoryMovePlanner.canDropCategory(")
             && librarySource.contains("onPreviewCategoryDrop")
+            && librarySource.contains("categoryDragCommitTarget = CategoryDragDropTarget")
+            && librarySource.contains("onCategoryDropExited")
+            && librarySource.contains("scheduleCategoryDragPreviewReset()")
+            && librarySource.contains("CategoryMovePlanner.reorderedCategories(")
+            && librarySource.contains("categoryDragPreviewCategories = previewCategories")
+            && !librarySource.contains("postsNotice: false")
             && librarySource.contains("LibraryRootFolderDropDelegate")
-            && librarySource.contains("model.canMoveCategory(draggedCategoryID, toParent: nil)")
+            && librarySource.contains("CategoryMovePlanner.canMoveCategory(")
             && appModelSource.contains("func reorderCategory(")
             && appModelSource.contains("postsNotice: Bool = true")
             && appModelSource.contains("if postsNotice {"),
-        "library folder dragging should reject invalid targets, allow top-level moves, and reorder sibling folders live during hover"
+        "library folder dragging should reject invalid targets, allow top-level moves, and preview live sibling reordering without database writes or stale canceled previews during hover"
     )
     try check(
         librarySource.contains("onTogglePinned")

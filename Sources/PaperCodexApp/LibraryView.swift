@@ -26,6 +26,9 @@ struct LibraryView: View {
     @State private var tagPendingDelete: PaperTag?
     @State private var draggedCategoryID: String?
     @State private var liveCategoryDropKey: String?
+    @State private var categoryDragPreviewCategories: [PaperCodexCore.Category]?
+    @State private var categoryDragCommitTarget: CategoryDragDropTarget?
+    @State private var categoryDragResetToken: UUID?
     @State private var watchedFolderPendingRemoval: WatchedFolder?
     @State private var noteTitle = ""
     @State private var noteBody = ""
@@ -65,6 +68,10 @@ struct LibraryView: View {
 
     private var filteredPaperIDs: [String] {
         makePaperListState().paperIDs
+    }
+
+    private var sidebarCategories: [PaperCodexCore.Category] {
+        categoryDragPreviewCategories ?? model.categories
     }
 
     private var sortedPapers: [Paper] {
@@ -321,7 +328,7 @@ struct LibraryView: View {
 
     private var categorySidebarSection: some View {
         let categoryTree = LibraryCategoryTreeSnapshot(
-            categories: model.categories,
+            categories: sidebarCategories,
             collapsedCategoryIDs: collapsedCategoryIDs
         )
 
@@ -336,7 +343,11 @@ struct LibraryView: View {
                     guard let draggedCategoryID else {
                         return true
                     }
-                    return model.canMoveCategory(draggedCategoryID, toParent: nil)
+                    return CategoryMovePlanner.canMoveCategory(
+                        draggedCategoryID,
+                        toParent: nil,
+                        in: sidebarCategories
+                    )
                 },
                 onDropPapers: { paperIDs in
                     model.movePapers(paperIDs, toCategory: nil)
@@ -346,13 +357,12 @@ struct LibraryView: View {
                     withAnimation(.spring(response: 0.24, dampingFraction: 0.86)) {
                         model.moveCategory(droppedCategoryID, toParent: nil)
                     }
-                    draggedCategoryID = nil
-                    liveCategoryDropKey = nil
+                    clearCategoryDragPreview()
                 }
             ) {
                 selectRootLibrary()
             }
-            if model.categories.isEmpty {
+            if sidebarCategories.isEmpty {
                 SidebarEmptyText("No categories")
             } else {
                 VStack(alignment: .leading, spacing: LibraryLayout.categoryTreeRowSpacing) {
@@ -369,17 +379,21 @@ struct LibraryView: View {
                             isPinned: item.category.isPinned,
                             categoryDragPayload: categoryDragPayload(for: item.category),
                             onDragCategory: {
+                                clearCategoryDragPreview()
                                 draggedCategoryID = item.category.id
-                                liveCategoryDropKey = nil
                             },
                             canDropCategory: { placement in
                                 guard let draggedCategoryID else {
                                     return true
                                 }
-                                return model.canDropCategory(
+                                if draggedCategoryID == item.category.id {
+                                    return categoryDragCommitTarget != nil
+                                }
+                                return CategoryMovePlanner.canDropCategory(
                                     draggedCategoryID,
-                                    onto: item.category.id,
-                                    placement: placement
+                                    ontoCategory: item.category.id,
+                                    placement: placement,
+                                    in: sidebarCategories
                                 )
                             },
                             onPreviewCategoryDrop: { placement in
@@ -391,6 +405,9 @@ struct LibraryView: View {
                                     relativeTo: item.category.id,
                                     placement: placement
                                 )
+                            },
+                            onCategoryDropExited: {
+                                scheduleCategoryDragPreviewReset()
                             },
                             onToggle: {
                                 toggleCategoryCollapsed(item.category.id)
@@ -413,23 +430,36 @@ struct LibraryView: View {
                                 selectLibraryCategory(item.category.id)
                             },
                             onDropCategory: { droppedCategoryID, placement in
-                                guard droppedCategoryID != item.category.id else {
+                                let dropTarget: CategoryDragDropTarget
+                                if droppedCategoryID == item.category.id, let categoryDragCommitTarget {
+                                    dropTarget = categoryDragCommitTarget
+                                } else if droppedCategoryID != item.category.id {
+                                    dropTarget = CategoryDragDropTarget(
+                                        targetCategoryID: item.category.id,
+                                        placement: placement
+                                    )
+                                } else {
+                                    clearCategoryDragPreview()
                                     return
                                 }
                                 withAnimation(.spring(response: 0.24, dampingFraction: 0.86)) {
-                                    switch placement {
+                                    switch dropTarget.placement {
                                     case .inside:
-                                        model.moveCategory(droppedCategoryID, toParent: item.category.id)
+                                        model.moveCategory(droppedCategoryID, toParent: dropTarget.targetCategoryID)
                                     case .before, .after:
-                                        model.reorderCategory(droppedCategoryID, relativeTo: item.category.id, placement: placement)
+                                        model.reorderCategory(
+                                            droppedCategoryID,
+                                            relativeTo: dropTarget.targetCategoryID,
+                                            placement: dropTarget.placement
+                                        )
                                     }
                                 }
-                                draggedCategoryID = nil
-                                liveCategoryDropKey = nil
+                                clearCategoryDragPreview()
                             }
                         )
                     }
                 }
+                .animation(.spring(response: 0.22, dampingFraction: 0.86), value: categoryTree.visibleItems.map(\.id))
             }
         }
     }
@@ -561,8 +591,7 @@ struct LibraryView: View {
                         )
                         .contentShape(Rectangle())
                         .onDrag {
-                            draggedCategoryID = nil
-                            liveCategoryDropKey = nil
+                            clearCategoryDragPreview()
                             return NSItemProvider(object: paperDragPayload(for: paper) as NSString)
                         } preview: {
                             PaperDragPreview(
@@ -1158,6 +1187,7 @@ struct LibraryView: View {
         relativeTo targetCategoryID: String,
         placement: LibraryCategoryDropPlacement
     ) {
+        cancelCategoryDragPreviewReset()
         guard draggedCategoryID != targetCategoryID else {
             return
         }
@@ -1168,17 +1198,58 @@ struct LibraryView: View {
         guard liveCategoryDropKey != dropKey else {
             return
         }
-        guard model.canDropCategory(draggedCategoryID, onto: targetCategoryID, placement: placement) else {
+        let previewBaseCategories = sidebarCategories
+        guard CategoryMovePlanner.canDropCategory(
+            draggedCategoryID,
+            ontoCategory: targetCategoryID,
+            placement: placement,
+            in: previewBaseCategories
+        ) else {
+            return
+        }
+        guard let previewCategories = try? CategoryMovePlanner.reorderedCategories(
+            movingCategoryID: draggedCategoryID,
+            relativeTo: targetCategoryID,
+            placement: placement,
+            in: previewBaseCategories
+        ), previewCategories != previewBaseCategories else {
             return
         }
         liveCategoryDropKey = dropKey
+        categoryDragCommitTarget = CategoryDragDropTarget(
+            targetCategoryID: targetCategoryID,
+            placement: placement
+        )
         withAnimation(.spring(response: 0.22, dampingFraction: 0.82)) {
-            model.reorderCategory(
-                draggedCategoryID,
-                relativeTo: targetCategoryID,
-                placement: placement,
-                postsNotice: false
-            )
+            categoryDragPreviewCategories = previewCategories
+        }
+    }
+
+    private func clearCategoryDragPreview() {
+        draggedCategoryID = nil
+        liveCategoryDropKey = nil
+        categoryDragPreviewCategories = nil
+        categoryDragCommitTarget = nil
+        categoryDragResetToken = nil
+    }
+
+    private func cancelCategoryDragPreviewReset() {
+        categoryDragResetToken = nil
+    }
+
+    private func scheduleCategoryDragPreviewReset() {
+        guard categoryDragPreviewCategories != nil else {
+            return
+        }
+        let resetToken = UUID()
+        categoryDragResetToken = resetToken
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            guard categoryDragResetToken == resetToken else {
+                return
+            }
+            withAnimation(.easeOut(duration: 0.16)) {
+                clearCategoryDragPreview()
+            }
         }
     }
 
@@ -1471,6 +1542,11 @@ private struct CategoryListItem: Identifiable {
     var connectorContinuations: [Bool] = []
 
     var id: String { category.id }
+}
+
+private struct CategoryDragDropTarget: Equatable {
+    var targetCategoryID: String
+    var placement: LibraryCategoryDropPlacement
 }
 
 struct LibraryPaperArxivMetadata: Equatable {
@@ -3017,6 +3093,7 @@ private struct CategorySidebarRow: View {
     var onDragCategory: () -> Void
     var canDropCategory: (LibraryCategoryDropPlacement) -> Bool
     var onPreviewCategoryDrop: (LibraryCategoryDropPlacement) -> Void
+    var onCategoryDropExited: () -> Void
     var onToggle: () -> Void
     var onSelect: () -> Void
     var onCreateChild: () -> Void
@@ -3154,6 +3231,7 @@ private struct CategorySidebarRow: View {
                 placement: $dropPlacement,
                 canDrop: canDropCategory,
                 onPreviewDrop: onPreviewCategoryDrop,
+                onDropExited: onCategoryDropExited,
                 onDrop: loadDroppedItems(from:placement:)
             )
         )
@@ -3286,6 +3364,7 @@ private struct CategorySidebarDropDelegate: DropDelegate {
     @Binding var placement: LibraryCategoryDropPlacement?
     var canDrop: (LibraryCategoryDropPlacement) -> Bool
     var onPreviewDrop: (LibraryCategoryDropPlacement) -> Void
+    var onDropExited: () -> Void
     var onDrop: ([NSItemProvider], LibraryCategoryDropPlacement) -> Bool
 
     func validateDrop(info: DropInfo) -> Bool {
@@ -3308,6 +3387,7 @@ private struct CategorySidebarDropDelegate: DropDelegate {
     func dropExited(info: DropInfo) {
         isTargeted = false
         placement = nil
+        onDropExited()
     }
 
     func performDrop(info: DropInfo) -> Bool {
