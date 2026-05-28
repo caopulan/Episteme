@@ -1134,7 +1134,8 @@ func runUILayoutSourceChecks() throws {
             && appSource.contains(".environmentObject(model.navigation)")
             && appSource.contains("@EnvironmentObject private var navigation: AppNavigation")
             && appShellSource.contains("@EnvironmentObject private var navigation: AppNavigation")
-            && appSource.contains("@State private var mountedRoutes: Set<AppRoute> = [.library]")
+            && appSource.contains("private let initiallyMountedRoutes: Set<AppRoute>")
+            && appSource.contains("@State private var mountedRoutes: Set<AppRoute> = initiallyMountedRoutes")
             && appSource.contains("@State private var routeCacheWarmupTask: Task<Void, Never>?")
             && appSource.contains("private let persistentRouteOrder: [AppRoute]")
             && appSource.contains("persistentRoutedContent")
@@ -2016,6 +2017,12 @@ func runUILayoutSourceChecks() throws {
             && appModelSource.contains("applyDiscoverCachedState")
             && !appModelSource.contains("func showDiscover() {\n        route = .discover\n        clearReaderContext()\n        refreshDiscoverEnrichmentsForCurrentFeed()\n    }"),
         "opening Discover should show cached state while background loaders warm JSON, asset, and thumbnail data off the main actor"
+    )
+    try check(
+        appSource.contains("private let initiallyMountedRoutes: Set<AppRoute> = [.library, .discover, .search]")
+            && appSource.contains("@State private var mountedRoutes: Set<AppRoute> = initiallyMountedRoutes")
+            && !appSource.contains("@State private var mountedRoutes: Set<AppRoute> = [.library]"),
+        "Library, Explore, and Search route shells should be mounted before navigation clicks so route switching never flashes a transition placeholder"
     )
     let discoverCacheLoaderSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/DiscoverCacheLoader.swift"))
     let pdfThumbnailCacheSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/PDFThumbnailCache.swift"))

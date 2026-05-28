@@ -2,6 +2,7 @@ import SwiftUI
 
 private let routeCacheWarmupDelayNanoseconds: UInt64 = 120_000_000
 private let persistentRouteOrder: [AppRoute] = [.library, .discover, .search, .settings, .reader]
+private let initiallyMountedRoutes: Set<AppRoute> = [.library, .discover, .search]
 
 @main
 struct PaperCodexApp: App {
@@ -25,7 +26,7 @@ struct PaperCodexApp: App {
 struct RootView: View {
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var navigation: AppNavigation
-    @State private var mountedRoutes: Set<AppRoute> = [.library]
+    @State private var mountedRoutes: Set<AppRoute> = initiallyMountedRoutes
     @State private var routeCacheWarmupTask: Task<Void, Never>?
     @State private var isShowingSaveToLibrarySheet = false
 
