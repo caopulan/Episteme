@@ -674,6 +674,14 @@ struct ArxivSearchView: View {
         model.arxivSearchThroughYear.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    private var sortOrderTitle: String {
+        model.arxivSearchSortOrderRawValue == ArxivAPISortOrder.descending.rawValue ? "Sort descending" : "Sort ascending"
+    }
+
+    private var sortOrderSystemImage: String {
+        model.arxivSearchSortOrderRawValue == ArxivAPISortOrder.descending.rawValue ? "arrow.down" : "arrow.up"
+    }
+
     var body: some View {
         SidebarSplitLayout(minContentWidth: 760) {
             sidebar
@@ -886,15 +894,13 @@ struct ArxivSearchView: View {
                 .pickerStyle(.menu)
                 .frame(width: 116)
 
-                Button {
-                    model.arxivSearchSortOrderRawValue = model.arxivSearchSortOrderRawValue == ArxivAPISortOrder.descending.rawValue
-                        ? ArxivAPISortOrder.ascending.rawValue
-                        : ArxivAPISortOrder.descending.rawValue
-                } label: {
-                    Image(systemName: model.arxivSearchSortOrderRawValue == ArxivAPISortOrder.descending.rawValue ? "arrow.down" : "arrow.up")
-                        .frame(width: 22, height: 22)
+                PaperCodexIconButton(
+                    title: sortOrderTitle,
+                    systemImage: sortOrderSystemImage,
+                    tint: .secondary
+                ) {
+                    toggleSearchSortOrder()
                 }
-                .buttonStyle(.bordered)
                 .fixedSize()
 
                 PaperCodexToolbarButton(
@@ -981,6 +987,12 @@ struct ArxivSearchView: View {
 
     private func removeRequiredCategory(_ category: String) {
         model.arxivSearchRequiredCategories = model.arxivSearchRequiredCategories.filter { $0 != category }
+    }
+
+    private func toggleSearchSortOrder() {
+        model.arxivSearchSortOrderRawValue = model.arxivSearchSortOrderRawValue == ArxivAPISortOrder.descending.rawValue
+            ? ArxivAPISortOrder.ascending.rawValue
+            : ArxivAPISortOrder.descending.rawValue
     }
 
     private func gridColumnCount(for width: CGFloat) -> Int {
@@ -1479,13 +1491,80 @@ private struct QuickRangeButtons: View {
 
     private var quickButtons: some View {
         ForEach(ranges) { range in
-            Button(range.title) {
+            DiscoverQuickRangeButton(range: range) {
                 onSelect(range)
             }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .help(range.title)
         }
+    }
+}
+
+private struct DiscoverQuickRangeButton: View {
+    @State private var isHovering = false
+
+    var range: DiscoverQuickRange
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(LocalizedStringKey(range.title))
+                .font(.paperCodexSystem(size: 12.5, weight: .semibold))
+                .lineLimit(1)
+                .padding(.horizontal, 10)
+                .frame(height: 28)
+                .contentShape(RoundedRectangle(cornerRadius: 7))
+        }
+        .buttonStyle(DiscoverQuickRangeButtonStyle(isHovering: isHovering))
+        .fixedSize()
+        .help(range.title)
+        .onHover { hovering in
+            withAnimation(PaperCodexMotion.hover) {
+                isHovering = hovering
+            }
+        }
+    }
+}
+
+private struct DiscoverQuickRangeButtonStyle: ButtonStyle {
+    var isHovering: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        let isPressed = configuration.isPressed
+        configuration.label
+            .foregroundStyle(foregroundColor(isPressed: isPressed))
+            .background(
+                RoundedRectangle(cornerRadius: 7)
+                    .fill(backgroundColor(isPressed: isPressed))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 7)
+                            .stroke(borderColor(isPressed: isPressed), lineWidth: 1)
+                    )
+            )
+            .shadow(color: shadowColor(isPressed: isPressed), radius: isPressed ? 3 : 5, y: isPressed ? 1 : 2)
+            .scaleEffect(isPressed ? 0.97 : (isHovering ? 1.025 : 1), anchor: .center)
+            .animation(PaperCodexMotion.press, value: configuration.isPressed)
+            .animation(PaperCodexMotion.hover, value: isHovering)
+    }
+
+    private func foregroundColor(isPressed: Bool) -> Color {
+        isPressed || isHovering ? Color.accentColor : Color.primary.opacity(0.82)
+    }
+
+    private func backgroundColor(isPressed: Bool) -> Color {
+        if isPressed {
+            return Color.accentColor.opacity(0.17)
+        }
+        return isHovering ? Color.accentColor.opacity(0.11) : Color(nsColor: .controlBackgroundColor)
+    }
+
+    private func borderColor(isPressed: Bool) -> Color {
+        if isPressed {
+            return Color.accentColor.opacity(0.54)
+        }
+        return isHovering ? Color.accentColor.opacity(0.38) : Color.black.opacity(0.10)
+    }
+
+    private func shadowColor(isPressed: Bool) -> Color {
+        isPressed || isHovering ? Color.accentColor.opacity(isPressed ? 0.10 : 0.14) : .clear
     }
 }
 

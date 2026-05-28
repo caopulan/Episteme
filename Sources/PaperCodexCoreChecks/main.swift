@@ -1445,6 +1445,34 @@ func runUILayoutSourceChecks() throws {
     } else {
         throw CheckFailure(description: "Discover active filter chip source should remain inspectable")
     }
+    if let arxivSearchRange = discoverSource.range(of: "struct ArxivSearchView: View"),
+       let arxivSearchEndRange = discoverSource.range(of: "private struct SidebarFilterButton: View", range: arxivSearchRange.upperBound..<discoverSource.endIndex) {
+        let arxivSearchSource = String(discoverSource[arxivSearchRange.lowerBound..<arxivSearchEndRange.lowerBound])
+        try check(
+            arxivSearchSource.contains("PaperCodexIconButton(\n                    title: sortOrderTitle")
+                && arxivSearchSource.contains("private var sortOrderTitle: String")
+                && arxivSearchSource.contains("private var sortOrderSystemImage: String")
+                && !arxivSearchSource.contains(".buttonStyle(.bordered)"),
+            "Search sort direction should use shared immediate icon press feedback instead of the generic bordered button"
+        )
+    } else {
+        throw CheckFailure(description: "Search top control source should remain inspectable")
+    }
+    if let quickRangeRange = discoverSource.range(of: "private struct QuickRangeButtons: View"),
+       let quickRangeEndRange = discoverSource.range(of: "private struct DiscoverProcessActionSheet", range: quickRangeRange.upperBound..<discoverSource.endIndex) {
+        let quickRangeSource = String(discoverSource[quickRangeRange.lowerBound..<quickRangeEndRange.lowerBound])
+        try check(
+            quickRangeSource.contains("private struct DiscoverQuickRangeButton: View")
+                && quickRangeSource.contains("private struct DiscoverQuickRangeButtonStyle: ButtonStyle")
+                && quickRangeSource.contains(".buttonStyle(DiscoverQuickRangeButtonStyle(")
+                && quickRangeSource.contains("configuration.isPressed")
+                && quickRangeSource.contains("PaperCodexMotion.press")
+                && !quickRangeSource.contains(".buttonStyle(.bordered)"),
+            "Explore date quick range buttons should provide immediate pressed feedback before range recalculation"
+        )
+    } else {
+        throw CheckFailure(description: "Discover quick range button source should remain inspectable")
+    }
     try check(
         saveToLibrarySource.contains("SaveToLibraryDestinationHeader")
             && saveToLibrarySource.contains("SaveToLibraryFolderPathChip")
