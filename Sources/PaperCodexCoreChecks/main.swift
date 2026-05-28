@@ -1067,6 +1067,9 @@ func runUILayoutSourceChecks() throws {
     let appSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/PaperCodexApp.swift"))
     let chatViewURL = root.appendingPathComponent("Sources/PaperCodexApp/ChatView.swift")
     let chatSource = try String(contentsOf: chatViewURL)
+    let chatAppearanceURL = root.appendingPathComponent("Sources/PaperCodexApp/ChatAppearance.swift")
+    let chatAppearanceSource = FileManager.default.fileExists(atPath: chatAppearanceURL.path) ? try String(contentsOf: chatAppearanceURL) : ""
+    let chatMarkdownRendererSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexCore/ChatMarkdownRenderer.swift"))
     let saveToLibrarySource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/SaveToLibrarySheet.swift"))
     let readerViewSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/ReaderView.swift"))
     let windowTabBarSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/WindowChromeTabBar.swift"))
@@ -1476,9 +1479,37 @@ func runUILayoutSourceChecks() throws {
                 && !messageBubbleSource.contains(".buttonStyle(.bordered)"),
             "chat failure recovery actions should give immediate pressed feedback before retrying or opening a new session"
         )
+        try check(
+            messageBubbleSource.contains("ChatRoleBadge(")
+                && messageBubbleSource.contains("ChatMessageBubbleBackground(")
+                && messageBubbleSource.contains("message.createdAt")
+                && messageBubbleSource.contains("messageFontSize")
+                && messageBubbleSource.contains("fontFamily")
+                && !messageBubbleSource.contains(".background(isUser ? Color.blue.opacity(0.12) : Color(nsColor: .textBackgroundColor))"),
+            "reader chat messages should use redesigned role badges, timestamps, and richer bubble backgrounds"
+        )
     } else {
         throw CheckFailure(description: "chat message bubble source should remain inspectable")
     }
+    try check(
+        chatAppearanceSource.contains("enum ChatFontFamily: String, CaseIterable, Identifiable")
+            && chatAppearanceSource.contains("static let defaultMessageFontSize: Double = 16")
+            && chatAppearanceSource.contains("static let defaultComposerFontSize: Double = 15")
+            && appModelSource.contains("@Published var chatMessageFontSize")
+            && appModelSource.contains("@Published var chatComposerFontSize")
+            && appModelSource.contains("@Published var chatFontFamily")
+            && appModelSource.contains("func setChatAppearance(")
+            && settingsViewSource.contains("private var chatAppearanceSettings: some View")
+            && settingsViewSource.contains("Picker(\"Chat font\"")
+            && settingsViewSource.contains("Stepper(")
+            && settingsViewSource.contains("Message text:")
+            && settingsViewSource.contains("Composer text:")
+            && chatSource.contains("ChatMarkdownRenderStyle(")
+            && chatSource.contains("messageFontSize: model.chatMessageFontSize")
+            && chatSource.contains("fontSize: model.chatComposerFontSize")
+            && chatMarkdownRendererSource.contains("public struct ChatMarkdownRenderStyle"),
+        "Reader Chat should expose persistent font family and size settings with larger defaults for messages and composer"
+    )
     try check(
         discoverSource.contains("private struct SaveActionButtonStyle")
             && discoverSource.contains("private struct StableOpenButtonStyle")
@@ -3521,9 +3552,26 @@ func runCitationChecks() throws {
         markdown: "## Result\n\nValue $x^2$.\n\n![figure](/tmp/figure.png)\n\n\(parsed.displayMarkdown)"
     )
     try check(rendered.contains("window.MathJax"), "markdown renderer should configure MathJax for formulas")
+    try check(
+        rendered.contains("processEscapes: true")
+            && rendered.contains("[tex]/noerrors")
+            && rendered.contains("[tex]/noundefined")
+            && rendered.contains("mjx-container"),
+        "markdown renderer should harden formula display so bad TeX does not break the whole message"
+    )
     try check(rendered.contains("<h2>Result</h2>"), "markdown renderer should render markdown headings")
     try check(rendered.contains(#"<img alt="figure" src="file:///tmp/figure.png">"#), "markdown renderer should render absolute local images")
     try check(rendered.contains(#"href="papercodex-cite://open?id=paper%3Apaper-a%3Ap5%3Ab17""#), "markdown renderer should preserve clickable citation links")
+
+    let styledRendered = ChatMarkdownRenderer.renderDocument(
+        markdown: "Value $E=mc^2$.",
+        style: ChatMarkdownRenderStyle(fontSize: 18, fontFamily: "ui-rounded, sans-serif")
+    )
+    try check(
+        styledRendered.contains("font-size: 18px")
+            && styledRendered.contains("font-family: ui-rounded, sans-serif"),
+        "markdown renderer should accept Reader Chat font settings for formula-bearing messages"
+    )
 
     let inlineMathBeforeCitation = ChatMarkdownRenderer.renderFragment(
         markdown: #"归一化到 $[0,1]$ 后的“好样本概率”。 [1](papercodex-cite://open?id=paper%3Apaper-a%3Ap5%3Ab17)"#

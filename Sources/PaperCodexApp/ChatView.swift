@@ -90,6 +90,8 @@ struct ChatView: View {
                                 MessageBubble(
                                     message: message,
                                     isBusy: isCurrentSessionSending,
+                                    messageFontSize: model.chatMessageFontSize,
+                                    fontFamily: model.chatFontFamily,
                                     onCitation: { citationID in
                                         model.jumpToCitation(citationID)
                                     },
@@ -311,12 +313,18 @@ struct ChatView: View {
                     ComposerTextView(
                         text: composerDraftBinding,
                         isEnabled: canEditComposer,
+                        fontSize: model.chatComposerFontSize,
+                        fontFamily: model.chatFontFamily,
                         focusRequestID: composerFocusRequestID,
                         onSubmit: sendDraft
                     )
                         .frame(height: composerTextHeight)
-                        .background(Color(nsColor: .textBackgroundColor))
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(Color.accentColor.opacity(0.16), lineWidth: 1)
+                        )
+                        .shadow(color: Color.black.opacity(0.05), radius: 6, y: 2)
                     Button {
                         if isCurrentSessionSending {
                             model.cancelActiveCodexRun()
@@ -1543,6 +1551,8 @@ private struct CodexRunEventRow: View {
 private struct MessageBubble: View {
     var message: ChatMessage
     var isBusy: Bool
+    var messageFontSize: Double
+    var fontFamily: ChatFontFamily
     var onCitation: (String) -> Void
     var onRetryFailure: (String) -> Void
     var onNewSession: () -> Void
@@ -1579,49 +1589,124 @@ private struct MessageBubble: View {
     }
 
     var body: some View {
-        HStack {
+        HStack(alignment: .top, spacing: 10) {
             if isUser {
-                Spacer(minLength: 32)
+                Spacer(minLength: 44)
             }
-            VStack(alignment: .leading, spacing: 6) {
-                Text(isUser ? "You" : "Agent")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                if let userSourceAttachment {
-                    UserSourceReplyView(attachment: userSourceAttachment, onOpen: onCitation)
-                }
-                if !renderedMarkdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    MarkdownMessageView(messageID: message.id, markdown: renderedMarkdown, onCitation: onCitation)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                let imageURLs = generatedImageURLs(in: message.content)
-                if !imageURLs.isEmpty {
-                    GeneratedImageGallery(urls: imageURLs, onPreview: onGeneratedImagePreview)
-                }
-                if failureNotice != nil {
-                    HStack(spacing: 8) {
-                        ChatPanelActionButton(disabled: isBusy) {
-                            onRetryFailure(message.id)
-                        } label: {
-                            Label("Retry", systemImage: "arrow.clockwise")
-                        }
 
-                        ChatPanelActionButton(disabled: isBusy) {
-                            onNewSession()
-                        } label: {
-                            Label("New Session", systemImage: "plus.bubble")
-                        }
-                    }
-                    .padding(.top, 2)
-                }
-            }
-            .padding(12)
-            .background(isUser ? Color.blue.opacity(0.12) : Color(nsColor: .textBackgroundColor))
-            .clipShape(RoundedRectangle(cornerRadius: 8))
             if !isUser {
-                Spacer(minLength: 32)
+                ChatRoleBadge(isUser: false)
+            }
+
+            VStack(alignment: isUser ? .trailing : .leading, spacing: 7) {
+                HStack(spacing: 6) {
+                    Text(isUser ? "You" : "Agent")
+                        .font(fontFamily.swiftUIFont(size: max(11, messageFontSize - 4), weight: .semibold))
+                    Text(message.createdAt, style: .time)
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary.opacity(0.82))
+                }
+                .foregroundStyle(isUser ? Color.accentColor : Color.secondary)
+
+                VStack(alignment: .leading, spacing: 9) {
+                    if let userSourceAttachment {
+                        UserSourceReplyView(attachment: userSourceAttachment, onOpen: onCitation)
+                    }
+                    if !renderedMarkdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        MarkdownMessageView(
+                            messageID: message.id,
+                            markdown: renderedMarkdown,
+                            fontSize: messageFontSize,
+                            fontFamily: fontFamily,
+                            onCitation: onCitation
+                        )
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    let imageURLs = generatedImageURLs(in: message.content)
+                    if !imageURLs.isEmpty {
+                        GeneratedImageGallery(urls: imageURLs, onPreview: onGeneratedImagePreview)
+                    }
+                    if failureNotice != nil {
+                        HStack(spacing: 8) {
+                            ChatPanelActionButton(disabled: isBusy) {
+                                onRetryFailure(message.id)
+                            } label: {
+                                Label("Retry", systemImage: "arrow.clockwise")
+                            }
+
+                            ChatPanelActionButton(disabled: isBusy) {
+                                onNewSession()
+                            } label: {
+                                Label("New Session", systemImage: "plus.bubble")
+                            }
+                        }
+                        .padding(.top, 2)
+                    }
+                }
+                .padding(.horizontal, 13)
+                .padding(.vertical, 11)
+                .background(ChatMessageBubbleBackground(isUser: isUser))
+            }
+            .frame(maxWidth: 760, alignment: isUser ? .trailing : .leading)
+
+            if !isUser {
+                Spacer(minLength: 44)
+            }
+
+            if isUser {
+                ChatRoleBadge(isUser: true)
             }
         }
+    }
+}
+
+private struct ChatRoleBadge: View {
+    var isUser: Bool
+
+    var body: some View {
+        Image(systemName: isUser ? "person.fill" : "sparkles")
+            .font(.paperCodexSystem(size: 12, weight: .bold))
+            .frame(width: 28, height: 28)
+            .foregroundStyle(isUser ? Color.accentColor : Color.orange)
+            .background(
+                Circle()
+                    .fill((isUser ? Color.accentColor : Color.orange).opacity(0.12))
+            )
+            .overlay(
+                Circle()
+                    .stroke((isUser ? Color.accentColor : Color.orange).opacity(0.22), lineWidth: 1)
+            )
+            .shadow(color: (isUser ? Color.accentColor : Color.orange).opacity(0.10), radius: 5, y: 2)
+            .accessibilityHidden(true)
+    }
+}
+
+private struct ChatMessageBubbleBackground: View {
+    var isUser: Bool
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 8)
+            .fill(fill)
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(stroke, lineWidth: 1)
+            )
+            .shadow(color: shadow, radius: isUser ? 7 : 6, y: 3)
+    }
+
+    private var fill: Color {
+        if isUser {
+            return Color.accentColor.opacity(0.13)
+        }
+        return Color(nsColor: .textBackgroundColor)
+    }
+
+    private var stroke: Color {
+        isUser ? Color.accentColor.opacity(0.24) : Color.black.opacity(0.08)
+    }
+
+    private var shadow: Color {
+        isUser ? Color.accentColor.opacity(0.10) : Color.black.opacity(0.05)
     }
 }
 
@@ -1845,19 +1930,33 @@ private struct UserSourceReplyView: View {
 private struct MarkdownMessageView: View {
     var messageID: String
     var markdown: String
+    var fontSize: Double
+    var fontFamily: ChatFontFamily
     var onCitation: (String) -> Void
     @State private var height: CGFloat = 24
 
     var body: some View {
         MarkdownWebView(
-            html: ChatMarkdownRenderer.renderDocument(markdown: markdown),
+            html: ChatMarkdownRenderer.renderDocument(
+                markdown: markdown,
+                style: ChatMarkdownRenderStyle(
+                    fontSize: fontSize,
+                    fontFamily: fontFamily.cssFontFamily
+                )
+            ),
             height: $height,
             onCitation: onCitation
         )
-        .id("\(messageID)-\(markdown.hashValue)")
+        .id("\(messageID)-\(markdown.hashValue)-\(fontSize)-\(fontFamily.rawValue)")
         .frame(minHeight: 24)
         .frame(height: max(24, height))
         .onChange(of: markdown) {
+            height = 24
+        }
+        .onChange(of: fontSize) {
+            height = 24
+        }
+        .onChange(of: fontFamily) {
             height = 24
         }
     }
@@ -1866,6 +1965,8 @@ private struct MarkdownMessageView: View {
 private struct ComposerTextView: NSViewRepresentable {
     @Binding var text: String
     var isEnabled: Bool
+    var fontSize: Double
+    var fontFamily: ChatFontFamily
     var focusRequestID: UUID?
     var onSubmit: () -> Void
 
@@ -1886,7 +1987,8 @@ private struct ComposerTextView: NSViewRepresentable {
         textView.isAutomaticQuoteSubstitutionEnabled = false
         textView.isAutomaticDashSubstitutionEnabled = false
         textView.isAutomaticTextReplacementEnabled = false
-        textView.font = .systemFont(ofSize: 14)
+        textView.font = fontFamily.nsFont(size: fontSize)
+        textView.typingAttributes[.font] = fontFamily.nsFont(size: fontSize)
         textView.textContainerInset = NSSize(width: 8, height: 8)
         textView.drawsBackground = false
         textView.string = text
@@ -1910,6 +2012,9 @@ private struct ComposerTextView: NSViewRepresentable {
         textView.onSubmit = context.coordinator.submit
         textView.isEditable = isEnabled
         textView.textColor = isEnabled ? .labelColor : .secondaryLabelColor
+        let nsFont = fontFamily.nsFont(size: fontSize)
+        textView.font = nsFont
+        textView.typingAttributes[.font] = nsFont
         if textView.string != text {
             textView.string = text
         }

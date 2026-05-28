@@ -13,6 +13,9 @@ struct SettingsView: View {
     @State private var draftDiscoverCodexModel = ""
     @State private var draftDiscoverCodexReasoningEffort: CodexReasoningEffort = .default
     @State private var draftDiscoverCodexConcurrency = 10
+    @State private var draftChatMessageFontSize = ChatAppearanceDefaults.defaultMessageFontSize
+    @State private var draftChatComposerFontSize = ChatAppearanceDefaults.defaultComposerFontSize
+    @State private var draftChatFontFamily: ChatFontFamily = .system
     @State private var draftEmbeddingEnabled = false
     @State private var draftEmbeddingBaseURL = ""
     @State private var draftEmbeddingAPIKey = ""
@@ -48,6 +51,12 @@ struct SettingsView: View {
             || draftDiscoverCodexConcurrency != model.discoverCodexConcurrency
     }
 
+    private var isChatAppearanceDirty: Bool {
+        ChatAppearanceDefaults.clampedMessageFontSize(draftChatMessageFontSize) != model.chatMessageFontSize
+            || ChatAppearanceDefaults.clampedComposerFontSize(draftChatComposerFontSize) != model.chatComposerFontSize
+            || draftChatFontFamily != model.chatFontFamily
+    }
+
     private var isEmbeddingDirty: Bool {
         let embedding = model.localDiscoverPreferences.normalized.embedding
         return draftEmbeddingEnabled != embedding.enabled
@@ -69,6 +78,7 @@ struct SettingsView: View {
                 LazyVStack(alignment: .leading, spacing: 22) {
                     header
                     globalLanguageSettings
+                    chatAppearanceSettings
                     arxivFeedSettings
                     localRankingSettings
                     codexEnrichmentSettings
@@ -184,6 +194,63 @@ struct SettingsView: View {
             Text("Controls the whole app interface, Explore language, and the default Codex prompt.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    private var chatAppearanceSettings: some View {
+        settingsSection(title: "Reader Chat Appearance", systemImage: "text.bubble") {
+            Picker("Chat font", selection: $draftChatFontFamily) {
+                ForEach(ChatFontFamily.allCases) { family in
+                    Text(family.title).tag(family)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            Stepper(
+                "Message text: \(Int(ChatAppearanceDefaults.clampedMessageFontSize(draftChatMessageFontSize))) pt",
+                value: $draftChatMessageFontSize,
+                in: ChatAppearanceDefaults.messageFontSizeRange,
+                step: 1
+            )
+
+            Stepper(
+                "Composer text: \(Int(ChatAppearanceDefaults.clampedComposerFontSize(draftChatComposerFontSize))) pt",
+                value: $draftChatComposerFontSize,
+                in: ChatAppearanceDefaults.composerFontSizeRange,
+                step: 1
+            )
+
+            ChatAppearancePreview(
+                messageFontSize: draftChatMessageFontSize,
+                composerFontSize: draftChatComposerFontSize,
+                fontFamily: draftChatFontFamily
+            )
+
+            HStack {
+                SettingsActionButton(kind: .primary, disabled: !isChatAppearanceDirty) {
+                    model.setChatAppearance(
+                        messageFontSize: draftChatMessageFontSize,
+                        composerFontSize: draftChatComposerFontSize,
+                        fontFamily: draftChatFontFamily
+                    )
+                    syncLocalDrafts()
+                } label: {
+                    Label(isChatAppearanceDirty ? "Save Chat Appearance" : "Saved", systemImage: isChatAppearanceDirty ? "checkmark" : "checkmark.circle")
+                }
+
+                SettingsActionButton {
+                    model.resetChatAppearance()
+                    syncLocalDrafts()
+                } label: {
+                    Label("Default", systemImage: "arrow.counterclockwise")
+                }
+
+                Spacer()
+
+                Text("\(model.chatFontFamily.title) · \(Int(model.chatMessageFontSize))/\(Int(model.chatComposerFontSize)) pt")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(isChatAppearanceDirty ? .orange : .secondary)
+            }
         }
     }
 
@@ -816,6 +883,9 @@ struct SettingsView: View {
         draftDiscoverCodexModel = model.discoverCodexModelOverride
         draftDiscoverCodexReasoningEffort = model.discoverCodexReasoningEffort
         draftDiscoverCodexConcurrency = model.discoverCodexConcurrency
+        draftChatMessageFontSize = model.chatMessageFontSize
+        draftChatComposerFontSize = model.chatComposerFontSize
+        draftChatFontFamily = model.chatFontFamily
         draftEmbeddingEnabled = preferences.embedding.enabled
         draftEmbeddingBaseURL = preferences.embedding.baseURL
         draftEmbeddingModel = preferences.embedding.model
@@ -860,6 +930,51 @@ private enum SettingsActionButtonKind {
             Color.secondary
         case .destructive:
             Color.red
+        }
+    }
+}
+
+private struct ChatAppearancePreview: View {
+    var messageFontSize: Double
+    var composerFontSize: Double
+    var fontFamily: ChatFontFamily
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "sparkles")
+                    .font(.paperCodexSystem(size: 12, weight: .semibold))
+                    .frame(width: 24, height: 24)
+                    .foregroundStyle(Color.accentColor)
+                    .background(Color.accentColor.opacity(0.12), in: Circle())
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Agent response preview")
+                        .font(fontFamily.swiftUIFont(size: max(11, messageFontSize - 4), weight: .semibold))
+                        .foregroundStyle(.secondary)
+                    Text("Formula messages, citations, lists, and code blocks follow this reading size.")
+                        .font(fontFamily.swiftUIFont(size: messageFontSize))
+                        .lineSpacing(2)
+                        .foregroundStyle(.primary.opacity(0.90))
+                }
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color.accentColor.opacity(0.18), lineWidth: 1)
+            )
+
+            Text("Composer text preview")
+                .font(fontFamily.swiftUIFont(size: composerFontSize))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color.black.opacity(0.08), lineWidth: 1)
+                )
         }
     }
 }

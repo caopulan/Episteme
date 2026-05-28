@@ -216,6 +216,9 @@ private let embeddingProviderAPIKeyDefaultsKey = "PaperCodexEmbeddingProviderAPI
 private let arxivSaveOrganizationDefaultsKey = "PaperCodexArxivSaveOrganization"
 private let quickPromptsDefaultsKey = "PaperCodexQuickPrompts"
 private let librarySidebarWidthDefaultsKey = "PaperCodexLibrarySidebarWidth"
+private let chatMessageFontSizeDefaultsKey = "PaperCodexChatMessageFontSize"
+private let chatComposerFontSizeDefaultsKey = "PaperCodexChatComposerFontSize"
+private let chatFontFamilyDefaultsKey = "PaperCodexChatFontFamily"
 private let discoverScrollPositionPaperIDDefaultsKey = "PaperCodexDiscoverScrollPositionPaperID"
 private let arxivSearchRequiredCategoriesDefaultsKey = "PaperCodexArxivSearchRequiredCategories"
 private let arxivSearchFromYearDefaultsKey = "PaperCodexArxivSearchFromYear"
@@ -230,6 +233,25 @@ private let arxivLibraryImportRetryDelaysNanoseconds: [UInt64] = [
 private func loadDiscoverCodexConcurrencyFromDefaults() -> Int {
     let stored = UserDefaults.standard.integer(forKey: discoverCodexConcurrencyDefaultsKey)
     return stored == 0 ? defaultDiscoverCodexConcurrency : min(max(stored, 1), 20)
+}
+
+private func loadChatMessageFontSizeFromDefaults() -> Double {
+    let stored = UserDefaults.standard.double(forKey: chatMessageFontSizeDefaultsKey)
+    return stored == 0
+        ? ChatAppearanceDefaults.defaultMessageFontSize
+        : ChatAppearanceDefaults.clampedMessageFontSize(stored)
+}
+
+private func loadChatComposerFontSizeFromDefaults() -> Double {
+    let stored = UserDefaults.standard.double(forKey: chatComposerFontSizeDefaultsKey)
+    return stored == 0
+        ? ChatAppearanceDefaults.defaultComposerFontSize
+        : ChatAppearanceDefaults.clampedComposerFontSize(stored)
+}
+
+private func loadChatFontFamilyFromDefaults() -> ChatFontFamily {
+    let stored = UserDefaults.standard.string(forKey: chatFontFamilyDefaultsKey)
+    return stored.flatMap(ChatFontFamily.init(rawValue:)) ?? .system
 }
 
 private func loadCodexReasoningEffortFromDefaults(key: String) -> CodexReasoningEffort {
@@ -735,6 +757,9 @@ final class AppModel: ObservableObject {
         let stored = UserDefaults.standard.double(forKey: librarySidebarWidthDefaultsKey)
         return stored > 0 ? CGFloat(stored) : 280
     }()
+    @Published var chatMessageFontSize = loadChatMessageFontSizeFromDefaults()
+    @Published var chatComposerFontSize = loadChatComposerFontSizeFromDefaults()
+    @Published var chatFontFamily = loadChatFontFamilyFromDefaults()
 
     private let libraryStore = LibraryFeatureStore()
     private let readerStore = ReaderFeatureStore()
@@ -1757,6 +1782,32 @@ final class AppModel: ObservableObject {
         UserDefaults.standard.set(discoverCodexConcurrency, forKey: discoverCodexConcurrencyDefaultsKey)
         mergeAvailableCodexModelIDs([trimmedModel])
         postNotice(kind: .success, title: "Explore Processing Saved", message: "\(discoverCodexConcurrency) workers · Think \(reasoningEffort.displayName)")
+    }
+
+    func setChatAppearance(
+        messageFontSize: Double,
+        composerFontSize: Double,
+        fontFamily: ChatFontFamily
+    ) {
+        chatMessageFontSize = ChatAppearanceDefaults.clampedMessageFontSize(messageFontSize)
+        chatComposerFontSize = ChatAppearanceDefaults.clampedComposerFontSize(composerFontSize)
+        chatFontFamily = fontFamily
+        UserDefaults.standard.set(chatMessageFontSize, forKey: chatMessageFontSizeDefaultsKey)
+        UserDefaults.standard.set(chatComposerFontSize, forKey: chatComposerFontSizeDefaultsKey)
+        UserDefaults.standard.set(fontFamily.rawValue, forKey: chatFontFamilyDefaultsKey)
+        postNotice(
+            kind: .success,
+            title: "Chat Appearance Saved",
+            message: "\(fontFamily.title) · Message \(Int(chatMessageFontSize)) pt · Composer \(Int(chatComposerFontSize)) pt"
+        )
+    }
+
+    func resetChatAppearance() {
+        setChatAppearance(
+            messageFontSize: ChatAppearanceDefaults.defaultMessageFontSize,
+            composerFontSize: ChatAppearanceDefaults.defaultComposerFontSize,
+            fontFamily: .system
+        )
     }
 
     func setCodexSystemPrompt(_ prompt: String) {

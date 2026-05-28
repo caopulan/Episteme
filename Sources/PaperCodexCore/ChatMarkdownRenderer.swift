@@ -1,7 +1,30 @@
 import Foundation
 
+public struct ChatMarkdownRenderStyle: Equatable, Sendable {
+    public var fontSize: Double
+    public var fontFamily: String
+
+    public init(
+        fontSize: Double = 16,
+        fontFamily: String = "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif"
+    ) {
+        self.fontSize = min(max(fontSize, 11), 28)
+        self.fontFamily = Self.sanitizedFontFamily(fontFamily)
+    }
+
+    private static func sanitizedFontFamily(_ value: String) -> String {
+        let disallowed = CharacterSet(charactersIn: "\n\r;{}<>")
+        let sanitized = value.components(separatedBy: disallowed).joined(separator: " ")
+        let trimmed = sanitized.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif" : trimmed
+    }
+}
+
 public enum ChatMarkdownRenderer {
-    public static func renderDocument(markdown: String) -> String {
+    public static func renderDocument(
+        markdown: String,
+        style: ChatMarkdownRenderStyle = ChatMarkdownRenderStyle()
+    ) -> String {
         """
         <!doctype html>
         <html>
@@ -20,8 +43,9 @@ public enum ChatMarkdownRenderer {
           overflow-wrap: anywhere;
         }
         .message {
-          font-size: 14px;
-          line-height: 1.48;
+          font-family: \(style.fontFamily);
+          font-size: \(formattedFontSize(style.fontSize))px;
+          line-height: 1.55;
         }
         p, ul, ol, blockquote, pre, table {
           margin: 0 0 0.72em;
@@ -90,12 +114,29 @@ public enum ChatMarkdownRenderer {
           margin: 0 0 0.72em;
           overflow-x: auto;
         }
+        mjx-container {
+          line-height: 1.35;
+        }
+        mjx-container[display="true"] {
+          overflow-x: auto;
+          overflow-y: hidden;
+          padding: 0.12em 0;
+          max-width: 100%;
+        }
         </style>
         <script>
         window.MathJax = {
+          loader: {
+            load: ['[tex]/noerrors', '[tex]/noundefined']
+          },
           tex: {
             inlineMath: [['$', '$'], ['\\\\(', '\\\\)']],
-            displayMath: [['$$', '$$'], ['\\\\[', '\\\\]']]
+            displayMath: [['$$', '$$'], ['\\\\[', '\\\\]']],
+            processEscapes: true,
+            packages: {'[+]': ['noerrors', 'noundefined']}
+          },
+          chtml: {
+            matchFontHeight: false
           },
           options: {
             skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code']
@@ -137,6 +178,13 @@ public enum ChatMarkdownRenderer {
         </body>
         </html>
         """
+    }
+
+    private static func formattedFontSize(_ size: Double) -> String {
+        if size.rounded() == size {
+            return String(Int(size))
+        }
+        return String(format: "%.1f", size)
     }
 
     public static func renderFragment(markdown: String) -> String {
