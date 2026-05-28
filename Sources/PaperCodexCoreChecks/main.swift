@@ -1677,6 +1677,21 @@ func runUILayoutSourceChecks() throws {
     } else {
         throw CheckFailure(description: "recent conversation detail source should remain inspectable")
     }
+    if let inspectorRange = librarySource.range(of: "private var inspector: some View"),
+       let inspectorEndRange = librarySource.range(of: "private func paperMetadataSection", range: inspectorRange.upperBound..<librarySource.endIndex) {
+        let inspectorSource = String(librarySource[inspectorRange.lowerBound..<inspectorEndRange.lowerBound])
+        try check(
+            librarySource.contains("@State private var isInspectorReadButtonHovering = false")
+                && librarySource.contains("private struct LibraryInspectorReadButtonStyle: ButtonStyle")
+                && inspectorSource.contains(".buttonStyle(LibraryInspectorReadButtonStyle(")
+                && librarySource.contains("configuration.isPressed")
+                && librarySource.contains("PaperCodexMotion.press")
+                && !inspectorSource.contains(".buttonStyle(.borderedProminent)"),
+            "library inspector Read action should provide immediate pressed feedback before opening the reader"
+        )
+    } else {
+        throw CheckFailure(description: "library inspector source should remain inspectable")
+    }
     try check(
         homeChromeSource.contains("static let sidebarTopPadding: CGFloat = 28")
             && librarySource.contains("static let splitPaneTopInset: CGFloat = 0")
