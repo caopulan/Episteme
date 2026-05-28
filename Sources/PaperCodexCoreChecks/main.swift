@@ -1366,6 +1366,16 @@ func runUILayoutSourceChecks() throws {
         "common toolbar and icon actions should use shared controls, with reader-specific compact header actions only where layout requires them"
     )
     try check(
+        actionButtonSource.contains("struct PaperCodexToolbarButtonStyle")
+            && actionButtonSource.contains("struct PaperCodexIconButtonStyle")
+            && actionButtonSource.components(separatedBy: "configuration.isPressed").count - 1 >= 4
+            && actionButtonSource.components(separatedBy: "PaperCodexMotion.press").count - 1 >= 2
+            && actionButtonSource.contains(".buttonStyle(PaperCodexToolbarButtonStyle(")
+            && actionButtonSource.contains(".buttonStyle(PaperCodexIconButtonStyle(")
+            && !actionButtonSource.contains(".buttonStyle(.plain)"),
+        "shared toolbar and icon actions should provide immediate pressed feedback"
+    )
+    try check(
         saveToLibrarySource.contains("SaveToLibraryDestinationHeader")
             && saveToLibrarySource.contains("SaveToLibraryFolderPathChip")
             && saveToLibrarySource.contains("Choose destination")
