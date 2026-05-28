@@ -1394,7 +1394,7 @@ private struct CodexRunBubble: View {
     var run: ActiveCodexRun
 
     private var visibleEvents: [CodexRunEvent] {
-        Array(run.events.filter { $0.kind == .thinking || $0.kind == .answer || $0.kind == .usage }.suffix(8))
+        Array(run.events.filter { $0.kind == .thinking || $0.kind == .tool || $0.kind == .answer || $0.kind == .usage }.suffix(8))
     }
 
     private var tokenUsageSummary: String? {

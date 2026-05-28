@@ -4484,6 +4484,16 @@ func runCodexCLIChecks() throws {
     let toolEvent = try CodexJSONEventParser.parseLine(#"{"type":"tool_call","name":"web.search","arguments":{"query":"paper"}}"#)
     try check(toolEvent?.kind == .tool, "non-terminal tool calls should be classified as tool events")
     try check(toolEvent?.title == "web.search", "tool events should show the tool name")
+    let hermesStartedTool = try HermesBridgeEventParser.parseLine(#"{"type":"tool","state":"started","name":"read_file","detail":"full_text.txt"}"#)
+    try check(hermesStartedTool?.kind == .tool, "Hermes bridge tool-start events should become visible tool updates")
+    try check(hermesStartedTool?.title == "read_file", "Hermes bridge tool events should use the tool name as the title")
+    try check(hermesStartedTool?.detail == "full_text.txt", "Hermes bridge tool events should preserve the preview detail")
+    let hermesCompletedTool = try HermesBridgeEventParser.parseLine(#"{"type":"tool","state":"completed","name":"grep","duration":0.42,"is_error":false}"#)
+    try check(hermesCompletedTool?.kind == .tool, "Hermes bridge tool-completion events should stay in the tool lane")
+    try check(hermesCompletedTool?.detail == "Completed in 0.42s", "Hermes bridge tool completions should show compact duration")
+    let hermesAnswer = try HermesBridgeEventParser.parseLine(#"{"type":"answer","text":"最终回答"}"#)
+    try check(hermesAnswer?.kind == .answer, "Hermes bridge answer events should mark the final result")
+    try check(hermesAnswer?.detail == "最终回答", "Hermes bridge answer events should preserve final answer text")
     let imageGenerationEvent = try CodexJSONEventParser.parseLine(#"{"type":"image_generation_call","id":"ig_test","status":"completed","result":"base64-payload"}"#)
     try check(imageGenerationEvent?.kind == .tool, "image generation events should be classified as compact tool events")
     try check(imageGenerationEvent?.title == "Image generation", "image generation events should have a readable title")
@@ -4802,6 +4812,26 @@ func runAgentCommandBuilderChecks() throws {
         ],
         "Hermes adapter should build a quiet provider/model/skills query command so only the final answer reaches chat"
     )
+    let hermesInstallRoot = executableRoot.appendingPathComponent("hermes-agent", isDirectory: true)
+    let hermesBinRoot = hermesInstallRoot.appendingPathComponent("venv/bin", isDirectory: true)
+    try FileManager.default.createDirectory(at: hermesBinRoot, withIntermediateDirectories: true)
+    let hermesPythonURL = hermesBinRoot.appendingPathComponent("python3")
+    try "#!/bin/sh\nexit 0\n".write(to: hermesPythonURL, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: hermesPythonURL.path)
+    let hermesBridgeExecutableURL = hermesBinRoot.appendingPathComponent("hermes")
+    try "#!\(hermesPythonURL.path)\nexit 0\n".write(to: hermesBridgeExecutableURL, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: hermesBridgeExecutableURL.path)
+    let hermesBridge = try HermesRuntimeAdapter(executablePath: hermesBridgeExecutableURL.path).structuredNonInteractiveCommand(
+        prompt: "Summarize",
+        workspacePath: "/tmp/session-a",
+        provider: "kimi",
+        model: "kimi-k2",
+        skillsPath: "/tmp/session-a/skills/papercodex-agent-workspace"
+    )
+    try check(hermesBridge.executablePath == hermesPythonURL.path, "Hermes bridge should reuse Hermes' existing virtualenv Python")
+    try check(hermesBridge.arguments.prefix(2) == ["-u", "-c"], "Hermes bridge should run an unbuffered embedded Python event bridge")
+    try check(hermesBridge.arguments.contains("--query") && hermesBridge.arguments.contains("Summarize"), "Hermes bridge should pass the Paper Codex prompt through unchanged")
+    try check(hermesBridge.environmentOverrides["PAPER_CODEX_HERMES_ROOT"] == hermesInstallRoot.path, "Hermes bridge should import Hermes from its existing install root")
 
     let openClaw = OpenClawRuntimeAdapter(executablePath: "/opt/homebrew/bin/openclaw").nonInteractiveCommand(
         prompt: "Summarize",
@@ -5043,8 +5073,9 @@ func runAgentRuntimeSourceChecks() throws {
     try check(
         chatViewSource.contains("case terminal")
             && chatViewSource.contains("AgentTerminalView()")
-            && chatViewSource.contains("Label(\"Terminal\", systemImage: \"terminal\")"),
-        "ChatView should add a Terminal session panel tab"
+            && chatViewSource.contains("Label(\"Terminal\", systemImage: \"terminal\")")
+            && chatViewSource.contains("$0.kind == .thinking || $0.kind == .tool || $0.kind == .answer || $0.kind == .usage"),
+        "ChatView should add a Terminal session panel tab and show tool events in active agent runs"
     )
     try check(
         appModelSource.contains("@Published var agentTerminalState")

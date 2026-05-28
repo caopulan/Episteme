@@ -259,6 +259,25 @@ final class AgentRunCoordinator {
             )
         }
 
+        if runtimeProfile.backend == .hermes {
+            let command = try hermesStructuredCommand(
+                prompt: prompt,
+                session: session,
+                runtimeProfile: runtimeProfile,
+                modelOverride: modelOverride,
+                providerOverride: providerOverride
+            )
+            let eventLogURL = URL(fileURLWithPath: session.workspacePath, isDirectory: true)
+                .appendingPathComponent("turns", isDirectory: true)
+                .appendingPathComponent("\(UUID().uuidString.lowercased())-\(runtimeProfile.id)-events.jsonl")
+            return try await runHermesBridgeCommand(
+                command,
+                eventLogURL: eventLogURL,
+                runHandle: runHandle,
+                onEvent: onEvent
+            )
+        }
+
         let command = try nonCodexCommand(
             prompt: prompt,
             session: session,
@@ -283,6 +302,26 @@ final class AgentRunCoordinator {
             threadID: nil,
             generatedImages: [],
             tokenUsage: nil
+        )
+    }
+
+    private func hermesStructuredCommand(
+        prompt: String,
+        session: PaperSession,
+        runtimeProfile: AgentRuntimeProfile,
+        modelOverride: String,
+        providerOverride: String
+    ) throws -> AgentRuntimeCommand {
+        let workspaceURL = URL(fileURLWithPath: session.workspacePath, isDirectory: true)
+        let modelID = modelOverride.trimmingCharacters(in: .whitespacesAndNewlines)
+        let providerID = providerOverride.trimmingCharacters(in: .whitespacesAndNewlines)
+        let executable = try HermesRuntimeAdapter.findExecutable()
+        return try HermesRuntimeAdapter(executablePath: executable).structuredNonInteractiveCommand(
+            prompt: prompt,
+            workspacePath: session.workspacePath,
+            provider: providerID.isEmpty ? nil : providerID,
+            model: modelID.isEmpty ? runtimeProfile.defaultModelID : modelID,
+            skillsPath: workspaceURL.appendingPathComponent("skills/papercodex-agent-workspace", isDirectory: true).path
         )
     }
 
@@ -346,6 +385,33 @@ final class AgentRunCoordinator {
         }
     }
 
+    private func runHermesBridgeCommand(
+        _ command: AgentRuntimeCommand,
+        eventLogURL: URL,
+        runHandle: AgentRunHandle,
+        onEvent: @escaping @Sendable (AgentRunEvent) -> Void
+    ) async throws -> AgentRunResult {
+        let buffer = HermesBridgeRunBuffer()
+        let stdout = try await Task.detached(priority: .userInitiated) {
+            try self.commandRuntime.runStreaming(
+                command: command,
+                eventLogURL: eventLogURL,
+                runHandle: runHandle,
+                onStdoutData: { buffer.appendStdout($0) },
+                onStderrData: { buffer.appendStderr($0) },
+                finish: { buffer.finish() },
+                onEvent: onEvent
+            )
+        }.value
+        return AgentRunResult(
+            stdout: stdout,
+            lastMessage: buffer.finalAnswer ?? "",
+            threadID: buffer.sessionID,
+            generatedImages: [],
+            tokenUsage: nil
+        )
+    }
+
     private func runPlainCommand(
         _ command: AgentRuntimeCommand,
         eventLogURL: URL,
@@ -401,6 +467,106 @@ final class AgentRunCoordinator {
         }
         parts.append(reasoningEffort == .default ? "default thinking" : "\(reasoningEffort.displayName) thinking")
         return parts.joined(separator: " · ")
+    }
+}
+
+private final class HermesBridgeRunBuffer: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stdoutData = Data()
+    private var stderrData = Data()
+    private var stdoutRemainder = ""
+    private var stderrRemainder = ""
+    private var parsedFinalAnswer: String?
+    private var parsedSessionID: String?
+
+    var finalAnswer: String? {
+        lock.lock()
+        defer { lock.unlock() }
+        return parsedFinalAnswer
+    }
+
+    var sessionID: String? {
+        lock.lock()
+        defer { lock.unlock() }
+        return parsedSessionID
+    }
+
+    func appendStdout(_ data: Data) -> [AgentRunEvent] {
+        guard !data.isEmpty else {
+            return []
+        }
+        let text = String(decoding: data, as: UTF8.self)
+        let lines: [String]
+        lock.lock()
+        stdoutData.append(data)
+        stdoutRemainder += text
+        lines = Self.consumeLines(from: &stdoutRemainder)
+        lock.unlock()
+        return lines.compactMap(parseLine)
+    }
+
+    func appendStderr(_ data: Data) -> [AgentRunEvent] {
+        guard !data.isEmpty else {
+            return []
+        }
+        let text = String(decoding: data, as: UTF8.self)
+        let lines: [String]
+        lock.lock()
+        stderrData.append(data)
+        stderrRemainder += text
+        lines = Self.consumeLines(from: &stderrRemainder)
+        lock.unlock()
+        return lines
+            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .map { CodexRunEvent(kind: .terminal, title: "Hermes log", detail: $0) }
+    }
+
+    func finish() -> (stdout: String, stderr: String, events: [AgentRunEvent]) {
+        let stdoutRemainderSnapshot: String
+        let stderrRemainderSnapshot: String
+        let stdout: String
+        let stderr: String
+        lock.lock()
+        stdoutRemainderSnapshot = stdoutRemainder
+        stderrRemainderSnapshot = stderrRemainder
+        stdout = String(decoding: stdoutData, as: UTF8.self)
+        stderr = String(decoding: stderrData, as: UTF8.self)
+        lock.unlock()
+
+        var events: [AgentRunEvent] = []
+        if !stdoutRemainderSnapshot.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           let event = parseLine(stdoutRemainderSnapshot) {
+            events.append(event)
+        }
+        let trimmedStderrRemainder = stderrRemainderSnapshot.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedStderrRemainder.isEmpty {
+            events.append(CodexRunEvent(kind: .terminal, title: "Hermes log", detail: trimmedStderrRemainder))
+        }
+        return (stdout, stderr, events)
+    }
+
+    private func parseLine(_ line: String) -> AgentRunEvent? {
+        guard let parsed = try? HermesBridgeEventParser.parseResultLine(line) else {
+            return CodexRunEvent(kind: .raw, title: "Hermes", detail: line)
+        }
+        lock.lock()
+        if let finalAnswer = parsed.finalAnswer {
+            parsedFinalAnswer = finalAnswer
+        }
+        if let sessionID = parsed.sessionID {
+            parsedSessionID = sessionID
+        }
+        lock.unlock()
+        return parsed.event
+    }
+
+    private static func consumeLines(from buffer: inout String) -> [String] {
+        var lines: [String] = []
+        while let newline = buffer.firstIndex(where: { $0.isNewline }) {
+            lines.append(String(buffer[..<newline]))
+            buffer.removeSubrange(...newline)
+        }
+        return lines
     }
 }
 
