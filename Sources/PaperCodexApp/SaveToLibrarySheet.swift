@@ -48,6 +48,8 @@ struct SaveToLibrarySheet: View {
     @State private var collapsedCategoryIDs: Set<String> = []
     @State private var activeNewCategoryParentID: String?
     @State private var newCategoryName = ""
+    @State private var isCancelButtonHovering = false
+    @State private var isSaveButtonHovering = false
 
     init(
         paperTitle: String,
@@ -222,7 +224,18 @@ struct SaveToLibrarySheet: View {
     private var actionRow: some View {
         HStack(spacing: 10) {
             Spacer()
-            Button("Cancel", action: onCancel)
+            Button {
+                onCancel()
+            } label: {
+                Label("Cancel", systemImage: "xmark")
+            }
+            .buttonStyle(SaveToLibraryFooterButtonStyle(kind: .secondary, isHovering: isCancelButtonHovering, disabled: false))
+            .onHover { hovering in
+                withAnimation(PaperCodexMotion.hover) {
+                    isCancelButtonHovering = hovering
+                }
+            }
+
             Button {
                 onSave(
                     SaveToLibraryCategorySelection(
@@ -234,9 +247,18 @@ struct SaveToLibrarySheet: View {
             } label: {
                 Label("Save", systemImage: "checkmark")
             }
-            .buttonStyle(.borderedProminent)
-            .disabled(selectedCategoryIDs.isEmpty && selectedNewCategoryIDs.isEmpty)
+            .buttonStyle(SaveToLibraryFooterButtonStyle(kind: .primary, isHovering: isSaveButtonHovering, disabled: !canSave))
+            .disabled(!canSave)
+            .onHover { hovering in
+                withAnimation(PaperCodexMotion.hover) {
+                    isSaveButtonHovering = hovering
+                }
+            }
         }
+    }
+
+    private var canSave: Bool {
+        !selectedCategoryIDs.isEmpty || !selectedNewCategoryIDs.isEmpty
     }
 
     private var visibleFolderItems: [SaveToLibraryFolderItem] {
@@ -465,6 +487,109 @@ struct SaveToLibrarySheet: View {
             parentID = parent.parentID
         }
         return names.reversed().joined(separator: " / ")
+    }
+}
+
+private enum SaveToLibraryFooterButtonKind {
+    case secondary
+    case primary
+}
+
+private struct SaveToLibraryFooterButtonStyle: ButtonStyle {
+    var kind: SaveToLibraryFooterButtonKind
+    var isHovering: Bool
+    var disabled: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        let isPressed = configuration.isPressed && !disabled
+        configuration.label
+            .font(.paperCodexSystem(size: 13, weight: .semibold))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .foregroundStyle(foregroundColor(isPressed: isPressed))
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(backgroundColor(isPressed: isPressed))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(borderColor(isPressed: isPressed), lineWidth: 1)
+            )
+            .shadow(color: shadowColor(isPressed: isPressed), radius: isPressed ? 4 : 7, y: isPressed ? 1 : 3)
+            .scaleEffect(buttonScale(isPressed: isPressed), anchor: .center)
+            .animation(PaperCodexMotion.press, value: configuration.isPressed)
+            .animation(PaperCodexMotion.hover, value: isHovering)
+            .animation(PaperCodexMotion.hover, value: disabled)
+    }
+
+    private var tint: Color {
+        switch kind {
+        case .secondary:
+            .secondary
+        case .primary:
+            .accentColor
+        }
+    }
+
+    private func foregroundColor(isPressed: Bool) -> Color {
+        if disabled {
+            return Color.secondary.opacity(0.48)
+        }
+        switch kind {
+        case .secondary:
+            return isPressed || isHovering ? Color.primary.opacity(0.90) : Color.primary.opacity(0.74)
+        case .primary:
+            return .white
+        }
+    }
+
+    private func backgroundColor(isPressed: Bool) -> Color {
+        if disabled {
+            return Color(nsColor: .controlBackgroundColor).opacity(0.56)
+        }
+        switch kind {
+        case .secondary:
+            if isPressed {
+                return Color.primary.opacity(0.10)
+            }
+            return isHovering ? Color.primary.opacity(0.07) : Color(nsColor: .controlBackgroundColor)
+        case .primary:
+            if isPressed {
+                return tint.opacity(0.82)
+            }
+            return tint.opacity(isHovering ? 0.96 : 0.90)
+        }
+    }
+
+    private func borderColor(isPressed: Bool) -> Color {
+        if disabled {
+            return Color.black.opacity(0.06)
+        }
+        switch kind {
+        case .secondary:
+            return Color.black.opacity(isPressed ? 0.16 : (isHovering ? 0.12 : 0.08))
+        case .primary:
+            return tint.opacity(isPressed ? 0.62 : (isHovering ? 0.48 : 0.34))
+        }
+    }
+
+    private func shadowColor(isPressed: Bool) -> Color {
+        if disabled {
+            return .clear
+        }
+        switch kind {
+        case .secondary:
+            return isPressed || isHovering ? Color.black.opacity(isPressed ? 0.06 : 0.08) : .clear
+        case .primary:
+            return tint.opacity(isPressed ? 0.14 : (isHovering ? 0.22 : 0.16))
+        }
+    }
+
+    private func buttonScale(isPressed: Bool) -> CGFloat {
+        if disabled {
+            return 1
+        }
+        return isPressed ? 0.972 : (isHovering ? 1.014 : 1)
     }
 }
 

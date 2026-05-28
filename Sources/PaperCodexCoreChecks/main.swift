@@ -1554,6 +1554,21 @@ func runUILayoutSourceChecks() throws {
             && saveToLibrarySource.contains("New root folder"),
         "save-to-library should present folder destination selection as a clear tree picker with selected path chips"
     )
+    if let actionRowRange = saveToLibrarySource.range(of: "private var actionRow: some View"),
+       let actionRowEndRange = saveToLibrarySource.range(of: "private var visibleFolderItems", range: actionRowRange.upperBound..<saveToLibrarySource.endIndex) {
+        let actionRowSource = String(saveToLibrarySource[actionRowRange.lowerBound..<actionRowEndRange.lowerBound])
+        try check(
+            saveToLibrarySource.contains("@State private var isSaveButtonHovering = false")
+                && saveToLibrarySource.contains("private struct SaveToLibraryFooterButtonStyle: ButtonStyle")
+                && actionRowSource.contains(".buttonStyle(SaveToLibraryFooterButtonStyle(")
+                && saveToLibrarySource.contains("configuration.isPressed")
+                && saveToLibrarySource.contains("PaperCodexMotion.press")
+                && !actionRowSource.contains(".buttonStyle(.borderedProminent)"),
+            "save-to-library footer actions should provide immediate pressed feedback before saving destinations"
+        )
+    } else {
+        throw CheckFailure(description: "save-to-library action row source should remain inspectable")
+    }
     if let pathChipRange = saveToLibrarySource.range(of: "private struct SaveToLibraryFolderPathChip: View"),
        let pathChipEndRange = saveToLibrarySource.range(of: "private struct SaveToLibraryFlowLayout", range: pathChipRange.upperBound..<saveToLibrarySource.endIndex),
        let folderRowRange = saveToLibrarySource.range(of: "private struct SaveToLibraryFolderRow: View"),
