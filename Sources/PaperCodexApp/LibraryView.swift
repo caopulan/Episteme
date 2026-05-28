@@ -2168,6 +2168,8 @@ private struct RecentConversationsContent: View {
 }
 
 private struct RecentConversationRow: View {
+    @State private var isHovering = false
+
     var session: PaperSession
     var papers: [Paper]
     var isSelected: Bool
@@ -2195,26 +2197,26 @@ private struct RecentConversationRow: View {
                         .lineLimit(1)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(RecentConversationRowButtonStyle(isSelected: isSelected, isHovering: isHovering))
 
-            Button(action: onOpen) {
-                Image(systemName: "arrow.forward.circle")
-                    .font(.paperCodexSystem(size: 18, weight: .semibold))
-                    .frame(width: 28, height: 28)
-            }
-            .buttonStyle(.borderless)
-            .help("Open Session")
+            PaperCodexIconButton(title: "Open Session", systemImage: "arrow.forward.circle", tint: .accentColor, action: onOpen)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
-        .background(isSelected ? Color.accentColor.opacity(0.12) : Color(nsColor: .controlBackgroundColor))
+        .background(isSelected ? Color.accentColor.opacity(0.08) : Color(nsColor: .controlBackgroundColor))
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(
             RoundedRectangle(cornerRadius: 8)
                 .stroke(isSelected ? Color.accentColor.opacity(0.35) : Color.primary.opacity(0.08), lineWidth: 1)
         )
         .help(session.title)
+        .onHover { hovering in
+            withAnimation(PaperCodexMotion.hover) {
+                isHovering = hovering
+            }
+        }
     }
 
     private var detailText: String {
@@ -2230,6 +2232,52 @@ private struct RecentConversationRow: View {
         formatter.unitsStyle = .short
         return formatter
     }()
+}
+
+private struct RecentConversationRowButtonStyle: ButtonStyle {
+    var isSelected: Bool
+    var isHovering: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        let isPressed = configuration.isPressed
+        configuration.label
+            .padding(.horizontal, 8)
+            .padding(.vertical, 7)
+            .background(
+                RoundedRectangle(cornerRadius: 7)
+                    .fill(backgroundColor(isPressed: isPressed))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 7)
+                    .stroke(borderColor(isPressed: isPressed), lineWidth: 1)
+            )
+            .shadow(color: shadowColor(isPressed: isPressed), radius: isPressed ? 3 : 5, y: isPressed ? 1 : 2)
+            .scaleEffect(isPressed ? 0.988 : 1, anchor: .center)
+            .animation(PaperCodexMotion.press, value: configuration.isPressed)
+            .animation(PaperCodexMotion.hover, value: isHovering)
+            .animation(PaperCodexMotion.selection, value: isSelected)
+    }
+
+    private func backgroundColor(isPressed: Bool) -> Color {
+        if isSelected {
+            return Color.accentColor.opacity(isPressed ? 0.18 : 0.12)
+        }
+        if isPressed {
+            return Color.accentColor.opacity(0.10)
+        }
+        return isHovering ? Color.primary.opacity(0.045) : Color.clear
+    }
+
+    private func borderColor(isPressed: Bool) -> Color {
+        if isPressed {
+            return Color.accentColor.opacity(0.40)
+        }
+        return isSelected ? Color.accentColor.opacity(0.25) : Color.clear
+    }
+
+    private func shadowColor(isPressed: Bool) -> Color {
+        isPressed ? Color.accentColor.opacity(0.10) : .clear
+    }
 }
 
 private struct RecentConversationDetailPanel: View {

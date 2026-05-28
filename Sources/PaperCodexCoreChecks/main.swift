@@ -1604,6 +1604,22 @@ func runUILayoutSourceChecks() throws {
             && !sidebarRowSource.contains(".buttonStyle(.plain)"),
         "navigation rows should provide immediate press feedback and keep route transitions fast"
     )
+    if let recentRowRange = librarySource.range(of: "private struct RecentConversationRow: View"),
+       let recentRowEndRange = librarySource.range(of: "private struct RecentConversationDetailPanel", range: recentRowRange.upperBound..<librarySource.endIndex) {
+        let recentRowSource = String(librarySource[recentRowRange.lowerBound..<recentRowEndRange.lowerBound])
+        try check(
+            recentRowSource.contains("private struct RecentConversationRowButtonStyle: ButtonStyle")
+                && recentRowSource.contains(".buttonStyle(RecentConversationRowButtonStyle(")
+                && recentRowSource.contains("configuration.isPressed")
+                && recentRowSource.contains("PaperCodexMotion.press")
+                && recentRowSource.contains("PaperCodexIconButton(title: \"Open Session\"")
+                && !recentRowSource.contains(".buttonStyle(.plain)")
+                && !recentRowSource.contains(".buttonStyle(.borderless)"),
+            "recent conversation rows should provide immediate pressed feedback before selecting or opening sessions"
+        )
+    } else {
+        throw CheckFailure(description: "recent conversation row source should remain inspectable")
+    }
     try check(
         homeChromeSource.contains("static let sidebarTopPadding: CGFloat = 28")
             && librarySource.contains("static let splitPaneTopInset: CGFloat = 0")
