@@ -4105,7 +4105,7 @@ func runPromptChecks() throws {
             languageMode: .chinese
         )
     )
-    try check(chinesePrompt.contains("你是 Paper Codex 中的 Codex"), "Chinese language mode should switch the full system prompt to Chinese")
+    try check(chinesePrompt.contains("你是 Episteme 中的 Codex"), "Chinese language mode should switch the full system prompt to Chinese")
     try check(chinesePrompt.contains("全局语言偏好：中文"), "prompt should include the Chinese global language preference")
     try check(chinesePrompt.contains("[全局语言]"), "Chinese prompt should switch prompt section labels to Chinese")
     try check(!chinesePrompt.contains("[global language]"), "Chinese prompt should not keep English-only language section labels")
@@ -4228,7 +4228,7 @@ func runWorkspaceChecks() throws {
     try check(manifest.papers.first?.fullTextPath == paperDir.appendingPathComponent("full_text.txt").path, "workspace manifest should link to full text")
 
     let instructions = try String(contentsOf: workspaceRoot.appendingPathComponent("agent_instructions.md"), encoding: .utf8)
-    try check(instructions.contains("Use Paper Codex MCP for library, tag, folder, note, and app navigation actions."), "agent instructions should route app operations through MCP")
+    try check(instructions.contains("Use Episteme MCP for library, tag, folder, note, and app navigation actions."), "agent instructions should route app operations through MCP")
     try check(instructions.contains("[[cite:paper:{paper_id}:p{page}:b{block_index}]]"), "agent instructions should include the citation contract")
     let workspaceSkill = try String(contentsOf: workspaceRoot.appendingPathComponent("skills/papercodex-agent-workspace/SKILL.md"), encoding: .utf8)
     try check(workspaceSkill.contains("Use MCP tools for app state changes"), "workspace skill should route app mutations through MCP")
@@ -5226,13 +5226,35 @@ func runCodexRecoveryChecks() throws {
 
 func runPathChecks() throws {
     let overrideRoot = PaperCodexPaths.supportRoot(environment: [
+        "EPISTEME_SUPPORT_ROOT": "/tmp/Episteme-isolated-root"
+    ])
+    try check(overrideRoot.path == "/tmp/Episteme-isolated-root", "support root should honor explicit Episteme environment override")
+
+    let legacyOverrideRoot = PaperCodexPaths.supportRoot(environment: [
         "PAPER_CODEX_SUPPORT_ROOT": "/tmp/paper-codex-isolated-root"
     ])
-    try check(overrideRoot.path == "/tmp/paper-codex-isolated-root", "support root should honor explicit environment override")
+    try check(legacyOverrideRoot.path == "/tmp/paper-codex-isolated-root", "support root should keep honoring the legacy Paper Codex environment override")
 
-    let defaultRoot = PaperCodexPaths.supportRoot(environment: [:])
-    try check(defaultRoot.lastPathComponent == "PaperCodex", "default support root should end in PaperCodex")
+    let tempApplicationSupportRoot = FileManager.default.temporaryDirectory
+        .appendingPathComponent("Episteme-path-check-\(UUID().uuidString)", isDirectory: true)
+        .appendingPathComponent("Application Support", isDirectory: true)
+    defer {
+        try? FileManager.default.removeItem(at: tempApplicationSupportRoot.deletingLastPathComponent())
+    }
+
+    let defaultRoot = PaperCodexPaths.supportRoot(environment: [:], applicationSupportDirectory: tempApplicationSupportRoot)
+    try check(defaultRoot.lastPathComponent == "Episteme", "default support root should end in Episteme")
     try check(defaultRoot.path.contains("Application Support"), "default support root should live under Application Support")
+
+    let legacyRoot = tempApplicationSupportRoot.appendingPathComponent("PaperCodex", isDirectory: true)
+    try FileManager.default.createDirectory(at: legacyRoot, withIntermediateDirectories: true)
+    try Data("legacy-library".utf8).write(to: legacyRoot.appendingPathComponent("store.sqlite"))
+    try PaperCodexPaths.migrateLegacySupportRootIfNeeded(
+        to: defaultRoot,
+        applicationSupportDirectory: tempApplicationSupportRoot
+    )
+    try check(FileManager.default.fileExists(atPath: defaultRoot.appendingPathComponent("store.sqlite").path), "legacy PaperCodex support data should migrate to Episteme")
+    try check(!FileManager.default.fileExists(atPath: legacyRoot.path), "legacy PaperCodex support directory should be moved after migration")
 }
 
 func runBundleChecks() throws {
@@ -5245,11 +5267,13 @@ func runBundleChecks() throws {
     try check(!script.contains(oldHost), "app bundle should not keep the old remote feed host")
     try check(!script.contains(insecureHTTPKey), "app bundle should not allow insecure HTTP for old feed hosts")
     try check(
-        script.contains("configuration=\"${PAPER_CODEX_BUILD_CONFIGURATION:-release}\"")
+        script.contains("configuration=\"${EPISTEME_BUILD_CONFIGURATION:-${PAPER_CODEX_BUILD_CONFIGURATION:-release}}\"")
             && script.contains("swift build -c \"$configuration\"")
             && script.contains("swift build -c \"$configuration\" --show-bin-path"),
         "installed app bundle should default to a Release build while keeping an explicit configuration override"
     )
+    try check(script.contains("app_path=\"${EPISTEME_APP_PATH:-${PAPER_CODEX_APP_PATH:-$HOME/Applications/Episteme.app}}\""), "bundle script should default to Episteme.app while keeping the legacy app-path override")
+    try check(script.contains("<string>Episteme</string>"), "app bundle display name should be Episteme")
     let katexResourceRoot = root.appendingPathComponent("Sources/PaperCodexApp/Resources/KaTeX")
     try check(
         script.contains("Sources/PaperCodexApp/Resources/KaTeX")

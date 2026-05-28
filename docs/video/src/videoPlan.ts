@@ -119,7 +119,7 @@ export const scenes: VideoScene[] = [
     duration: 185,
     eyebrow: "production goal",
     title: "研究体验的关键，是让上下文连续起来",
-    body: "Paper Codex 把论文、文件夹、标签、页面、AI 记录和生成资产放在同一个工作面里，让每一步都能自然接上下一步。",
+    body: "Episteme 把论文、文件夹、标签、页面、AI 记录和生成资产放在同一个工作面里，让每一步都能自然接上下一步。",
     cards: [
       {title: "文库归位", body: "文件夹、标签、收藏和论文详情在同一屏持续同步。", color: COLORS.blue},
       {title: "阅读锚定", body: "页面、缩放、论文选择和问答面板保持稳定关系。", color: COLORS.green},
@@ -301,7 +301,7 @@ export const scenes: VideoScene[] = [
     from: 2148,
     duration: 310,
     title: "最终效果：论文进入持续循环",
-    body: "Paper Codex 的核心价值，是把发现、保存、阅读、提问、生成和复盘连成一个稳定的桌面研究系统。",
+    body: "Episteme 的核心价值，是把发现、保存、阅读、提问、生成和复盘连成一个稳定的桌面研究系统。",
     steps: [
       {label: "发现", body: "arXiv 卡片筛选候选论文", color: COLORS.orange},
       {label: "保存", body: "进入本地文库和文件夹", color: COLORS.blue},
@@ -315,7 +315,7 @@ export const scenes: VideoScene[] = [
     kind: "closing",
     from: 2398,
     duration: 242,
-    title: "Paper Codex",
+    title: "Episteme",
     body: "面向真实研究工作的 macOS 论文工作台。",
     items: ["本地优先", "上下文连续", "AI 过程可检查"],
   },

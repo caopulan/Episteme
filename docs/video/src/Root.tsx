@@ -1,12 +1,12 @@
 import {Composition} from "remotion";
-import {PaperCodexIntro} from "./IntroVideo";
+import {EpistemeIntro} from "./IntroVideo";
 import {VIDEO} from "./videoPlan";
 
 export const RemotionRoot = () => {
   return (
     <Composition
-      id="PaperCodexIntro"
-      component={PaperCodexIntro}
+      id="EpistemeIntro"
+      component={EpistemeIntro}
       durationInFrames={VIDEO.durationInFrames}
       fps={VIDEO.fps}
       width={VIDEO.width}

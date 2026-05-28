@@ -386,7 +386,7 @@ public final class PromptTemplateStore {
                 task: "paper_reading",
                 name: "Grounded Reading",
                 body: """
-                Read {{paper_title}} for {{user_goal}}. Use the original PDF, full text, spans, and anchors before making paper-specific claims. Cite precise Paper Codex source IDs when quoting or judging details.
+                Read {{paper_title}} for {{user_goal}}. Use the original PDF, full text, spans, and anchors before making paper-specific claims. Cite precise Episteme source IDs when quoting or judging details.
                 """,
                 now: now
             ),
@@ -479,7 +479,7 @@ public final class PromptTemplateStore {
                 task: "citation_grounding",
                 name: "Citation Grounding",
                 body: """
-                Resolve {{selected_text}} in {{paper_title}} to Paper Codex page/span/anchor IDs. Do not invent source positions.
+                Resolve {{selected_text}} in {{paper_title}} to Episteme page/span/anchor IDs. Do not invent source positions.
                 """,
                 now: now
             ),

@@ -127,7 +127,7 @@ struct SettingsView: View {
 
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text("Paper Codex")
+            Text("Episteme")
                 .font(.paperCodexSystem(size: 24, weight: .semibold))
 
             PrimaryNavigationSection()
@@ -434,7 +434,7 @@ struct SettingsView: View {
     }
 
     private var codexMCPSettings: some View {
-        settingsSection(title: "Paper Codex MCP", systemImage: "point.3.connected.trianglepath.dotted") {
+        settingsSection(title: "Episteme MCP", systemImage: "point.3.connected.trianglepath.dotted") {
             Toggle(
                 "Enable for in-app Codex",
                 isOn: Binding(
@@ -471,7 +471,7 @@ struct SettingsView: View {
                 } label: {
                     Label(model.isInstallingCodexPlugin ? "Installing" : "Install / Update", systemImage: "puzzlepiece.extension")
                 }
-                .help("Install or update the Paper Codex plugin in local Codex")
+                .help("Install or update the Episteme plugin in local Codex")
             }
         }
     }

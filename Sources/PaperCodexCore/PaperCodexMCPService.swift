@@ -189,12 +189,12 @@ public final class PaperCodexMCPService: @unchecked Sendable {
 
     private func resourceList() throws -> [[String: Any]] {
         var resources: [[String: Any]] = [
-            resource(uri: "papercodex://papers", name: "Papers", description: "Saved Paper Codex papers."),
-            resource(uri: "papercodex://folders", name: "Folders", description: "Paper Codex folder tree."),
-            resource(uri: "papercodex://tags", name: "Tags", description: "Paper Codex tag list."),
-            resource(uri: "papercodex://sessions/recent", name: "Recent sessions", description: "Recent Paper Codex reading sessions."),
-            resource(uri: "papercodex://app/active-context", name: "Active app context", description: "Current Paper Codex route, paper, session, and selection snapshot."),
-            resource(uri: "papercodex://settings/prompt-templates", name: "Prompt templates", description: "Typed prompt templates managed by Paper Codex MCP."),
+            resource(uri: "papercodex://papers", name: "Papers", description: "Saved Episteme papers."),
+            resource(uri: "papercodex://folders", name: "Folders", description: "Episteme folder tree."),
+            resource(uri: "papercodex://tags", name: "Tags", description: "Episteme tag list."),
+            resource(uri: "papercodex://sessions/recent", name: "Recent sessions", description: "Recent Episteme reading sessions."),
+            resource(uri: "papercodex://app/active-context", name: "Active app context", description: "Current Episteme route, paper, session, and selection snapshot."),
+            resource(uri: "papercodex://settings/prompt-templates", name: "Prompt templates", description: "Typed prompt templates managed by Episteme MCP."),
             resource(uri: "papercodex://settings/prompt-templates/defaults", name: "Prompt template defaults", description: "Default prompt template id by task."),
             resource(uri: "papercodex://settings/prompt-templates/tasks", name: "Prompt template tasks", description: "Supported prompt-template task names."),
             resource(uri: "papercodex://settings/prompt-templates/variables", name: "Prompt template variables", description: "Variables used by all active prompt templates.")
@@ -228,7 +228,7 @@ public final class PaperCodexMCPService: @unchecked Sendable {
             resourceTemplate(uri: "papercodex://papers/{paper_id}/anchors", name: "Paper anchors", description: "User-created source anchors."),
             resourceTemplate(uri: "papercodex://papers/{paper_id}/annotations", name: "Paper annotations", description: "PDF annotation records."),
             resourceTemplate(uri: "papercodex://papers/{paper_id}/notes", name: "Paper notes", description: "Markdown notes for a paper."),
-            resourceTemplate(uri: "papercodex://papers/{paper_id}/digest", name: "Paper digest", description: "Durable structured digest stored as a Paper Codex note."),
+            resourceTemplate(uri: "papercodex://papers/{paper_id}/digest", name: "Paper digest", description: "Durable structured digest stored as an Episteme note."),
             resourceTemplate(uri: "papercodex://folders/{folder_id}", name: "Folder", description: "Folder metadata."),
             resourceTemplate(uri: "papercodex://folders/{folder_id}/papers", name: "Folder papers", description: "Papers assigned to a folder."),
             resourceTemplate(uri: "papercodex://tags/{tag_id}", name: "Tag", description: "Tag metadata."),
@@ -477,7 +477,7 @@ public final class PaperCodexMCPService: @unchecked Sendable {
 
     private func tools() -> [[String: Any]] {
         [
-            tool("paper.import_pdf", "Import a local PDF into the Paper Codex library.", ["source_path": "string", "title": "string", "authors": "array", "year": "integer", "source_url": "string", "folder_ids": "array", "tag_names": "array"], ["source_path"]),
+            tool("paper.import_pdf", "Import a local PDF into the Episteme library.", ["source_path": "string", "title": "string", "authors": "array", "year": "integer", "source_url": "string", "folder_ids": "array", "tag_names": "array"], ["source_path"]),
             tool("paper.list", "List saved papers.", [:], []),
             tool("paper.get", "Get paper metadata.", ["paper_id": "string"], ["paper_id"]),
             tool("paper.search", "Search title, author, source, folder, tag, or extracted text.", ["query": "string", "limit": "integer"], ["query"]),
@@ -513,13 +513,13 @@ public final class PaperCodexMCPService: @unchecked Sendable {
             tool("anchor.list", "List anchors for a paper.", ["paper_id": "string"], ["paper_id"]),
             tool("anchor.get", "Get an anchor.", ["anchor_id": "string"], ["anchor_id"]),
             tool("anchor.search", "Search anchors by selected text/context.", ["paper_id": "string", "query": "string"], ["paper_id", "query"]),
-            tool("citation.resolve", "Resolve a Paper Codex citation id to span or anchor metadata.", ["citation_id": "string"], ["citation_id"]),
-            tool("app.open_paper", "Ask the running Paper Codex app to open a paper.", ["paper_id": "string"], ["paper_id"]),
-            tool("app.reveal_paper", "Ask the running Paper Codex app to reveal a paper in Library.", ["paper_id": "string"], ["paper_id"]),
-            tool("app.open_folder", "Ask the running Paper Codex app to show a folder.", ["folder_id": "string"], ["folder_id"]),
-            tool("app.open_tag", "Ask the running Paper Codex app to show a tag.", ["tag_id": "string"], ["tag_id"]),
-            tool("app.jump_to_page", "Ask the running Paper Codex app to open a paper at a page.", ["paper_id": "string", "page": "integer"], ["paper_id", "page"]),
-            tool("app.jump_to_anchor", "Ask the running Paper Codex app to jump to an anchor or citation id.", ["anchor_id": "string"], ["anchor_id"]),
+            tool("citation.resolve", "Resolve an Episteme citation id to span or anchor metadata.", ["citation_id": "string"], ["citation_id"]),
+            tool("app.open_paper", "Ask the running Episteme app to open a paper.", ["paper_id": "string"], ["paper_id"]),
+            tool("app.reveal_paper", "Ask the running Episteme app to reveal a paper in Library.", ["paper_id": "string"], ["paper_id"]),
+            tool("app.open_folder", "Ask the running Episteme app to show a folder.", ["folder_id": "string"], ["folder_id"]),
+            tool("app.open_tag", "Ask the running Episteme app to show a tag.", ["tag_id": "string"], ["tag_id"]),
+            tool("app.jump_to_page", "Ask the running Episteme app to open a paper at a page.", ["paper_id": "string", "page": "integer"], ["paper_id", "page"]),
+            tool("app.jump_to_anchor", "Ask the running Episteme app to jump to an anchor or citation id.", ["anchor_id": "string"], ["anchor_id"]),
             tool("watched_folder.list", "List watched folders.", [:], []),
             tool("watched_folder.add", "Add a watched folder.", ["path": "string"], ["path"]),
             tool("watched_folder.remove", "Remove a watched folder.", ["folder_id": "string"], ["folder_id"]),
@@ -693,7 +693,7 @@ public final class PaperCodexMCPService: @unchecked Sendable {
         PromptTemplateStore.supportedTasks.map { task in
             [
                 "name": task,
-                "description": "Render the default Paper Codex prompt template for \(task).",
+                "description": "Render the default Episteme prompt template for \(task).",
                 "arguments": [
                     ["name": "paper_title", "description": "Paper title.", "required": false],
                     ["name": "user_goal", "description": "Current reading or organization goal.", "required": false],

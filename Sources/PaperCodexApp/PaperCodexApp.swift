@@ -62,7 +62,7 @@ struct RootView: View {
             guard let message else {
                 return
             }
-            model.postNotice(kind: .error, title: "Paper Codex", message: message, autoDismissAfter: nil)
+            model.postNotice(kind: .error, title: "Episteme", message: message, autoDismissAfter: nil)
             model.errorMessage = nil
         }
         .onAppear {
@@ -219,7 +219,7 @@ private struct RouteTransitionPlaceholder: View {
 
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text("Paper Codex")
+            Text("Episteme")
                 .font(.paperCodexSystem(size: 24, weight: .semibold))
 
             PrimaryNavigationSection()
@@ -260,7 +260,7 @@ struct PaperCodexCommands: Commands {
     @ObservedObject var navigation: AppNavigation
 
     var body: some Commands {
-        CommandMenu("Paper Codex") {
+        CommandMenu("Episteme") {
             Button("Library") {
                 model.goToLibrary()
             }

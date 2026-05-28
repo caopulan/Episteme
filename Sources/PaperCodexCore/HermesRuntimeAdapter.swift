@@ -6,7 +6,7 @@ public enum HermesRuntimeAdapterError: Error, CustomStringConvertible, Equatable
     public var description: String {
         switch self {
         case let .unsupportedExecutable(path):
-            "Hermes executable is not a Python entrypoint that Paper Codex can bridge: \(path)"
+            "Hermes executable is not a Python entrypoint that Episteme can bridge: \(path)"
         }
     }
 }

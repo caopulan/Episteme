@@ -130,7 +130,7 @@ public struct CodexPluginInstaller {
         let manifest: [String: Any] = [
             "name": Self.marketplaceName,
             "interface": [
-                "displayName": "Paper Codex"
+                "displayName": "Episteme"
             ],
             "plugins": [
                 [
@@ -197,24 +197,24 @@ public struct CodexPluginInstaller {
         [
             "name": Self.pluginName,
             "version": appVersion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "0.1.0" : appVersion,
-            "description": "Expose the local Paper Codex app, paper library, notes, tags, folders, reading sessions, and citation-aware workspace skills to Codex.",
-            "author": ["name": "Paper Codex"],
-            "homepage": "https://local.paper-codex.app",
+            "description": "Expose the local Episteme app, paper library, notes, tags, folders, reading sessions, and citation-aware workspace skills to Codex.",
+            "author": ["name": "Episteme"],
+            "homepage": "https://local.episteme.app",
             "license": "Local",
             "keywords": ["paper-codex", "papers", "research", "mcp", "skills"],
             "skills": "./skills/",
             "mcpServers": "./.mcp.json",
             "interface": [
-                "displayName": "Paper Codex",
-                "shortDescription": "Use Paper Codex library and reading sessions",
-                "longDescription": "Paper Codex lets Codex read local paper workspaces, manage paper metadata through MCP, and preserve exact citation markers back to the PDF.",
-                "developerName": "Paper Codex",
+                "displayName": "Episteme",
+                "shortDescription": "Use Episteme library and reading sessions",
+                "longDescription": "Episteme lets Codex read local paper workspaces, manage paper metadata through MCP, and preserve exact citation markers back to the PDF.",
+                "developerName": "Episteme",
                 "category": "Research",
                 "capabilities": ["Read", "Write"],
                 "defaultPrompt": [
-                    "Summarize the current Paper Codex paper with citations",
-                    "Add tags and notes to papers in Paper Codex",
-                    "Inspect my Paper Codex reading session workspace"
+                    "Summarize the current Episteme paper with citations",
+                    "Add tags and notes to papers in Episteme",
+                    "Inspect my Episteme reading session workspace"
                 ],
                 "brandColor": "#2563EB",
                 "screenshots": []
@@ -324,10 +324,10 @@ public struct CodexPluginInstaller {
     public static let mcpSkillMarkdown = """
     ---
     name: papercodex-mcp
-    description: Use when Codex needs to inspect or mutate the local Paper Codex library, paper notes, tags, folders, reading sessions, or citation-aware workspace state through Paper Codex MCP.
+    description: Use when Codex needs to inspect or mutate the local Episteme library, paper notes, tags, folders, reading sessions, or citation-aware workspace state through Episteme MCP.
     ---
 
-    # Paper Codex MCP
+    # Episteme MCP
 
     Use the `paper-codex` MCP server for app state changes. Use resources for state views and tools for mutations.
 
@@ -342,7 +342,7 @@ public struct CodexPluginInstaller {
     - `papercodex://sessions/{session_id}/prompt-contract`
     - `papercodex://settings/prompt-templates`
 
-    Use MCP tools for adding papers, tagging papers, moving papers between folders, creating notes, and navigating the app. Do not edit the Paper Codex SQLite store directly.
+    Use MCP tools for adding papers, tagging papers, moving papers between folders, creating notes, and navigating the app. Do not edit the Episteme SQLite store directly.
 
     Prompt templates are typed settings. Never invent a generic settings update; use prompt-template tools such as preview, validate, replace body, set variables, or set default for task.
     """
@@ -350,12 +350,12 @@ public struct CodexPluginInstaller {
     public static let agentWorkspaceSkillMarkdown = """
     ---
     name: papercodex-agent-workspace
-    description: Use when an agent is launched inside a Paper Codex reading-session workspace and must read paper files, follow citation contracts, or coordinate app/library changes through Paper Codex MCP.
+    description: Use when an agent is launched inside an Episteme reading-session workspace and must read paper files, follow citation contracts, or coordinate app/library changes through Episteme MCP.
     ---
 
-    # Paper Codex Agent Workspace
+    # Episteme Agent Workspace
 
-    Use this skill when your current working directory is a Paper Codex session workspace.
+    Use this skill when your current working directory is an Episteme session workspace.
 
     ## First Reads
 
@@ -389,11 +389,11 @@ public struct CodexPluginInstaller {
     - prompt template changes
     - importing or deleting library items
 
-    Do not edit the Paper Codex SQLite database or app support files directly.
+    Do not edit the Episteme SQLite database or app support files directly.
 
     ## Citation Contract
 
-    Ground paper claims with Paper Codex citation markers:
+    Ground paper claims with Episteme citation markers:
 
     ```text
     [[cite:paper:{paper_id}:p{page}:b{block_index}]]

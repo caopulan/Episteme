@@ -1042,6 +1042,7 @@ final class AppModel: ObservableObject {
         }
         discoverSelectedCategories = localDiscoverPreferences.categories.isEmpty ? ["cs.CV"] : [localDiscoverPreferences.categories[0]]
         do {
+            try PaperCodexPaths.migrateLegacySupportRootIfNeeded(to: root)
             try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
             let store = try PaperRepository(databasePath: root.appendingPathComponent("store.sqlite").path)
             try store.migrate()
@@ -1086,7 +1087,7 @@ final class AppModel: ObservableObject {
             refreshInstalledCodexPluginIfNeeded()
             startMCPCommandPolling()
         } catch {
-            errorMessage = "Paper Codex MCP server failed to start: \(String(describing: error))"
+            errorMessage = "Episteme MCP server failed to start: \(String(describing: error))"
         }
     }
 
@@ -1102,7 +1103,7 @@ final class AppModel: ObservableObject {
             )
             try mcpService?.writeActiveContextSnapshot(context)
         } catch {
-            errorMessage = "Paper Codex MCP context update failed: \(String(describing: error))"
+            errorMessage = "Episteme MCP context update failed: \(String(describing: error))"
         }
     }
 
@@ -1149,7 +1150,7 @@ final class AppModel: ObservableObject {
                 handleMCPCommand(command)
             }
         } catch {
-            errorMessage = "Paper Codex MCP command handling failed: \(String(describing: error))"
+            errorMessage = "Episteme MCP command handling failed: \(String(describing: error))"
         }
     }
 
@@ -1195,7 +1196,7 @@ final class AppModel: ObservableObject {
             }
             refreshMCPActiveContextSnapshot()
         } catch {
-            errorMessage = "Paper Codex MCP command failed: \(String(describing: error))"
+            errorMessage = "Episteme MCP command failed: \(String(describing: error))"
         }
     }
 
@@ -1751,7 +1752,7 @@ final class AppModel: ObservableObject {
             let trimmedAPIKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
             let effectiveAPIKey = trimmedAPIKey.isEmpty ? embeddingProviderAPIKeyValue() : trimmedAPIKey
             let client = try OpenAICompatibleEmbeddingClient(settings: settings, apiKey: effectiveAPIKey)
-            let vectors = try await client.embed(texts: ["Paper Codex embedding connection test."])
+            let vectors = try await client.embed(texts: ["Episteme embedding connection test."])
             let dimensions = vectors.first?.count ?? 0
             embeddingProviderTestStatus = "Connected · \(dimensions) dimensions"
             postNotice(kind: .success, title: "Embedding Test Passed", message: "\(dimensions) dimensions")
@@ -4205,14 +4206,14 @@ final class AppModel: ObservableObject {
         UserDefaults.standard.set(enabled, forKey: inAppCodexMCPEnabledDefaultsKey)
         postNotice(
             kind: .success,
-            title: enabled ? "Paper Codex MCP Enabled" : "Paper Codex MCP Disabled",
+            title: enabled ? "Episteme MCP Enabled" : "Episteme MCP Disabled",
             message: inAppCodexMCPStatusText
         )
     }
 
     func installOrUpdateCodexPlugin() async {
         guard let endpoint = mcpEndpoint else {
-            errorMessage = "Paper Codex MCP server is still starting."
+            errorMessage = "Episteme MCP server is still starting."
             return
         }
         isInstallingCodexPlugin = true
@@ -5620,7 +5621,7 @@ final class AppModel: ObservableObject {
         configuration.timeoutIntervalForRequest = 12
         configuration.timeoutIntervalForResource = 30
         var request = URLRequest(url: url)
-        request.setValue("PaperCodex/0.1 (+https://arxiv.org)", forHTTPHeaderField: "User-Agent")
+        request.setValue("Episteme/0.1 (+https://arxiv.org)", forHTTPHeaderField: "User-Agent")
         let (data, response) = try await URLSession(configuration: configuration).data(for: request)
         if let http = response as? HTTPURLResponse,
            !(200..<300).contains(http.statusCode) {
@@ -5722,7 +5723,7 @@ final class AppModel: ObservableObject {
         let schema = "{\n\(schemaLines.joined(separator: ",\n"))\n}"
         let tasks = taskLines.joined(separator: "\n")
         return """
-        You are helping Paper Codex enrich an arXiv discovery card.
+        You are helping Episteme enrich an arXiv discovery card.
         Return strict JSON only. Do not wrap the JSON in Markdown.
 
         Required JSON schema:
@@ -5892,7 +5893,7 @@ final class AppModel: ObservableObject {
             let executable = try PiRuntimeAdapter.findExecutable()
             return PiRuntimeAdapter(executablePath: executable).terminalCommand(
                 workspacePath: session.workspacePath,
-                systemPrompt: "Use Paper Codex citations.",
+                systemPrompt: "Use Episteme citations.",
                 agentInstructionsPath: FileManager.default.fileExists(atPath: agentInstructionsPath) ? agentInstructionsPath : nil
             )
         }

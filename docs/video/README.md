@@ -1,6 +1,6 @@
-# Paper Codex Remotion Video
+# Episteme Remotion Video
 
-This folder contains the Remotion source for the Paper Codex introduction video. The current composition is an 88-second, config-driven product walkthrough built from real app screenshots, generated-image output, in-app preview captures, animated cursor motion, focus zoom targets, callouts, and a chapter progress rail.
+This folder contains the Remotion source for the Episteme introduction video. The current composition is an 88-second, config-driven product walkthrough built from real app screenshots, generated-image output, in-app preview captures, animated cursor motion, focus zoom targets, callouts, and a chapter progress rail.
 
 The production structure follows the same workflow used by walkthrough-video and Remotion production skills:
 
@@ -28,7 +28,7 @@ npm run render
 The render script copies the current app icon and documentation screenshots into the local Remotion `public/` folder, then writes:
 
 ```text
-../assets/videos/paper-codex-intro.mp4
+../assets/videos/episteme-intro.mp4
 ```
 
 The generated `public/` directory is intentionally ignored because it only mirrors assets already tracked elsewhere in the repository.

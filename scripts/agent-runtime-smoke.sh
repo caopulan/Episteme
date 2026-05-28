@@ -7,8 +7,8 @@ Usage: scripts/agent-runtime-smoke.sh [--codex] [--claude] [--kimi-openclaw] [--
 
 Options:
   --all              Run Codex, Claude Code, OpenClaw Kimi, Hermes Kimi, and pi routes.
-  --codex            Run codex exec in a fixture Paper Codex workspace.
-  --claude           Run claude --print in a fixture Paper Codex workspace.
+  --codex            Run codex exec in a fixture Episteme workspace.
+  --claude           Run claude --print in a fixture Episteme workspace.
   --kimi-openclaw    Run openclaw agent --local --json with OPENCLAW_MODEL.
   --hermes-kimi      Run hermes chat through the Kimi provider.
   --pi               Run pi print mode in the fixture workspace.
@@ -102,12 +102,19 @@ json_value() {
 
 detect_mcp_metadata() {
   local candidates=()
+  if [ "${EPISTEME_MCP_METADATA:-}" != "" ]; then
+    candidates+=("$EPISTEME_MCP_METADATA")
+  fi
   if [ "${PAPER_CODEX_MCP_METADATA:-}" != "" ]; then
     candidates+=("$PAPER_CODEX_MCP_METADATA")
+  fi
+  if [ "${EPISTEME_SUPPORT_ROOT:-}" != "" ]; then
+    candidates+=("$EPISTEME_SUPPORT_ROOT/mcp/server.json")
   fi
   if [ "${PAPER_CODEX_SUPPORT_ROOT:-}" != "" ]; then
     candidates+=("$PAPER_CODEX_SUPPORT_ROOT/mcp/server.json")
   fi
+  candidates+=("$HOME/Library/Application Support/Episteme/mcp/server.json")
   candidates+=("$HOME/Library/Application Support/PaperCodex/mcp/server.json")
 
   local candidate
@@ -163,9 +170,9 @@ cat >"$workspace/session.json" <<'JSON'
 JSON
 
 cat >"$workspace/prompt_contract.md" <<'MARKDOWN'
-# Paper Codex Prompt Contract
+# Episteme Prompt Contract
 
-Use Paper Codex citation markers for grounded paper claims:
+Use Episteme citation markers for grounded paper claims:
 
 [[cite:paper:{paper_id}:p{page}:b{block_index}]]
 [[cite:paper:{paper_id}:p{page}:a{anchor_suffix}]]
@@ -177,26 +184,26 @@ cat >"$workspace/agent_instructions.md" <<'MARKDOWN'
 Read workspace_manifest.json and prompt_contract.md before answering.
 Use workspace files for source reading and generated artifacts.
 Use MCP tools for app state changes.
-Do not mutate the Paper Codex library during this smoke test.
+Do not mutate the Episteme library during this smoke test.
 MARKDOWN
 
 cat >"$workspace/papers/smoke-paper/metadata.json" <<'JSON'
 {
   "paper_id": "smoke-paper",
-  "title": "Paper Codex Runtime Smoke Paper"
+  "title": "Episteme Runtime Smoke Paper"
 }
 JSON
 
 cat >"$workspace/papers/smoke-paper/full_text.txt" <<'TEXT'
-[[cite:paper:smoke-paper:p1:b0]] Paper Codex runtime smoke tests verify workspace and prompt-contract visibility.
+[[cite:paper:smoke-paper:p1:b0]] Episteme runtime smoke tests verify workspace and prompt-contract visibility.
 TEXT
 
 cat >"$workspace/papers/smoke-paper/spans.jsonl" <<'JSONL'
-{"id":"paper:smoke-paper:p1:b0","paper_id":"smoke-paper","page":1,"text":"Paper Codex runtime smoke tests verify workspace and prompt-contract visibility."}
+{"id":"paper:smoke-paper:p1:b0","paper_id":"smoke-paper","page":1,"text":"Episteme runtime smoke tests verify workspace and prompt-contract visibility."}
 JSONL
 
 cat >"$workspace/papers/smoke-paper/pages.jsonl" <<'JSONL'
-{"paper_id":"smoke-paper","page":1,"text":"Paper Codex runtime smoke tests verify workspace and prompt-contract visibility.","confidence":1.0}
+{"paper_id":"smoke-paper","page":1,"text":"Episteme runtime smoke tests verify workspace and prompt-contract visibility.","confidence":1.0}
 JSONL
 
 cat >"$workspace/papers/smoke-paper/anchors.jsonl" <<'JSONL'
@@ -220,7 +227,7 @@ manifest = {
   "agent_instructions_path" => File.join(workspace, "agent_instructions.md"),
   "papers" => [{
     "paper_id" => "smoke-paper",
-    "title" => "Paper Codex Runtime Smoke Paper",
+    "title" => "Episteme Runtime Smoke Paper",
     "original_pdf_path" => File.join(workspace, "papers/smoke-paper/original.pdf"),
     "full_text_path" => File.join(workspace, "papers/smoke-paper/full_text.txt"),
     "pages_jsonl_path" => File.join(workspace, "papers/smoke-paper/pages.jsonl"),
@@ -235,7 +242,7 @@ File.write(File.join(workspace, "workspace_manifest.json"), JSON.pretty_generate
 make_prompt() {
   local runtime="$1"
   cat <<PROMPT
-You are running a Paper Codex local runtime smoke test for ${runtime}.
+You are running an Episteme local runtime smoke test for ${runtime}.
 
 Working directory: ${workspace}
 Read workspace_manifest.json, prompt_contract.md, agent_instructions.md, and papers/smoke-paper/full_text.txt.
@@ -250,8 +257,8 @@ Return strict JSON only with exactly these keys:
 
 Set workspace_seen true only if workspace_manifest.json is visible.
 Set citation_contract_seen true only if the prompt contract contains [[cite:paper:{paper_id}:p{page}:b{block_index}]].
-Set mcp_endpoint_seen according to whether mcp.json contains a Paper Codex endpoint.
-Do not modify Paper Codex app state.
+Set mcp_endpoint_seen according to whether mcp.json contains an Episteme endpoint.
+Do not modify Episteme app state.
 PROMPT
 }
 
@@ -317,7 +324,7 @@ fi
 if [ "$run_claude" -eq 1 ]; then
   require_executable claude
   prompt=$(make_prompt "claude-code")
-  claude_args=(--print --output-format stream-json --verbose --system-prompt "Use Paper Codex workspace files and return strict JSON only." "--add-dir=$workspace")
+  claude_args=(--print --output-format stream-json --verbose --system-prompt "Use Episteme workspace files and return strict JSON only." "--add-dir=$workspace")
   if [ "$mcp_config_path" != "" ]; then
     claude_args+=("--mcp-config=$mcp_config_path")
   fi
@@ -352,5 +359,5 @@ if [ "$run_pi" -eq 1 ]; then
   require_executable pi
   prompt=$(make_prompt "pi")
   run_and_verify "pi" "$workspace/turns/pi-output.log" \
-    pi -p --mode json --session-dir "$workspace/agent-sessions/pi" --system-prompt "Use Paper Codex workspace files and return strict JSON only." --append-system-prompt "$workspace/agent_instructions.md" "$prompt"
+    pi -p --mode json --session-dir "$workspace/agent-sessions/pi" --system-prompt "Use Episteme workspace files and return strict JSON only." --append-system-prompt "$workspace/agent_instructions.md" "$prompt"
 fi

@@ -1,16 +1,16 @@
-# Paper Codex Showcase
+# Episteme Showcase
 
 <p align="center">
   <a href="showcase.zh-CN.md">简体中文</a> · <strong>English</strong>
 </p>
 
-This page gives a visual tour of the current Paper Codex interface. The screenshots were captured from the native macOS app with a real local research library, so they show the intended day-to-day product flow rather than placeholder mockups.
+This page gives a visual tour of the current Episteme interface. The screenshots were captured from the native macOS app with a real local research library, so they show the intended day-to-day product flow rather than placeholder mockups.
 
 ## Intro Video
 
-The Remotion source lives in [docs/video](video). The rendered video is a detailed product walkthrough using real Paper Codex screenshots, generated-image output, in-app preview captures, and animated focus moves that zoom into the relevant controls:
+The Remotion source lives in [docs/video](video). The rendered video is a detailed product walkthrough using real Episteme screenshots, generated-image output, in-app preview captures, and animated focus moves that zoom into the relevant controls:
 
-[docs/assets/videos/paper-codex-intro.mp4](assets/videos/paper-codex-intro.mp4)
+[docs/assets/videos/episteme-intro.mp4](assets/videos/episteme-intro.mp4)
 
 ## 1. Reader And Codex Chat
 
@@ -55,11 +55,11 @@ What this screen demonstrates:
 
 ![Generated image output](assets/screenshots/generated-output.png)
 
-Generated images can become part of the research session. Paper Codex keeps the asset in the session workspace and can bring it back into the reading flow for in-app preview.
+Generated images can become part of the research session. Episteme keeps the asset in the session workspace and can bring it back into the reading flow for in-app preview.
 
 ![In-app generated image preview](assets/screenshots/in-app-image-preview.png)
 
-The video uses this real preview state to show generated images being inspected inside Paper Codex rather than opened as external files.
+The video uses this real preview state to show generated images being inspected inside Episteme rather than opened as external files.
 
 ## 5. Sessions And Settings
 
@@ -85,7 +85,7 @@ The screenshots are intentionally real product captures. If the UI changes, refr
 
 ```bash
 scripts/build-app-bundle.sh
-open "$HOME/Applications/PaperCodex.app"
+open "$HOME/Applications/Episteme.app"
 ```
 
 Then replace the images in:

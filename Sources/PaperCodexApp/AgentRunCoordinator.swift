@@ -354,7 +354,7 @@ final class AgentRunCoordinator {
             return ClaudeCodeRuntimeAdapter(executablePath: executable).nonInteractiveCommand(
                 prompt: prompt,
                 workspacePath: session.workspacePath,
-                systemPrompt: "Use the Paper Codex citation contract and workspace files.",
+                systemPrompt: "Use the Episteme citation contract and workspace files.",
                 mcpConfigPath: FileManager.default.fileExists(atPath: mcpConfigPath) ? mcpConfigPath : nil
             )
         case .hermes:
@@ -379,7 +379,7 @@ final class AgentRunCoordinator {
             return PiRuntimeAdapter(executablePath: executable).nonInteractiveCommand(
                 prompt: prompt,
                 workspacePath: session.workspacePath,
-                systemPrompt: "Use Paper Codex citations.",
+                systemPrompt: "Use Episteme citations.",
                 agentInstructionsPath: FileManager.default.fileExists(atPath: agentInstructionsPath) ? agentInstructionsPath : nil
             )
         }

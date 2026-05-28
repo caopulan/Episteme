@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="docs/assets/logo-rounded.png" alt="Paper Codex logo" width="132">
+  <img src="docs/assets/logo-rounded.png" alt="Episteme logo" width="132">
 </p>
 
-<h1 align="center">Paper Codex</h1>
+<h1 align="center">Episteme</h1>
 
 <p align="center">
   A local-first macOS paper library with native PDF reading and Codex-backed research sessions.
@@ -29,13 +29,13 @@
   <a href="#architecture">🧱 Architecture</a>
 </p>
 
-Paper Codex is a native macOS workspace for reading, organizing, and discussing academic papers. It keeps PDFs, folders, tags, notes, arXiv caches, thumbnails, reading sessions, and generated outputs on your machine, while using the Codex CLI when you want an AI research assistant inside a paper-specific workspace.
+Episteme is a native macOS workspace for reading, organizing, and discussing academic papers. It keeps PDFs, folders, tags, notes, arXiv caches, thumbnails, reading sessions, and generated outputs on your machine, while using the Codex CLI when you want an AI research assistant inside a paper-specific workspace.
 
 It is built for researchers who want the speed and feel of a local paper manager, plus grounded chat over the actual PDF, clickable citations back to source regions, and local arXiv discovery without a hosted product backend.
 
 ## Intro Video
 
-Watch the detailed Remotion product walkthrough with animated UI focus moves: [docs/assets/videos/paper-codex-intro.mp4](docs/assets/videos/paper-codex-intro.mp4).
+Watch the detailed Remotion product walkthrough with animated UI focus moves: [docs/assets/videos/episteme-intro.mp4](docs/assets/videos/episteme-intro.mp4).
 
 ## Screenshots
 
@@ -72,7 +72,7 @@ See the full visual tour in [docs/showcase.md](docs/showcase.md).
 - 🔭 **Local arXiv Explore** - browse arXiv metadata directly, cache feeds/PDFs/thumbnails, and save papers into the local library.
 - ✨ **Codex enrichment** - process Explore results for Chinese titles, summaries, contribution notes, tags, and useful links.
 - 🧭 **Similarity ranking** - optionally rank arXiv results against local folders or tags using an OpenAI-compatible embedding provider.
-- 🔒 **Local-first storage** - no Paper Codex account, cloud sync, or product API is required for the current version.
+- 🔒 **Local-first storage** - no Episteme account, cloud sync, or product API is required for the current version.
 
 ## Installation
 
@@ -93,28 +93,28 @@ codex --version
 ### Build the app bundle
 
 ```bash
-git clone https://github.com/caopulan/PaperCodex.git
-cd PaperCodex
+git clone https://github.com/caopulan/Episteme.git
+cd Episteme
 scripts/build-app-bundle.sh
-open "$HOME/Applications/PaperCodex.app"
+open "$HOME/Applications/Episteme.app"
 ```
 
 By default, the build script installs the signed local app bundle at:
 
 ```text
-~/Applications/PaperCodex.app
+~/Applications/Episteme.app
 ```
 
 You can override the output path:
 
 ```bash
-PAPER_CODEX_APP_PATH="$PWD/build/PaperCodex.app" scripts/build-app-bundle.sh
-open "$PWD/build/PaperCodex.app"
+EPISTEME_APP_PATH="$PWD/build/Episteme.app" scripts/build-app-bundle.sh
+open "$PWD/build/Episteme.app"
 ```
 
 ## Quick Start
 
-1. Open **Paper Codex**.
+1. Open **Episteme**.
 2. Import a PDF from the Library page, or open Discover and fetch recent arXiv papers.
 3. Open a paper in the reader.
 4. Select a sentence or paragraph in the PDF.
@@ -134,13 +134,13 @@ Compare this paper with the other papers in the current session. Which assumptio
 Use imagegen to create a figure that explains this paper's training pipeline.
 ```
 
-When image generation succeeds, Paper Codex copies the generated asset into the session workspace and renders it in the chat. Click the thumbnail to open an in-app zoomable preview instead of leaving the reader.
+When image generation succeeds, Episteme copies the generated asset into the session workspace and renders it in the chat. Click the thumbnail to open an in-app zoomable preview instead of leaving the reader.
 
 ## Daily Workflow
 
 ### Organize a Local Library
 
-Paper Codex stores saved PDFs and metadata locally. Use the Library sidebar as a folder tree, then narrow the paper list with search, folder scope, and reading actions.
+Episteme stores saved PDFs and metadata locally. Use the Library sidebar as a folder tree, then narrow the paper list with search, folder scope, and reading actions.
 
 ```text
 Library
@@ -175,13 +175,13 @@ Codex runs are not hidden behind a remote service. Session files live on disk, a
 The default support directory is:
 
 ```text
-~/Library/Application Support/PaperCodex
+~/Library/Application Support/Episteme
 ```
 
 Typical contents:
 
 ```text
-PaperCodex/
+Episteme/
 ├── store.sqlite
 ├── papers/
 ├── sessions/
@@ -193,7 +193,7 @@ PaperCodex/
 For development or experiments, isolate app data with:
 
 ```bash
-PAPER_CODEX_SUPPORT_ROOT="$PWD/.papercodex-dev" swift run PaperCodexApp
+EPISTEME_SUPPORT_ROOT="$PWD/.episteme-dev" swift run PaperCodexApp
 ```
 
 ## Development
@@ -230,7 +230,7 @@ Run local agent runtime smoke checks against a safe fixture workspace:
 scripts/agent-runtime-smoke.sh --codex --claude --kimi-openclaw
 ```
 
-The smoke script verifies that Codex, Claude Code, and the OpenClaw Kimi route can see `workspace_manifest.json`, the Paper Codex citation contract, and the live MCP endpoint when the app is running. It is read-only by default and does not mutate library papers, folders, tags, or notes.
+The smoke script verifies that Codex, Claude Code, and the OpenClaw Kimi route can see `workspace_manifest.json`, the Episteme citation contract, and the live MCP endpoint when the app is running. It is read-only by default and does not mutate library papers, folders, tags, or notes.
 
 If OpenClaw Kimi is blocked by local account or membership state, use the configured Hermes Kimi route:
 
@@ -238,7 +238,7 @@ If OpenClaw Kimi is blocked by local account or membership state, use the config
 scripts/agent-runtime-smoke.sh --hermes-kimi
 ```
 
-To expose Paper Codex to local Codex outside the in-app session, open Settings -> Paper Codex MCP and click **Install / Update**. The app writes a local Codex marketplace, plugin cache entry, MCP endpoint config, and Paper Codex skills. If the app moves ports or ships newer plugin/skill content, the same button refreshes the installed plugin; an already-installed plugin is also refreshed on Paper Codex startup.
+To expose Episteme to local Codex outside the in-app session, open Settings -> Episteme MCP and click **Install / Update**. The app writes a local Codex marketplace, plugin cache entry, MCP endpoint config, and Episteme skills. If the app moves ports or ships newer plugin/skill content, the same button refreshes the installed plugin; an already-installed plugin is also refreshed on Episteme startup.
 
 Build the distributable local app bundle:
 
@@ -248,7 +248,7 @@ scripts/build-app-bundle.sh
 
 ## Architecture
 
-Paper Codex is split into a SwiftUI macOS shell and a local core library.
+Episteme is split into a SwiftUI macOS shell and a local core library.
 
 ```text
 Sources/
@@ -282,12 +282,14 @@ Most user-facing configuration is available in the Settings page:
 The app also respects:
 
 ```bash
-PAPER_CODEX_SUPPORT_ROOT=/custom/support/root
-PAPER_CODEX_APP_PATH=/custom/PaperCodex.app
-PAPER_CODEX_BUILD_CONFIGURATION=release
-PAPER_CODEX_BUNDLE_IDENTIFIER=local.paper-codex.app
-PAPER_CODEX_CODESIGN_IDENTITY=-
+EPISTEME_SUPPORT_ROOT=/custom/support/root
+EPISTEME_APP_PATH=/custom/Episteme.app
+EPISTEME_BUILD_CONFIGURATION=release
+EPISTEME_BUNDLE_IDENTIFIER=local.episteme.app
+EPISTEME_CODESIGN_IDENTITY=-
 ```
+
+The legacy `PAPER_CODEX_*` environment variables are still accepted for existing development scripts and local setups.
 
 ## Current Limitations
 
@@ -309,22 +311,22 @@ codex --version
 codex exec --help
 ```
 
-Paper Codex checks for `codex` in `PATH` and common install locations, including the Codex app bundle and Homebrew paths.
+Episteme checks for `codex` in `PATH` and common install locations, including the Codex app bundle and Homebrew paths.
 
 ### Reset local development data
 
 Use an isolated support root while testing:
 
 ```bash
-rm -rf "$PWD/.papercodex-dev"
-PAPER_CODEX_SUPPORT_ROOT="$PWD/.papercodex-dev" swift run PaperCodexApp
+rm -rf "$PWD/.episteme-dev"
+EPISTEME_SUPPORT_ROOT="$PWD/.episteme-dev" swift run PaperCodexApp
 ```
 
 ### Rebuild the installed app
 
 ```bash
 scripts/build-app-bundle.sh
-open "$HOME/Applications/PaperCodex.app"
+open "$HOME/Applications/Episteme.app"
 ```
 
 ## Contributing
@@ -346,4 +348,4 @@ Keep changes grounded in the local-first product boundary: local library, local 
 
 ## License
 
-No open source license file is currently included in this repository. Add a `LICENSE` file before relying on Paper Codex as open source software.
+No open source license file is currently included in this repository. Add a `LICENSE` file before relying on Episteme as open source software.

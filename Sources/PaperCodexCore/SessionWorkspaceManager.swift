@@ -230,7 +230,7 @@ public final class SessionWorkspaceManager {
     }
 
     public static let promptContract = """
-    # Paper Codex Prompt Contract
+    # Episteme Prompt Contract
 
     The original PDF is the primary source. Use the full local index files as navigation aids.
 
@@ -251,11 +251,11 @@ public final class SessionWorkspaceManager {
     """
 
     public static let agentInstructions = """
-    # Paper Codex Agent Workspace
+    # Episteme Agent Workspace
 
-    You are running inside a Paper Codex session workspace.
+    You are running inside an Episteme session workspace.
 
-    Use Paper Codex MCP for library, tag, folder, note, and app navigation actions.
+    Use Episteme MCP for library, tag, folder, note, and app navigation actions.
     Use the workspace files for reading paper source content.
 
     The citation contract is strict:

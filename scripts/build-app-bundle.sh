@@ -4,14 +4,14 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$repo_root"
 
-configuration="${PAPER_CODEX_BUILD_CONFIGURATION:-release}"
+configuration="${EPISTEME_BUILD_CONFIGURATION:-${PAPER_CODEX_BUILD_CONFIGURATION:-release}}"
 
 swift build -c "$configuration"
 
 binary_path="$(swift build -c "$configuration" --show-bin-path)/PaperCodexApp"
-app_path="${PAPER_CODEX_APP_PATH:-$HOME/Applications/PaperCodex.app}"
-bundle_identifier="${PAPER_CODEX_BUNDLE_IDENTIFIER:-local.paper-codex.app}"
-codesign_identity="${PAPER_CODEX_CODESIGN_IDENTITY:--}"
+app_path="${EPISTEME_APP_PATH:-${PAPER_CODEX_APP_PATH:-$HOME/Applications/Episteme.app}}"
+bundle_identifier="${EPISTEME_BUNDLE_IDENTIFIER:-${PAPER_CODEX_BUNDLE_IDENTIFIER:-local.episteme.app}}"
+codesign_identity="${EPISTEME_CODESIGN_IDENTITY:-${PAPER_CODEX_CODESIGN_IDENTITY:--}}"
 contents_path="$app_path/Contents"
 macos_path="$contents_path/MacOS"
 resources_path="$contents_path/Resources"
@@ -19,7 +19,7 @@ resources_path="$contents_path/Resources"
 rm -rf "$app_path"
 mkdir -p "$(dirname "$app_path")"
 mkdir -p "$macos_path" "$resources_path"
-cp "$binary_path" "$macos_path/PaperCodexApp"
+cp "$binary_path" "$macos_path/Episteme"
 cp Sources/PaperCodexApp/Resources/AppIcon.icns "$resources_path/AppIcon.icns"
 if [[ -d "Sources/PaperCodexApp/Resources/KaTeX" ]]; then
   cp -R Sources/PaperCodexApp/Resources/KaTeX "$resources_path/KaTeX"
@@ -35,13 +35,13 @@ cat > "$contents_path/Info.plist" <<PLIST
 <plist version="1.0">
 <dict>
   <key>CFBundleExecutable</key>
-  <string>PaperCodexApp</string>
+  <string>Episteme</string>
   <key>CFBundleIdentifier</key>
   <string>${bundle_identifier}</string>
   <key>CFBundleName</key>
-  <string>Paper Codex</string>
+  <string>Episteme</string>
   <key>CFBundleDisplayName</key>
-  <string>Paper Codex</string>
+  <string>Episteme</string>
   <key>CFBundleDevelopmentRegion</key>
   <string>en</string>
   <key>CFBundleIconFile</key>

@@ -1,1 +1,1 @@
-export {PaperCodexIntro} from "./WalkthroughComposition";
+export {EpistemeIntro} from "./WalkthroughComposition";

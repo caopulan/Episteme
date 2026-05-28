@@ -3,7 +3,7 @@
 import PackageDescription
 
 let package = Package(
-    name: "PaperCodex",
+    name: "Episteme",
     platforms: [
         .macOS(.v14)
     ],

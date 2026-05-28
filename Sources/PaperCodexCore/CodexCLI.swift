@@ -524,7 +524,7 @@ public struct CodexDiagnostic: Equatable, Sendable {
         return CodexDiagnostic(
             severity: .ready,
             title: "Codex ready",
-            detail: "CLI \(version ?? "unknown version") supports Paper Codex sessions.\(modelDetail)",
+            detail: "CLI \(version ?? "unknown version") supports Episteme sessions.\(modelDetail)",
             executablePath: executablePath,
             version: version,
             capabilities: capabilities

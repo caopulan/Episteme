@@ -81,7 +81,7 @@ const BrandMark = ({compact = false}: {compact?: boolean}) => (
         boxShadow: "0 22px 54px rgba(31, 122, 255, 0.24)",
       }}
     />
-    <span>Paper Codex</span>
+    <span>Episteme</span>
   </div>
 );
 
@@ -870,7 +870,7 @@ const SceneRenderer = ({scene}: {scene: VideoScene}) => {
   return <ClosingSceneView scene={scene} />;
 };
 
-export const PaperCodexIntro = () => (
+export const EpistemeIntro = () => (
   <AbsoluteFill style={{background: COLORS.soft}}>
     {scenes.map((scene) => (
       <SceneRenderer key={scene.id} scene={scene} />

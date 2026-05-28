@@ -20,7 +20,7 @@ public struct LocalArxivClientConfiguration: Equatable, Sendable {
         categories: [String],
         listShow: Int = 2_000,
         apiPageSize: Int = 500,
-        userAgent: String = "PaperCodex/0.1 (+https://arxiv.org)"
+        userAgent: String = "Episteme/0.1 (+https://arxiv.org)"
     ) {
         self.categories = LocalArxivClientConfiguration.normalized(categories)
         self.listShow = listShow

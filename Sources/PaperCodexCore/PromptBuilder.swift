@@ -4,7 +4,7 @@ public enum PromptDefaults {
     public static let workspacePathPlaceholder = "{{workspace_path}}"
 
     public static let codexSystemPrompt = """
-    You are Codex inside Paper Codex, a local-first paper-reading workspace.
+    You are Codex inside Episteme, a local-first paper-reading workspace.
 
     workspace: {{workspace_path}}
 
@@ -23,7 +23,7 @@ public enum PromptDefaults {
     - If evidence is insufficient, say what is missing and give the most useful bounded answer.
 
     Paper evidence and citations:
-    - Cite Paper Codex source positions exactly as [[cite:paper:{paper_id}:p{page}:b{block_index}]] or [[cite:paper:{paper_id}:p{page}:a{anchor_suffix}]].
+    - Cite Episteme source positions exactly as [[cite:paper:{paper_id}:p{page}:b{block_index}]] or [[cite:paper:{paper_id}:p{page}:a{anchor_suffix}]].
     - Use citations sparingly: normally use one citation marker for the answer, and use at most three citation markers unless the user explicitly asks for an evidence audit.
     - Put citation markers at the end of the paragraph or bullet they support.
     - Use direct quotes when they clarify a key claim, method, or result. Keep quotes short, format them with Markdown block quotes, and cite them immediately.
@@ -58,7 +58,7 @@ public enum PromptDefaults {
     """
 
     public static let chineseCodexSystemPrompt = """
-    你是 Paper Codex 中的 Codex，一个本地优先的论文阅读工作区助手。
+    你是 Episteme 中的 Codex，一个本地优先的论文阅读工作区助手。
 
     workspace: {{workspace_path}}
 
@@ -77,7 +77,7 @@ public enum PromptDefaults {
     - 如果证据不足，要说明缺少什么，并给出最有用的有边界回答。
 
     论文证据和引用：
-    - Paper Codex 来源位置必须严格写成 [[cite:paper:{paper_id}:p{page}:b{block_index}]] 或 [[cite:paper:{paper_id}:p{page}:a{anchor_suffix}]]。
+    - Episteme 来源位置必须严格写成 [[cite:paper:{paper_id}:p{page}:b{block_index}]] 或 [[cite:paper:{paper_id}:p{page}:a{anchor_suffix}]]。
     - 引用要稀疏：通常一个回答只放一个引用标记；除非用户明确要求证据审计，否则最多使用三个引用标记。
     - 引用标记放在它支持的段落或 bullet 末尾。
     - 直接引用只在澄清关键主张、方法或结果时使用。引用要短，用 Markdown block quote，并立即标注引用。
@@ -194,9 +194,9 @@ public enum PaperCodexLanguageMode: String, Codable, CaseIterable, Identifiable,
         case .automatic:
             "Global language preference: Automatic. Match the user's language for each answer unless the user explicitly asks for a different language. The app interface follows the system language when possible."
         case .chinese:
-            "全局语言偏好：中文。Paper Codex 的界面语言、Discover 元数据、快捷提示和默认系统提示都应以中文为主；除非用户明确要求其他语言，否则默认用中文回答。"
+            "全局语言偏好：中文。Episteme 的界面语言、Discover 元数据、快捷提示和默认系统提示都应以中文为主；除非用户明确要求其他语言，否则默认用中文回答。"
         case .english:
-            "Global language preference: English. Paper Codex interface language, Discover metadata, quick prompts, and the default system prompt should use English. Answer in English by default unless the user explicitly asks for a different language."
+            "Global language preference: English. Episteme interface language, Discover metadata, quick prompts, and the default system prompt should use English. Answer in English by default unless the user explicitly asks for a different language."
         }
     }
 }

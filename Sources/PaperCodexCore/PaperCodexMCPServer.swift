@@ -30,13 +30,13 @@ public enum PaperCodexMCPServerError: Error, CustomStringConvertible, Equatable 
     public var description: String {
         switch self {
         case .couldNotBind:
-            "Could not bind Paper Codex MCP server to a localhost port."
+            "Could not bind Episteme MCP server to a localhost port."
         case let .socketFailed(message):
-            "Paper Codex MCP server socket failed: \(message)"
+            "Episteme MCP server socket failed: \(message)"
         case .invalidRequest:
             "Invalid HTTP request."
         case .unauthorized:
-            "Missing or invalid Paper Codex MCP token."
+            "Missing or invalid Episteme MCP token."
         }
     }
 }

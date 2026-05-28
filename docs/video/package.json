@@ -1,11 +1,11 @@
 {
-  "name": "paper-codex-intro-video",
+  "name": "episteme-intro-video",
   "private": true,
   "version": "0.1.0",
   "type": "module",
   "scripts": {
     "prepare-assets": "node scripts/prepare-assets.mjs",
-    "render": "npm run prepare-assets && remotion render src/index.tsx PaperCodexIntro ../assets/videos/paper-codex-intro.mp4 --codec=h264 --crf=23 --pixel-format=yuv420p",
+    "render": "npm run prepare-assets && remotion render src/index.tsx EpistemeIntro ../assets/videos/episteme-intro.mp4 --codec=h264 --crf=23 --pixel-format=yuv420p",
     "studio": "npm run prepare-assets && remotion studio src/index.tsx"
   },
   "dependencies": {
