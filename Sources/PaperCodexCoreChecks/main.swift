@@ -817,6 +817,73 @@ func runLibraryCategoryAssignmentChecks() throws {
     }
 }
 
+func runCategoryMovePlannerChecks() throws {
+    let diffusion = Category(id: "cat-diffusion", parentID: nil, name: "Diffusion", sortOrder: 10)
+    let rl = Category(id: "cat-rl", parentID: diffusion.id, name: "RL", sortOrder: 10)
+    let reward = Category(id: "cat-reward", parentID: rl.id, name: "reward model", sortOrder: 10)
+    let forward = Category(id: "cat-forward", parentID: rl.id, name: "forward-rl", sortOrder: 20)
+    let grpo = Category(id: "cat-grpo", parentID: rl.id, name: "GRPO改进", sortOrder: 30)
+    let opd = Category(id: "cat-opd", parentID: rl.id, name: "OPD", sortOrder: 40)
+    let categories = [diffusion, rl, reward, forward, grpo, opd]
+
+    try check(
+        CategoryMovePlanner.canDropCategory(
+            "cat-rl",
+            ontoCategory: "cat-grpo",
+            placement: .before,
+            in: categories
+        ) == false,
+        "folder dragging should reject before/after drops onto the dragged folder's descendants"
+    )
+    try check(
+        CategoryMovePlanner.canDropCategory(
+            "cat-rl",
+            ontoCategory: "cat-grpo",
+            placement: .inside,
+            in: categories
+        ) == false,
+        "folder dragging should reject inside drops onto the dragged folder's descendants"
+    )
+    try check(
+        CategoryMovePlanner.canMoveCategory("cat-grpo", toParent: "cat-rl", in: categories) == false,
+        "folder dragging should reject no-op drops into the folder's existing parent"
+    )
+    try check(
+        CategoryMovePlanner.canMoveCategory("cat-diffusion", toParent: nil, in: categories) == false,
+        "folder dragging should reject no-op drops from a top-level folder back to the top level"
+    )
+
+    let reordered = try CategoryMovePlanner.reorderedCategories(
+        movingCategoryID: "cat-opd",
+        relativeTo: "cat-grpo",
+        placement: .before,
+        in: categories
+    )
+    let reorderedRLSiblings = reordered
+        .filter { $0.parentID == rl.id }
+        .sorted { $0.sortOrder < $1.sortOrder }
+        .map { "\($0.id):\($0.sortOrder)" }
+    try check(
+        reorderedRLSiblings == [
+            "cat-reward:10",
+            "cat-forward:20",
+            "cat-opd:30",
+            "cat-grpo:40"
+        ],
+        "folder reordering before a sibling should normalize the sibling order"
+    )
+
+    let movedToRoot = try CategoryMovePlanner.movedCategories(
+        movingCategoryID: "cat-grpo",
+        toParent: nil,
+        in: categories
+    )
+    try check(
+        movedToRoot.first(where: { $0.id == "cat-grpo" })?.parentID == nil,
+        "folder dragging should support moving a nested folder back to the top level"
+    )
+}
+
 func runUILayoutSourceChecks() throws {
     let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
     let libraryViewURL = root.appendingPathComponent("Sources/PaperCodexApp/LibraryView.swift")
@@ -1010,6 +1077,15 @@ func runUILayoutSourceChecks() throws {
             && librarySource.contains("CategorySidebarDropDelegate")
             && appModelSource.contains("func reorderCategory("),
         "library category rows should support animated folder reordering before or after sibling rows"
+    )
+    try check(
+        librarySource.contains("@State private var draggedCategoryID")
+            && librarySource.contains("canDropCategory: { placement in")
+            && librarySource.contains("model.canDropCategory(")
+            && librarySource.contains("LibraryRootFolderDropDelegate")
+            && librarySource.contains("model.canMoveCategory(draggedCategoryID, toParent: nil)")
+            && appModelSource.contains("typealias LibraryCategoryDropPlacement = CategoryMovePlacement"),
+        "library folder dragging should reject invalid self/descendant targets and allow moving folders back to the top level"
     )
     try check(
         librarySource.contains("onTogglePinned")
@@ -5957,6 +6033,10 @@ do {
     if selectedChecks.isEmpty || selectedChecks.contains("library-category-assignment") {
         try runLibraryCategoryAssignmentChecks()
         print("library-category-assignment: pass")
+    }
+    if selectedChecks.isEmpty || selectedChecks.contains("category-move-planner") {
+        try runCategoryMovePlannerChecks()
+        print("category-move-planner: pass")
     }
     if selectedChecks.isEmpty || selectedChecks.contains("ui-layout-source") {
         try runUILayoutSourceChecks()

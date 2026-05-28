@@ -24,6 +24,7 @@ struct LibraryView: View {
     @State private var categoryPendingDelete: PaperCodexCore.Category?
     @State private var tagPendingManagement: PaperTag?
     @State private var tagPendingDelete: PaperTag?
+    @State private var draggedCategoryID: String?
     @State private var watchedFolderPendingRemoval: WatchedFolder?
     @State private var noteTitle = ""
     @State private var noteBody = ""
@@ -329,7 +330,23 @@ struct LibraryView: View {
             }
             LibraryRootFolderRow(
                 countText: "\(model.papers.count)",
-                isSelected: selectedLibrarySurface == .papers && selectedCategoryID == nil && selectedTagID == nil
+                isSelected: selectedLibrarySurface == .papers && selectedCategoryID == nil && selectedTagID == nil,
+                canDropCategory: {
+                    guard let draggedCategoryID else {
+                        return true
+                    }
+                    return model.canMoveCategory(draggedCategoryID, toParent: nil)
+                },
+                onDropPapers: { paperIDs in
+                    model.movePapers(paperIDs, toCategory: nil)
+                    selectRootLibrary()
+                },
+                onDropCategory: { droppedCategoryID in
+                    withAnimation(.spring(response: 0.24, dampingFraction: 0.86)) {
+                        model.moveCategory(droppedCategoryID, toParent: nil)
+                    }
+                    draggedCategoryID = nil
+                }
             ) {
                 selectRootLibrary()
             }
@@ -349,6 +366,19 @@ struct LibraryView: View {
                             isExpanded: !collapsedCategoryIDs.contains(item.category.id),
                             isPinned: item.category.isPinned,
                             categoryDragPayload: categoryDragPayload(for: item.category),
+                            onDragCategory: {
+                                draggedCategoryID = item.category.id
+                            },
+                            canDropCategory: { placement in
+                                guard let draggedCategoryID else {
+                                    return true
+                                }
+                                return model.canDropCategory(
+                                    draggedCategoryID,
+                                    onto: item.category.id,
+                                    placement: placement
+                                )
+                            },
                             onToggle: {
                                 toggleCategoryCollapsed(item.category.id)
                             },
@@ -381,6 +411,7 @@ struct LibraryView: View {
                                         model.reorderCategory(droppedCategoryID, relativeTo: item.category.id, placement: placement)
                                     }
                                 }
+                                draggedCategoryID = nil
                             }
                         )
                     }
@@ -516,7 +547,8 @@ struct LibraryView: View {
                         )
                         .contentShape(Rectangle())
                         .onDrag {
-                            NSItemProvider(object: paperDragPayload(for: paper) as NSString)
+                            draggedCategoryID = nil
+                            return NSItemProvider(object: paperDragPayload(for: paper) as NSString)
                         } preview: {
                             PaperDragPreview(
                                 paper: paper,
@@ -1409,56 +1441,118 @@ struct LibraryPaperArxivMetadata: Equatable {
 
 private struct LibraryRootFolderRow: View {
     @State private var isHovering = false
+    @State private var isDropTargeted = false
 
     var countText: String
     var isSelected: Bool
+    var canDropCategory: () -> Bool
+    var onDropPapers: ([String]) -> Void
+    var onDropCategory: (String) -> Void
     var onSelect: () -> Void
 
     var body: some View {
         Button(action: onSelect) {
-            HStack(spacing: 8) {
-                Image(systemName: isSelected ? "tray.full.fill" : "tray.full")
-                    .frame(width: 18)
-                    .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
-                Text("All Papers")
-                    .font(.paperCodexSystem(size: 13, weight: isSelected ? .semibold : .medium))
-                    .lineLimit(1)
-                Spacer(minLength: 8)
-                Text(countText)
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .contentTransition(.numericText())
-            }
-            .padding(.horizontal, 9)
-            .padding(.vertical, 7)
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(isSelected ? Color.accentColor.opacity(0.13) : (isHovering ? Color.primary.opacity(0.045) : Color.clear))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(isSelected ? Color.accentColor.opacity(0.22) : (isHovering ? Color.accentColor.opacity(0.18) : Color.clear), lineWidth: 1)
-            )
-            .overlay(alignment: .leading) {
-                if isSelected {
-                    Capsule()
-                        .fill(Color.accentColor.opacity(0.72))
-                        .frame(width: 3, height: 18)
-                        .padding(.leading, 3)
-                        .transition(.opacity.combined(with: .scale(scale: 0.82)))
+            ZStack(alignment: .trailing) {
+                HStack(spacing: 8) {
+                    Image(systemName: isSelected ? "tray.full.fill" : "tray.full")
+                        .frame(width: 18)
+                        .foregroundStyle(isSelected || isDropTargeted ? Color.accentColor : Color.secondary)
+                    Text("All Papers")
+                        .font(.paperCodexSystem(size: 13, weight: isSelected ? .semibold : .medium))
+                        .lineLimit(1)
+                    Spacer(minLength: 8)
+                }
+                .padding(.horizontal, 9)
+                .padding(.vertical, 7)
+
+                if isDropTargeted {
+                    Label("Top Level", systemImage: "arrow.up.to.line")
+                        .font(.paperCodexSystem(size: 11, weight: .semibold))
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 4)
+                        .foregroundStyle(Color.accentColor)
+                        .background(Capsule().fill(Color.accentColor.opacity(0.16)))
+                        .padding(.trailing, 6)
+                        .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                } else {
+                    Text(countText)
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .contentTransition(.numericText())
+                        .padding(.trailing, 9)
+                        .transition(.opacity.combined(with: .scale(scale: 0.92)))
                 }
             }
-            .scaleEffect(isHovering ? 1.01 : 1, anchor: .center)
-            .animation(PaperCodexMotion.hover, value: isHovering)
-            .animation(PaperCodexMotion.selection, value: isSelected)
         }
         .buttonStyle(.plain)
-        .help("Show all papers")
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(isDropTargeted ? Color.accentColor.opacity(0.12) : (isSelected ? Color.accentColor.opacity(0.13) : (isHovering ? Color.primary.opacity(0.045) : Color.clear)))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(isDropTargeted ? Color.accentColor.opacity(0.55) : (isSelected ? Color.accentColor.opacity(0.22) : (isHovering ? Color.accentColor.opacity(0.18) : Color.clear)), lineWidth: isDropTargeted ? 1.5 : 1)
+        )
+        .overlay(alignment: .leading) {
+            if isSelected {
+                Capsule()
+                    .fill(Color.accentColor.opacity(0.72))
+                    .frame(width: 3, height: 18)
+                    .padding(.leading, 3)
+                    .transition(.opacity.combined(with: .scale(scale: 0.82)))
+            }
+        }
+        .scaleEffect(isDropTargeted ? 1.02 : (isHovering ? 1.01 : 1), anchor: .center)
+        .animation(PaperCodexMotion.hover, value: isHovering)
+        .animation(PaperCodexMotion.hover, value: isDropTargeted)
+        .animation(PaperCodexMotion.selection, value: isSelected)
+        .contentShape(Rectangle())
+        .onDrop(
+            of: LibraryLayout.categoryDropContentTypes,
+            delegate: LibraryRootFolderDropDelegate(
+                isTargeted: $isDropTargeted,
+                canDropCategory: canDropCategory,
+                onDrop: loadDroppedItems(from:)
+            )
+        )
+        .help("Show all papers or drop a folder here to move it to the top level")
         .onHover { hovering in
             withAnimation(PaperCodexMotion.hover) {
                 isHovering = hovering
             }
         }
+    }
+
+    private func loadDroppedItems(from providers: [NSItemProvider]) -> Bool {
+        let textProviders = providers.filter { $0.canLoadObject(ofClass: NSString.self) }
+        guard !textProviders.isEmpty else {
+            return false
+        }
+        for provider in textProviders {
+            provider.loadObject(ofClass: NSString.self) { object, _ in
+                guard let payload = (object as? NSString).map(String.init) else {
+                    return
+                }
+                let trimmedPayload = payload.trimmingCharacters(in: .whitespacesAndNewlines)
+                if let droppedCategoryID = LibraryLayout.droppedCategoryID(from: trimmedPayload) {
+                    DispatchQueue.main.async {
+                        onDropCategory(droppedCategoryID)
+                    }
+                    return
+                }
+                let paperIDs = trimmedPayload
+                    .components(separatedBy: .whitespacesAndNewlines)
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+                guard !paperIDs.isEmpty else {
+                    return
+                }
+                DispatchQueue.main.async {
+                    onDropPapers(paperIDs)
+                }
+            }
+        }
+        return true
     }
 }
 
@@ -2876,6 +2970,8 @@ private struct CategorySidebarRow: View {
     var isExpanded: Bool
     var isPinned: Bool
     var categoryDragPayload: String
+    var onDragCategory: () -> Void
+    var canDropCategory: (LibraryCategoryDropPlacement) -> Bool
     var onToggle: () -> Void
     var onSelect: () -> Void
     var onCreateChild: () -> Void
@@ -3003,13 +3099,15 @@ private struct CategorySidebarRow: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
         .onDrag {
-            NSItemProvider(object: categoryDragPayload as NSString)
+            onDragCategory()
+            return NSItemProvider(object: categoryDragPayload as NSString)
         }
         .onDrop(
             of: LibraryLayout.categoryDropContentTypes,
             delegate: CategorySidebarDropDelegate(
                 isTargeted: $isDropTargeted,
                 placement: $dropPlacement,
+                canDrop: canDropCategory,
                 onDrop: loadDroppedItems(from:placement:)
             )
         )
@@ -3101,24 +3199,59 @@ private struct CategorySidebarRow: View {
     }
 }
 
-private struct CategorySidebarDropDelegate: DropDelegate {
+private struct LibraryRootFolderDropDelegate: DropDelegate {
     @Binding var isTargeted: Bool
-    @Binding var placement: LibraryCategoryDropPlacement?
-    var onDrop: ([NSItemProvider], LibraryCategoryDropPlacement) -> Bool
+    var canDropCategory: () -> Bool
+    var onDrop: ([NSItemProvider]) -> Bool
 
     func validateDrop(info: DropInfo) -> Bool {
-        info.hasItemsConforming(to: LibraryLayout.categoryDropContentTypes)
+        info.hasItemsConforming(to: LibraryLayout.categoryDropContentTypes) && canDrop(info: info)
     }
 
     func dropEntered(info: DropInfo) {
-        isTargeted = true
-        placement = placement(for: info)
+        isTargeted = canDrop(info: info)
     }
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
-        isTargeted = true
-        placement = placement(for: info)
-        return DropProposal(operation: .move)
+        isTargeted = canDrop(info: info)
+        return isTargeted ? DropProposal(operation: .move) : nil
+    }
+
+    func dropExited(info: DropInfo) {
+        isTargeted = false
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        guard canDrop(info: info) else {
+            isTargeted = false
+            return false
+        }
+        isTargeted = false
+        return onDrop(info.itemProviders(for: LibraryLayout.categoryDropContentTypes))
+    }
+
+    private func canDrop(info _: DropInfo) -> Bool {
+        canDropCategory()
+    }
+}
+
+private struct CategorySidebarDropDelegate: DropDelegate {
+    @Binding var isTargeted: Bool
+    @Binding var placement: LibraryCategoryDropPlacement?
+    var canDrop: (LibraryCategoryDropPlacement) -> Bool
+    var onDrop: ([NSItemProvider], LibraryCategoryDropPlacement) -> Bool
+
+    func validateDrop(info: DropInfo) -> Bool {
+        info.hasItemsConforming(to: LibraryLayout.categoryDropContentTypes) && validPlacement(for: info) != nil
+    }
+
+    func dropEntered(info: DropInfo) {
+        updateDropState(info: info)
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        updateDropState(info: info)
+        return placement == nil ? nil : DropProposal(operation: .move)
     }
 
     func dropExited(info: DropInfo) {
@@ -3127,10 +3260,29 @@ private struct CategorySidebarDropDelegate: DropDelegate {
     }
 
     func performDrop(info: DropInfo) -> Bool {
-        let finalPlacement = placement(for: info)
+        guard let finalPlacement = validPlacement(for: info) else {
+            isTargeted = false
+            placement = nil
+            return false
+        }
         isTargeted = false
         placement = nil
         return onDrop(info.itemProviders(for: LibraryLayout.categoryDropContentTypes), finalPlacement)
+    }
+
+    private func updateDropState(info: DropInfo) {
+        if let validPlacement = validPlacement(for: info) {
+            isTargeted = true
+            placement = validPlacement
+        } else {
+            isTargeted = false
+            placement = nil
+        }
+    }
+
+    private func validPlacement(for info: DropInfo) -> LibraryCategoryDropPlacement? {
+        let placement = placement(for: info)
+        return canDrop(placement) ? placement : nil
     }
 
     private func placement(for info: DropInfo) -> LibraryCategoryDropPlacement {

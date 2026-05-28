@@ -39,11 +39,7 @@ enum LibrarySurface {
     case papers
 }
 
-enum LibraryCategoryDropPlacement: String {
-    case before
-    case after
-    case inside
-}
+typealias LibraryCategoryDropPlacement = CategoryMovePlacement
 
 enum ArxivSaveOrganization: String, CaseIterable, Identifiable {
     case primaryCategory = "primary-category"
@@ -3025,18 +3021,19 @@ final class AppModel: ObservableObject {
             guard let repository else {
                 throw AppModelError.repositoryUnavailable
             }
-            guard var category = categories.first(where: { $0.id == categoryID }) else {
+            guard let category = categories.first(where: { $0.id == categoryID }) else {
                 throw AppModelError.categoryNotFound(categoryID)
             }
-            if parentID == categoryID || categoryDescendantIDs(of: categoryID).contains(parentID ?? "") {
-                throw AppModelError.invalidCategoryMove
-            }
-            guard category.parentID != parentID else {
+            let updatedCategories = try CategoryMovePlanner.movedCategories(
+                movingCategoryID: categoryID,
+                toParent: parentID,
+                in: categories
+            )
+            let changedCategories = categoryChanges(from: categories, to: updatedCategories)
+            guard !changedCategories.isEmpty else {
                 return
             }
-            category.parentID = parentID
-            category.sortOrder = nextCategorySortOrder(parentID: parentID)
-            try repository.upsertCategory(category)
+            try saveCategoryChanges(changedCategories, repository: repository)
             try reloadLibrary()
             postNotice(kind: .success, title: "Category Moved", message: category.name)
         } catch {
@@ -3049,32 +3046,20 @@ final class AppModel: ObservableObject {
             guard let repository else {
                 throw AppModelError.repositoryUnavailable
             }
-            guard var category = categories.first(where: { $0.id == categoryID }) else {
+            guard let category = categories.first(where: { $0.id == categoryID }) else {
                 throw AppModelError.categoryNotFound(categoryID)
             }
-            guard let target = categories.first(where: { $0.id == targetCategoryID }) else {
-                throw AppModelError.categoryNotFound(targetCategoryID)
-            }
-            guard categoryID != targetCategoryID else {
+            let updatedCategories = try CategoryMovePlanner.reorderedCategories(
+                movingCategoryID: categoryID,
+                relativeTo: targetCategoryID,
+                placement: placement,
+                in: categories
+            )
+            let changedCategories = categoryChanges(from: categories, to: updatedCategories)
+            guard !changedCategories.isEmpty else {
                 return
             }
-            if placement == .inside {
-                moveCategory(categoryID, toParent: targetCategoryID)
-                return
-            }
-            let newParentID = target.parentID
-            if newParentID == categoryID || categoryDescendantIDs(of: categoryID).contains(newParentID ?? "") {
-                throw AppModelError.invalidCategoryMove
-            }
-            category.parentID = newParentID
-            category.isPinned = target.isPinned
-            var siblings = sortedCategorySiblings(parentID: newParentID).filter { $0.id != categoryID }
-            guard let targetIndex = siblings.firstIndex(where: { $0.id == targetCategoryID }) else {
-                return
-            }
-            let insertionIndex = placement == .before ? targetIndex : targetIndex + 1
-            siblings.insert(category, at: insertionIndex)
-            try saveNormalizedCategoryOrder(siblings, repository: repository)
+            try saveCategoryChanges(changedCategories, repository: repository)
             try reloadLibrary()
             postNotice(kind: .success, title: "Category Reordered", message: category.name)
         } catch {
@@ -3193,6 +3178,19 @@ final class AppModel: ObservableObject {
         categoryDescendantIDs(of: ancestorID).contains(categoryID)
     }
 
+    func canMoveCategory(_ categoryID: String, toParent parentID: String?) -> Bool {
+        CategoryMovePlanner.canMoveCategory(categoryID, toParent: parentID, in: categories)
+    }
+
+    func canDropCategory(_ categoryID: String, onto targetCategoryID: String, placement: LibraryCategoryDropPlacement) -> Bool {
+        CategoryMovePlanner.canDropCategory(
+            categoryID,
+            ontoCategory: targetCategoryID,
+            placement: placement,
+            in: categories
+        )
+    }
+
     private func sortedCategorySiblings(parentID: String?) -> [PaperCodexCore.Category] {
         categories
             .filter { $0.parentID == parentID }
@@ -3222,6 +3220,20 @@ final class AppModel: ObservableObject {
             var updated = sibling
             updated.sortOrder = (index + 1) * 10
             try repository.upsertCategory(updated)
+        }
+    }
+
+    private func categoryChanges(
+        from currentCategories: [PaperCodexCore.Category],
+        to updatedCategories: [PaperCodexCore.Category]
+    ) -> [PaperCodexCore.Category] {
+        let currentCategoriesByID = Dictionary(uniqueKeysWithValues: currentCategories.map { ($0.id, $0) })
+        return updatedCategories.filter { currentCategoriesByID[$0.id] != $0 }
+    }
+
+    private func saveCategoryChanges(_ changedCategories: [PaperCodexCore.Category], repository: PaperRepository) throws {
+        for category in changedCategories {
+            try repository.upsertCategory(category)
         }
     }
 
