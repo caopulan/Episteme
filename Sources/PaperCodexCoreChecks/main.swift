@@ -1024,6 +1024,15 @@ func runUILayoutSourceChecks() throws {
         "library paper dragging should not rely on a parallel custom drag gesture"
     )
     try check(
+        librarySource.contains("@State private var isPressing = false")
+            && librarySource.contains(".onLongPressGesture(")
+            && librarySource.contains("minimumDuration: .infinity")
+            && librarySource.contains("isPressing && !isImportPlaceholder")
+            && librarySource.contains("PaperCodexMotion.press")
+            && !librarySource.contains("DragGesture(minimumDistance: 0"),
+        "library paper rows should provide immediate pressed feedback without replacing native drag/drop"
+    )
+    try check(
         !librarySource.contains("ActiveLibraryPaperDrag"),
         "library paper dragging should avoid stale custom drag state when native drag/drop is used"
     )

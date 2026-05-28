@@ -1848,6 +1848,7 @@ private struct PaperRow: View {
     var onRead: () -> Void
 
     @State private var isHovering = false
+    @State private var isPressing = false
 
     var body: some View {
         HStack(alignment: .center, spacing: 14) {
@@ -1903,18 +1904,29 @@ private struct PaperRow: View {
                 .stroke(rowBorderColor, lineWidth: isMultiSelected ? 1.5 : 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 8))
-        .shadow(color: isHovering ? Color.black.opacity(0.10) : .clear, radius: 6, y: 2)
-        .scaleEffect(isHovering && !isImportPlaceholder ? 1.006 : 1, anchor: .center)
+        .shadow(color: rowShadowColor, radius: isPressing ? 4 : 6, y: isPressing ? 1 : 2)
+        .scaleEffect(rowScale, anchor: .center)
         .overlay(alignment: .leading) {
-            if isSelected || isMultiSelected {
+            if isSelected || isMultiSelected || isPressing {
                 Capsule()
-                    .fill(Color.accentColor.opacity(isMultiSelected ? 0.82 : 0.62))
+                    .fill(Color.accentColor.opacity(leadingIndicatorOpacity))
                     .frame(width: 4)
                     .padding(.vertical, 12)
                     .padding(.leading, 4)
                     .transition(.opacity.combined(with: .scale(scale: 0.92)))
             }
         }
+        .onLongPressGesture(
+            minimumDuration: .infinity,
+            maximumDistance: 16,
+            pressing: { isPressing in
+                withAnimation(PaperCodexMotion.press) {
+                    self.isPressing = isPressing && !isImportPlaceholder
+                }
+            },
+            perform: {}
+        )
+        .animation(PaperCodexMotion.press, value: isPressing)
         .animation(PaperCodexMotion.hover, value: isHovering)
         .animation(PaperCodexMotion.selection, value: isSelected)
         .animation(PaperCodexMotion.selection, value: isMultiSelected)
@@ -1934,6 +1946,9 @@ private struct PaperRow: View {
         if isMultiSelected {
             return Color.accentColor.opacity(0.16)
         }
+        if isPressing && !isImportPlaceholder {
+            return Color.accentColor.opacity(0.12)
+        }
         if isSelected {
             return Color.accentColor.opacity(0.10)
         }
@@ -1947,6 +1962,9 @@ private struct PaperRow: View {
         if isMultiSelected {
             return Color.accentColor.opacity(0.62)
         }
+        if isPressing && !isImportPlaceholder {
+            return Color.accentColor.opacity(0.48)
+        }
         if isSelected {
             return Color.accentColor.opacity(0.38)
         }
@@ -1954,6 +1972,30 @@ private struct PaperRow: View {
             return Color.primary.opacity(0.10)
         }
         return Color.clear
+    }
+
+    private var rowShadowColor: Color {
+        if isImportPlaceholder {
+            return .clear
+        }
+        if isPressing {
+            return Color.accentColor.opacity(0.12)
+        }
+        return isHovering ? Color.black.opacity(0.10) : .clear
+    }
+
+    private var rowScale: CGFloat {
+        if isImportPlaceholder {
+            return 1
+        }
+        return isPressing ? 0.992 : (isHovering ? 1.006 : 1)
+    }
+
+    private var leadingIndicatorOpacity: Double {
+        if isMultiSelected {
+            return 0.82
+        }
+        return isPressing ? 0.70 : 0.62
     }
 }
 
