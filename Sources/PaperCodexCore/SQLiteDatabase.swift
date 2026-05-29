@@ -3,6 +3,7 @@ import SQLite3
 
 public enum SQLiteStoreError: Error, CustomStringConvertible, Equatable {
     case openFailed(path: String, message: String)
+    case configureFailed(path: String, setting: String, message: String)
     case prepareFailed(sql: String, message: String)
     case bindFailed(index: Int32, message: String)
     case stepFailed(sql: String, message: String)
@@ -13,6 +14,8 @@ public enum SQLiteStoreError: Error, CustomStringConvertible, Equatable {
         switch self {
         case let .openFailed(path, message):
             "Could not open SQLite database at \(path): \(message)"
+        case let .configureFailed(path, setting, message):
+            "Could not configure SQLite database at \(path) with \(setting): \(message)"
         case let .prepareFailed(sql, message):
             "Could not prepare SQLite statement \(sql): \(message)"
         case let .bindFailed(index, message):
@@ -38,6 +41,7 @@ public enum SQLiteValue: Equatable {
 public final class SQLiteDatabase {
     private var handle: OpaquePointer?
     private let path: String
+    private static let busyTimeoutMilliseconds: Int32 = 5_000
 
     public init(path: String) throws {
         self.path = path
@@ -45,7 +49,12 @@ public final class SQLiteDatabase {
             let message = handle.map { String(cString: sqlite3_errmsg($0)) } ?? "unknown SQLite error"
             throw SQLiteStoreError.openFailed(path: path, message: message)
         }
+        if sqlite3_busy_timeout(handle, Self.busyTimeoutMilliseconds) != SQLITE_OK {
+            throw SQLiteStoreError.configureFailed(path: path, setting: "busy_timeout", message: lastErrorMessage)
+        }
         try execute("PRAGMA foreign_keys = ON;")
+        try execute("PRAGMA journal_mode = WAL;")
+        try execute("PRAGMA synchronous = NORMAL;")
     }
 
     deinit {

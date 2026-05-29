@@ -8,6 +8,24 @@ struct CheckFailure: Error, CustomStringConvertible {
     var description: String
 }
 
+final class LockedStringBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedValue: String?
+
+    func set(_ value: String) {
+        lock.lock()
+        storedValue = value
+        lock.unlock()
+    }
+
+    func get() -> String? {
+        lock.lock()
+        let value = storedValue
+        lock.unlock()
+        return value
+    }
+}
+
 func check(_ condition: @autoclosure () -> Bool, _ message: String) throws {
     if !condition() {
         throw CheckFailure(description: message)
@@ -3763,19 +3781,63 @@ func runSyncDataStoreChecks() throws {
 func runSQLiteHelperChecks() throws {
     let databaseURL = FileManager.default.temporaryDirectory
         .appendingPathComponent("paper-codex-sqlite-helpers-\(UUID().uuidString).sqlite")
-    let database = try SQLiteDatabase(path: databaseURL.path)
-    try database.transaction {
-        try database.execute("CREATE TABLE sample (id TEXT PRIMARY KEY, value TEXT);")
-        try database.run("INSERT INTO sample (id, value) VALUES (?, ?);", bindings: [.text("a"), .text("one")])
+    do {
+        let database = try SQLiteDatabase(path: databaseURL.path)
+        try database.transaction {
+            try database.execute("CREATE TABLE sample (id TEXT PRIMARY KEY, value TEXT);")
+            try database.run("INSERT INTO sample (id, value) VALUES (?, ?);", bindings: [.text("a"), .text("one")])
+        }
+
+        let columns = try database.tableColumns("sample")
+        let values = try database.query("SELECT value FROM sample WHERE id = ?;", bindings: [.text("a")]) { row in
+            try row.text(0)
+        }
+
+        try check(columns == Set(["id", "value"]), "SQLite tableColumns should read table schema")
+        try check(values == ["one"], "SQLite transaction should commit successful work")
     }
 
-    let columns = try database.tableColumns("sample")
-    let values = try database.query("SELECT value FROM sample WHERE id = ?;", bindings: [.text("a")]) { row in
+    let reader = try SQLiteDatabase(path: databaseURL.path)
+    let busyTimeouts = try reader.query("PRAGMA busy_timeout;") { row in
+        row.int(0)
+    }
+    let journalModes = try reader.query("PRAGMA journal_mode;") { row in
+        try row.text(0)
+    }
+    let lockAcquired = DispatchSemaphore(value: 0)
+    let releaseLock = DispatchSemaphore(value: 0)
+    let lockFinished = DispatchSemaphore(value: 0)
+    let lockError = LockedStringBox()
+
+    Thread.detachNewThread {
+        do {
+            let lockHolder = try SQLiteDatabase(path: databaseURL.path)
+            try lockHolder.execute("BEGIN EXCLUSIVE TRANSACTION;")
+            lockAcquired.signal()
+            _ = releaseLock.wait(timeout: .now() + 2)
+            try lockHolder.execute("COMMIT;")
+        } catch {
+            let message = String(describing: error)
+            lockError.set(message)
+            lockAcquired.signal()
+        }
+        lockFinished.signal()
+    }
+
+    try check(lockAcquired.wait(timeout: .now() + 2) == .success, "SQLite lock holder should acquire the transient exclusive lock")
+    try check(lockError.get() == nil, "SQLite lock holder should acquire the transient exclusive lock without error")
+    DispatchQueue.global().asyncAfter(deadline: .now() + 0.15) {
+        releaseLock.signal()
+    }
+    let valuesAfterTransientLock = try reader.query("SELECT value FROM sample WHERE id = ?;", bindings: [.text("a")]) { row in
         try row.text(0)
     }
 
-    try check(columns == Set(["id", "value"]), "SQLite tableColumns should read table schema")
-    try check(values == ["one"], "SQLite transaction should commit successful work")
+    try check((busyTimeouts.first ?? 0) >= 5_000, "SQLite connections should wait for transient busy locks")
+    try check(journalModes.first?.lowercased() == "wal", "SQLite file databases should use WAL so readers are not blocked by writers")
+    try check(valuesAfterTransientLock == ["one"], "SQLite readers should survive a transient lock from another connection")
+    try check(lockFinished.wait(timeout: .now() + 2) == .success, "SQLite lock holder should release the transient exclusive lock")
+    try check(lockError.get() == nil, "SQLite lock holder should release the transient exclusive lock without error")
 }
 
 func runCitationChecks() throws {
