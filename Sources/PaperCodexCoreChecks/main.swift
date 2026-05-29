@@ -2988,11 +2988,19 @@ func runUILayoutSourceChecks() throws {
         "Discover feed rendering should reuse one visible-paper snapshot and avoid building long string layout signatures in body"
     )
     try check(
-        appModelSource.contains("if try loadCachedDiscoverSearch(query: query) {\n                return\n            }")
+        appModelSource.contains("cachedSearchResult = try loadCachedDiscoverSearch(query: query, allowPartialFragments: true)")
+            && appModelSource.contains("if cachedSearchResult == .complete")
             && appModelSource.contains("cacheQueryResult:")
             && appModelSource.contains("guard !feed.papers.isEmpty else")
             && appModelSource.contains("try loadDiscoverEnrichments(for: feed.papers)"),
         "Discover search should hit cached non-empty query results before network fetch and immediately load cached enrichments"
+    )
+    try check(
+        appModelSource.contains("allowPartialFragments: true")
+            && appModelSource.contains("localDiscoverCache.loadQueryResults(containedIn: query)")
+            && appModelSource.contains("\"Partial cached search\"")
+            && appModelSource.contains("cacheQueryResult: hasCompleteCoverage"),
+        "Discover search should fall back to reusable cached query fragments when live arXiv is unavailable"
     )
     try check(
         appModelSource.contains("loadLastDiscoverResultsState()")
@@ -5794,12 +5802,79 @@ func runLocalDiscoverEngineChecks() throws {
             )
         )
     )
+    let fragmentQuery = DiscoverQuery(
+        keyword: queryA.keyword,
+        dateRange: try DiscoverDateRange(start: "2026-04-30", end: "2026-04-30"),
+        categories: queryA.categories,
+        similaritySourceIDs: queryA.similaritySourceIDs,
+        rankingVersion: queryA.rankingVersion
+    ).normalized
+    try cache.saveQueryResult(
+        DiscoverQueryResult(
+            query: fragmentQuery,
+            arxivIDs: ["2604.18804"],
+            generatedAt: Date(timeIntervalSince1970: 1_777_300_100),
+            feed: ArxivFeedResponse(
+                date: fragmentQuery.dateRange.cacheLabel,
+                count: 1,
+                papers: [
+                    cachedDiscoverPaper(
+                        id: "2604.18804",
+                        listDate: "2026-04-30",
+                        categories: ["cs.CV"],
+                        title: "Fragment cache hit"
+                    )
+                ]
+            )
+        )
+    )
+    let outsideQuery = DiscoverQuery(
+        keyword: queryA.keyword,
+        dateRange: try DiscoverDateRange(start: "2026-05-01", end: "2026-05-01"),
+        categories: queryA.categories,
+        similaritySourceIDs: queryA.similaritySourceIDs,
+        rankingVersion: queryA.rankingVersion
+    ).normalized
+    try cache.saveQueryResult(
+        DiscoverQueryResult(
+            query: outsideQuery,
+            arxivIDs: ["2605.18805"],
+            generatedAt: Date(timeIntervalSince1970: 1_777_300_200),
+            feed: ArxivFeedResponse(
+                date: outsideQuery.dateRange.cacheLabel,
+                count: 1,
+                papers: [
+                    cachedDiscoverPaper(
+                        id: "2605.18805",
+                        listDate: "2026-05-01",
+                        categories: ["cs.CV"],
+                        title: "Outside requested range"
+                    )
+                ]
+            )
+        )
+    )
     try cache.saveEnrichment(enrichment)
     let cachedQuery = try cache.loadQueryResult(cacheKey: queryA.cacheKey)
     let cachedEnrichment = try cache.loadEnrichment(arxivID: "2604.18803")
     try check(cachedQuery?.arxivIDs == ["2604.18803"], "discover query cache should round-trip ordered ids")
     try check(cachedQuery?.feed?.papers.map(\.id) == ["2604.18803"], "discover query cache should round-trip the full search feed")
     try check(cachedEnrichment?.titleZH == "本地论文阅读器", "discover enrichment cache should round-trip processed metadata")
+    let combinedQuery = DiscoverQuery(
+        keyword: queryA.keyword,
+        dateRange: try DiscoverDateRange(start: "2026-04-27", end: "2026-04-30"),
+        categories: queryA.categories,
+        similaritySourceIDs: queryA.similaritySourceIDs,
+        rankingVersion: queryA.rankingVersion
+    ).normalized
+    let cachedFragments = try cache.loadQueryResults(containedIn: combinedQuery)
+    try check(
+        cachedFragments.map { $0.query.dateRange.cacheLabel } == [
+            "2026-04-30...2026-04-30",
+            "2026-04-27...2026-04-29"
+        ],
+        "discover query cache should find reusable cached fragments contained by a broader search"
+    )
 
     let embeddingText = "Recursive multi-agent systems coordinate latent-state reasoning."
     let embeddingRecord = DiscoverEmbeddingRecord(
@@ -5946,6 +6021,11 @@ func runLocalArxivClientChecks() throws {
     try check(
         appModelSource.contains("configuration.httpMaximumConnectionsPerHost = 1"),
         "app arXiv URL sessions should avoid opening parallel connections to arXiv"
+    )
+    try check(
+        appModelSource.contains("configuration.timeoutIntervalForRequest = 45")
+            && appModelSource.contains("configuration.timeoutIntervalForResource = 180"),
+        "app arXiv metadata requests should allow slow export API responses before treating them as timeouts"
     )
     try check(
         appModelSource.contains("cachedArxivPaperForLibraryImport")

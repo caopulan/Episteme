@@ -169,6 +169,17 @@ public struct DiscoverQueryResult: Codable, Equatable, Sendable {
     }
 }
 
+private extension DiscoverQuery {
+    func matchesDiscoverCacheFragments(for target: DiscoverQuery) -> Bool {
+        let lhs = normalized
+        let rhs = target.normalized
+        return lhs.keyword == rhs.keyword
+            && lhs.categories == rhs.categories
+            && lhs.similaritySourceIDs == rhs.similaritySourceIDs
+            && lhs.rankingVersion == rhs.rankingVersion
+    }
+}
+
 public extension ArxivFeedResponse {
     func scoped(to query: DiscoverQuery) -> ArxivFeedResponse {
         scoped(to: query.dateRange, categories: query.categories, dateLabel: query.dateRange.cacheLabel)
@@ -559,6 +570,48 @@ public final class LocalDiscoverCache {
         return try decoder.decode(DiscoverQueryResult.self, from: Data(contentsOf: url))
     }
 
+    public func loadQueryResults(containedIn query: DiscoverQuery) throws -> [DiscoverQueryResult] {
+        let target = query.normalized
+        let queriesRoot = queryResultsRootURL()
+        guard fileManager.fileExists(atPath: queriesRoot.path),
+              let enumerator = fileManager.enumerator(
+                at: queriesRoot,
+                includingPropertiesForKeys: [.isRegularFileKey],
+                options: [.skipsHiddenFiles]
+              ) else {
+            return []
+        }
+
+        var results: [DiscoverQueryResult] = []
+        for case let url as URL in enumerator where url.pathExtension == "json" && url.lastPathComponent != "last.json" {
+            let values = try url.resourceValues(forKeys: [.isRegularFileKey])
+            guard values.isRegularFile == true else {
+                continue
+            }
+            var result = try decoder.decode(DiscoverQueryResult.self, from: Data(contentsOf: url))
+            let cachedQuery = result.query.normalized
+            guard cachedQuery.matchesDiscoverCacheFragments(for: target),
+                  target.dateRange.contains(cachedQuery.dateRange),
+                  let feed = result.feed,
+                  !feed.papers.isEmpty else {
+                continue
+            }
+            result.query = cachedQuery
+            result.feed = feed
+            results.append(result)
+        }
+
+        return results.sorted { lhs, rhs in
+            if lhs.query.dateRange.end != rhs.query.dateRange.end {
+                return lhs.query.dateRange.end > rhs.query.dateRange.end
+            }
+            if lhs.query.dateRange.start != rhs.query.dateRange.start {
+                return lhs.query.dateRange.start > rhs.query.dateRange.start
+            }
+            return lhs.generatedAt > rhs.generatedAt
+        }
+    }
+
     public func saveLastQueryResult(_ result: DiscoverQueryResult) throws {
         try writeJSON(result, to: lastQueryResultURL())
     }
@@ -606,15 +659,15 @@ public final class LocalDiscoverCache {
         guard cacheKey.range(of: #"^[a-f0-9]{64}$"#, options: .regularExpression) != nil else {
             throw LocalDiscoverEngineError.unsafeCacheKey(cacheKey)
         }
-        return root
-            .appendingPathComponent("queries", isDirectory: true)
-            .appendingPathComponent("\(cacheKey).json")
+        return queryResultsRootURL().appendingPathComponent("\(cacheKey).json")
     }
 
     private func lastQueryResultURL() -> URL {
-        root
-            .appendingPathComponent("queries", isDirectory: true)
-            .appendingPathComponent("last.json")
+        queryResultsRootURL().appendingPathComponent("last.json")
+    }
+
+    private func queryResultsRootURL() -> URL {
+        root.appendingPathComponent("queries", isDirectory: true)
     }
 
     private func enrichmentURL(arxivID: String) -> URL {

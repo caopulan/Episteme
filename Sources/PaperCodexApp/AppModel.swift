@@ -183,6 +183,16 @@ private struct DiscoverPaperProcessingResult: Sendable {
     var tokenUsage: CodexTokenUsage? = nil
 }
 
+private enum CachedDiscoverSearchLoadResult: Equatable {
+    case none
+    case complete
+    case partial
+
+    var didLoad: Bool {
+        self != .none
+    }
+}
+
 private struct DiscoverSimilarityCategorySource {
     var categoryID: String
     var papers: [Paper]
@@ -1983,6 +1993,7 @@ final class AppModel: ObservableObject {
     }
 
     func searchDiscover() async {
+        var cachedSearchResult: CachedDiscoverSearchLoadResult = .none
         do {
             isSearchingDiscover = true
             isCancellingDiscoverSearch = false
@@ -2006,7 +2017,8 @@ final class AppModel: ObservableObject {
             discoverSelectedCategories = query.categories
             discoverPaperInteractionStateByID = [:]
 
-            if try loadCachedDiscoverSearch(query: query) {
+            cachedSearchResult = try loadCachedDiscoverSearch(query: query, allowPartialFragments: true)
+            if cachedSearchResult == .complete {
                 return
             }
 
@@ -2030,7 +2042,9 @@ final class AppModel: ObservableObject {
         } catch {
             if isCancellationError(error) || isCancellingDiscoverSearch || Task.isCancelled {
                 arxivCacheProgress = nil
-            } else if (try? loadCachedDiscoverSearch()) == true {
+            } else if cachedSearchResult.didLoad {
+                errorMessage = "Using partial cached Explore results. Search failed: \(error)"
+            } else if (try? loadCachedDiscoverSearch(allowPartialFragments: true).didLoad) == true {
                 errorMessage = "Using cached Explore results. Search failed: \(error)"
             } else {
                 errorMessage = String(describing: error)
@@ -4896,7 +4910,7 @@ final class AppModel: ObservableObject {
     }
 
     @discardableResult
-    private func loadCachedDiscoverSearch() throws -> Bool {
+    private func loadCachedDiscoverSearch(allowPartialFragments: Bool = false) throws -> CachedDiscoverSearchLoadResult {
         let range = try DiscoverDateRange(start: discoverStartDate, end: discoverEndDate)
         let categories = discoverSelectedCategories.isEmpty ? [localDiscoverPreferences.normalized.categories.first ?? "cs.CV"] : discoverSelectedCategories
         let similaritySourceIDs = effectiveDiscoverSimilaritySourceIDs()
@@ -4907,29 +4921,77 @@ final class AppModel: ObservableObject {
             similaritySourceIDs: similaritySourceIDs,
             rankingVersion: discoverRankingVersion()
         ).normalized
-        return try loadCachedDiscoverSearch(query: query)
+        return try loadCachedDiscoverSearch(query: query, allowPartialFragments: allowPartialFragments)
     }
 
     @discardableResult
-    private func loadCachedDiscoverSearch(query: DiscoverQuery) throws -> Bool {
+    private func loadCachedDiscoverSearch(
+        query: DiscoverQuery,
+        allowPartialFragments: Bool = false
+    ) throws -> CachedDiscoverSearchLoadResult {
         if let queryResult = try localDiscoverCache.loadQueryResult(cacheKey: query.cacheKey),
            let cachedFeed = queryResult.feed,
            !cachedFeed.papers.isEmpty {
             try localDiscoverCache.saveLastQueryResult(queryResult)
             try displayDiscoverFeed(cachedFeed, query: query, progressTitle: "Cached search", cacheRangeFeed: false, cacheQueryResult: false)
-            return true
+            return .complete
         }
 
-        guard let cachedFeed = try arxivCache.loadFeed(containing: query.dateRange) else {
-            return false
+        if let cachedFeed = try arxivCache.loadFeed(containing: query.dateRange) {
+            let scopedFeed = cachedFeed.scoped(to: query)
+            let filteredFeed = filterDiscoverFeed(scopedFeed, keyword: query.keyword)
+            guard !filteredFeed.papers.isEmpty else {
+                return .none
+            }
+            try displayDiscoverFeed(filteredFeed, query: query, progressTitle: "Cached search", cacheRangeFeed: false, cacheQueryResult: true)
+            return .complete
         }
-        let scopedFeed = cachedFeed.scoped(to: query)
-        let filteredFeed = filterDiscoverFeed(scopedFeed, keyword: query.keyword)
+
+        let cachedFragments = try localDiscoverCache.loadQueryResults(containedIn: query)
+        guard !cachedFragments.isEmpty else {
+            return .none
+        }
+        let coveredDates = Set(cachedFragments.flatMap { $0.query.dateRange.dates })
+        let hasCompleteCoverage = Set(query.dateRange.dates).isSubset(of: coveredDates)
+        guard allowPartialFragments || hasCompleteCoverage else {
+            return .none
+        }
+        let fragmentFeed = mergedCachedDiscoverFeed(from: cachedFragments, query: query)
+        let filteredFeed = filterDiscoverFeed(fragmentFeed.scoped(to: query), keyword: query.keyword)
         guard !filteredFeed.papers.isEmpty else {
-            return false
+            return .none
         }
-        try displayDiscoverFeed(filteredFeed, query: query, progressTitle: "Cached search", cacheRangeFeed: false, cacheQueryResult: true)
-        return true
+        try displayDiscoverFeed(
+            filteredFeed,
+            query: query,
+            progressTitle: hasCompleteCoverage ? "Cached search" : "Partial cached search",
+            cacheRangeFeed: false,
+            cacheQueryResult: hasCompleteCoverage
+        )
+        return hasCompleteCoverage ? .complete : .partial
+    }
+
+    private func mergedCachedDiscoverFeed(
+        from cachedFragments: [DiscoverQueryResult],
+        query: DiscoverQuery
+    ) -> ArxivFeedResponse {
+        var papers: [ArxivFeedPaper] = []
+        var seenIDs: Set<String> = []
+        for result in cachedFragments {
+            guard let feed = result.feed else {
+                continue
+            }
+            let fragmentFeed = feed.scoped(to: result.query.normalized)
+            for paper in fragmentFeed.papers where !seenIDs.contains(paper.id) {
+                seenIDs.insert(paper.id)
+                papers.append(paper)
+            }
+        }
+        return ArxivFeedResponse(
+            date: query.dateRange.cacheLabel,
+            count: papers.count,
+            papers: papers
+        )
     }
 
     private func loadDiscoverEnrichments(for papers: [ArxivFeedPaper]) throws {
@@ -5635,8 +5697,8 @@ final class AppModel: ObservableObject {
         let categories = overrideCategories ?? (preferences.categories.isEmpty ? LocalArxivClient.defaultCategories : preferences.categories)
         let configuration = URLSessionConfiguration.default
         configuration.httpMaximumConnectionsPerHost = 1
-        configuration.timeoutIntervalForRequest = 18
-        configuration.timeoutIntervalForResource = 60
+        configuration.timeoutIntervalForRequest = 45
+        configuration.timeoutIntervalForResource = 180
         return LocalArxivClient(
             configuration: LocalArxivClientConfiguration(categories: categories),
             session: URLSession(configuration: configuration)
