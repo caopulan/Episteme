@@ -3179,17 +3179,25 @@ func runUIDesignSourceChecks() throws {
         try check(
             messageBubbleSource.contains("private var chatBubbleContentWidth: CGFloat?")
                 && messageBubbleSource.contains(".frame(width: chatBubbleContentWidth, alignment: .leading)")
+                && messageBubbleSource.contains("expandsHorizontally: true")
                 && messageBubbleSource.contains(".frame(maxWidth: .infinity, alignment: .leading)")
                 && messageBubbleSource.contains(".padding(.horizontal, 13)")
                 && messageBubbleSource.contains(".padding(.top, 10)")
                 && messageBubbleSource.contains(".padding(.bottom, 8)")
                 && !messageBubbleSource.contains(".padding(.vertical, 11)")
                 && !messageBubbleSource.contains("ChatMessageBubbleBackground(isUser: isUser)"),
-            "user message bubbles should still shrink short messages while Agent replies use the available full width"
+            "user message bubbles should still shrink short messages while Agent Markdown explicitly expands to the available full width"
         )
     } else {
         throw CheckFailure(description: "message bubble source should remain inspectable")
     }
+    try check(
+        chatSource.contains(".padding(16)\n                    .frame(maxWidth: .infinity, alignment: .leading)")
+            && chatSource.contains("expandsHorizontally")
+            && chatSource.contains("setContentHuggingPriority(.defaultLow, for: .horizontal)")
+            && chatSource.contains("setContentCompressionResistancePriority(.defaultLow, for: .horizontal)"),
+        "chat scroll content and Markdown WebViews should carry full-width Agent layout constraints through to WKWebView"
+    )
     try check(
         chatSource.contains("private struct UserMessageBubbleBackground: View")
             && chatSource.contains("Color.accentColor.opacity(0.08)")
@@ -3910,7 +3918,10 @@ func runCitationChecks() throws {
         rendered.contains("renderMathInElement")
             && rendered.contains("throwOnError: false")
             && rendered.contains("strict: 'ignore'")
-            && rendered.contains(".katex-display"),
+            && rendered.contains(".katex-display")
+            && rendered.contains("html, body, .message")
+            && rendered.contains("width: 100%;")
+            && rendered.contains("box-sizing: border-box"),
         "markdown renderer should harden formula display so bad TeX does not break the whole message"
     )
     try check(

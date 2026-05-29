@@ -119,6 +119,7 @@ struct ChatView: View {
                         }
                     }
                     .padding(16)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .onChange(of: model.messages.count) { _, _ in
                     scrollToBottom(proxy)
@@ -1718,9 +1719,11 @@ private struct MessageBubble: View {
                 markdown: renderedMarkdown,
                 fontSize: messageFontSize,
                 fontFamily: fontFamily,
+                expandsHorizontally: true,
                 onCitation: onCitation
             )
             .frame(maxWidth: .infinity, alignment: .leading)
+            .layoutPriority(1)
         }
     }
 }
@@ -1990,6 +1993,7 @@ private struct MarkdownMessageView: View {
     var markdown: String
     var fontSize: Double
     var fontFamily: ChatFontFamily
+    var expandsHorizontally = false
     var onCitation: (String) -> Void
     @State private var height: CGFloat = 24
 
@@ -2003,10 +2007,12 @@ private struct MarkdownMessageView: View {
                 )
             ),
             height: $height,
+            expandsHorizontally: expandsHorizontally,
             onCitation: onCitation
         )
         .id("\(messageID)-\(markdown.hashValue)-\(fontSize)-\(fontFamily.rawValue)")
         .frame(minHeight: 24)
+        .frame(minWidth: expandsHorizontally ? 0 : nil, maxWidth: expandsHorizontally ? .infinity : nil, alignment: .leading)
         .frame(height: max(24, height))
         .onChange(of: markdown) {
             height = 24
@@ -2138,6 +2144,7 @@ private struct ComposerTextView: NSViewRepresentable {
 private struct MarkdownWebView: NSViewRepresentable {
     var html: String
     @Binding var height: CGFloat
+    var expandsHorizontally: Bool
     var onCitation: (String) -> Void
 
     private var htmlBaseURL: URL {
@@ -2155,6 +2162,8 @@ private struct MarkdownWebView: NSViewRepresentable {
         webView.navigationDelegate = context.coordinator
         webView.setValue(false, forKey: "drawsBackground")
         webView.allowsMagnification = false
+        webView.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        webView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         context.coordinator.currentHTML = html
         webView.loadHTMLString(html, baseURL: htmlBaseURL)
         return webView
@@ -2162,6 +2171,8 @@ private struct MarkdownWebView: NSViewRepresentable {
 
     func updateNSView(_ webView: WKWebView, context: Context) {
         context.coordinator.onCitation = onCitation
+        webView.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        webView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         if context.coordinator.currentHTML != html {
             context.coordinator.currentHTML = html
             webView.loadHTMLString(html, baseURL: htmlBaseURL)

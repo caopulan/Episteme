@@ -42,10 +42,15 @@ public enum ChatMarkdownRenderer {
           color: CanvasText;
           overflow-wrap: anywhere;
         }
+        html, body, .message {
+          width: 100%;
+          box-sizing: border-box;
+        }
         .message {
           font-family: \(style.fontFamily);
           font-size: \(formattedFontSize(style.fontSize))px;
           line-height: 1.55;
+          max-width: none;
         }
         p, ul, ol, blockquote, pre, table {
           margin: 0 0 0.72em;
