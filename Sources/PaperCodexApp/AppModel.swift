@@ -1056,6 +1056,10 @@ final class AppModel: ObservableObject {
             try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
             let store = try PaperRepository(databasePath: root.appendingPathComponent("store.sqlite").path)
             try store.migrate()
+            _ = try store.repairPaperFilePaths(
+                from: root.deletingLastPathComponent().appendingPathComponent(PaperCodexPaths.legacyAppSupportDirectoryName, isDirectory: true),
+                to: root
+            )
             repository = store
             try reloadLibrary()
             startDiscoverCacheWarmupIfNeeded()

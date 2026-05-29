@@ -3359,6 +3359,32 @@ func runRepositoryChecks() throws {
         multiPaperSession.id: [starredPaperB, paper]
     ], "repository should batch-fetch recent session papers without per-session paper queries")
 
+    let legacyRoot = tempRoot.appendingPathComponent("PaperCodex", isDirectory: true)
+    let repairedRoot = tempRoot.appendingPathComponent("Episteme", isDirectory: true)
+    let legacyPDFPath = legacyRoot.appendingPathComponent("papers/paper-c/original.pdf").path
+    let repairedPDFURL = repairedRoot.appendingPathComponent("papers/paper-c/original.pdf")
+    try FileManager.default.createDirectory(
+        at: repairedPDFURL.deletingLastPathComponent(),
+        withIntermediateDirectories: true
+    )
+    try Data("%PDF-1.4\n".utf8).write(to: repairedPDFURL)
+    let legacyPathPaper = Paper(
+        id: "paper-c",
+        filePath: legacyPDFPath,
+        fileHash: "hash-c",
+        title: "Paper C",
+        authors: [],
+        year: nil,
+        sourceURL: nil,
+        importedAt: now,
+        updatedAt: now
+    )
+    try repository.upsertPaper(legacyPathPaper)
+    let repairedCount = try repository.repairPaperFilePaths(from: legacyRoot, to: repairedRoot)
+    let repairedPaper = try repository.fetchPapers(ids: ["paper-c"]).first
+    try check(repairedCount == 1, "repository should count repaired legacy support-root file paths")
+    try check(repairedPaper?.filePath == repairedPDFURL.path, "repository should repair stale absolute PaperCodex paths after Episteme migration")
+
     var reorderedCategory = category
     reorderedCategory.sortOrder = 9
     try repository.upsertCategory(reorderedCategory)

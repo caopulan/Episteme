@@ -280,6 +280,55 @@ public final class PaperRepository {
         }.first
     }
 
+    public func repairPaperFilePaths(
+        from legacyRoot: URL,
+        to currentRoot: URL,
+        fileManager: FileManager = .default
+    ) throws -> Int {
+        let legacyPath = legacyRoot.standardizedFileURL.path
+        let currentPath = currentRoot.standardizedFileURL.path
+        guard legacyPath != currentPath else {
+            return 0
+        }
+        let legacyPrefix = legacyPath.hasSuffix("/") ? legacyPath : "\(legacyPath)/"
+        let currentPrefix = currentPath.hasSuffix("/") ? currentPath : "\(currentPath)/"
+        let candidates = try database.query("""
+        SELECT id, file_path FROM papers WHERE file_path LIKE ?;
+        """, bindings: [.text("\(legacyPrefix)%")]) { row in
+            (id: try row.text(0), filePath: try row.text(1))
+        }
+
+        var repaired = 0
+        try database.transaction {
+            for candidate in candidates {
+                guard !fileManager.fileExists(atPath: candidate.filePath) else {
+                    continue
+                }
+                let relativePath = String(candidate.filePath.dropFirst(legacyPrefix.count))
+                let repairedPath = "\(currentPrefix)\(relativePath)"
+                guard fileManager.fileExists(atPath: repairedPath) else {
+                    continue
+                }
+                try database.run("""
+                UPDATE papers SET file_path = ? WHERE id = ? AND file_path = ?;
+                """, bindings: [
+                    .text(repairedPath),
+                    .text(candidate.id),
+                    .text(candidate.filePath)
+                ])
+                try database.run("""
+                UPDATE paper_files SET local_path = ? WHERE paper_id = ? AND local_path = ?;
+                """, bindings: [
+                    .text(repairedPath),
+                    .text(candidate.id),
+                    .text(candidate.filePath)
+                ])
+                repaired += 1
+            }
+        }
+        return repaired
+    }
+
     public func setPaperStarred(_ isStarred: Bool, paperID: String, updatedAt: Date = Date()) throws {
         try database.run("""
         UPDATE papers
