@@ -1671,12 +1671,14 @@ func runUILayoutSourceChecks() throws {
         )
         try check(
             messageBubbleSource.contains("ChatRoleBadge(")
-                && messageBubbleSource.contains("ChatMessageBubbleBackground(")
+                && messageBubbleSource.contains("private var agentMessageRow: some View")
+                && messageBubbleSource.contains("private var userMessageRow: some View")
+                && messageBubbleSource.contains("UserMessageBubbleBackground()")
                 && messageBubbleSource.contains("message.createdAt")
                 && messageBubbleSource.contains("messageFontSize")
                 && messageBubbleSource.contains("fontFamily")
                 && !messageBubbleSource.contains(".background(isUser ? Color.blue.opacity(0.12) : Color(nsColor: .textBackgroundColor))"),
-            "reader chat messages should use redesigned role badges, timestamps, and richer bubble backgrounds"
+            "reader chat messages should keep role badges and timestamps while separating full-width Agent replies from user bubbles"
         )
     } else {
         throw CheckFailure(description: "chat message bubble source should remain inspectable")
@@ -3177,19 +3179,23 @@ func runUIDesignSourceChecks() throws {
         try check(
             messageBubbleSource.contains("private var chatBubbleContentWidth: CGFloat?")
                 && messageBubbleSource.contains(".frame(width: chatBubbleContentWidth, alignment: .leading)")
+                && messageBubbleSource.contains(".frame(maxWidth: .infinity, alignment: .leading)")
+                && messageBubbleSource.contains(".padding(.horizontal, 13)")
                 && messageBubbleSource.contains(".padding(.top, 10)")
                 && messageBubbleSource.contains(".padding(.bottom, 8)")
                 && !messageBubbleSource.contains(".padding(.vertical, 11)")
-                && !messageBubbleSource.contains(".frame(maxWidth: .infinity, alignment: .leading)"),
-            "message bubbles should be less bottom-heavy and shrink short messages instead of forcing equal-width bubbles"
+                && !messageBubbleSource.contains("ChatMessageBubbleBackground(isUser: isUser)"),
+            "user message bubbles should still shrink short messages while Agent replies use the available full width"
         )
     } else {
         throw CheckFailure(description: "message bubble source should remain inspectable")
     }
     try check(
-        chatSource.contains("return Color.accentColor.opacity(0.08)")
-            && chatSource.contains("isUser ? Color.accentColor.opacity(0.16) : Color.black.opacity(0.06)"),
-        "chat bubble color and border should stay quieter than the surrounding chrome"
+        chatSource.contains("private struct UserMessageBubbleBackground: View")
+            && chatSource.contains("Color.accentColor.opacity(0.08)")
+            && chatSource.contains("Color.accentColor.opacity(0.16)")
+            && !chatSource.contains("private struct ChatMessageBubbleBackground: View"),
+        "only user chat bubbles should keep a quiet framed background"
     )
 }
 

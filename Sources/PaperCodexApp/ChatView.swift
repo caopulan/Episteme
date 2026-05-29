@@ -1589,6 +1589,9 @@ private struct MessageBubble: View {
     }
 
     private var chatBubbleContentWidth: CGFloat? {
+        guard isUser else {
+            return nil
+        }
         let trimmedMarkdown = renderedMarkdown.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedMarkdown.isEmpty else {
             return nil
@@ -1617,74 +1620,107 @@ private struct MessageBubble: View {
     }
 
     var body: some View {
+        if isUser {
+            userMessageRow
+        } else {
+            agentMessageRow
+        }
+    }
+
+    private var userMessageRow: some View {
         HStack(alignment: .top, spacing: 10) {
-            if isUser {
-                Spacer(minLength: 44)
-            }
+            Spacer(minLength: 44)
 
-            if !isUser {
-                ChatRoleBadge(isUser: false)
+            VStack(alignment: .trailing, spacing: 7) {
+                messageHeader
+                messageContent
+                    .padding(.horizontal, 13)
+                    .padding(.top, 10)
+                    .padding(.bottom, 8)
+                    .background(UserMessageBubbleBackground())
             }
+            .paperCodexReadableLineLimit(alignment: .trailing)
 
-            VStack(alignment: isUser ? .trailing : .leading, spacing: 7) {
-                HStack(spacing: 6) {
-                    Text(isUser ? "You" : "Agent")
-                        .font(fontFamily.swiftUIFont(size: max(11, messageFontSize - 4), weight: .semibold))
-                    Text(message.createdAt, style: .time)
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(.secondary.opacity(0.82))
+            ChatRoleBadge(isUser: true)
+        }
+    }
+
+    private var agentMessageRow: some View {
+        HStack(alignment: .top, spacing: 10) {
+            ChatRoleBadge(isUser: false)
+
+            VStack(alignment: .leading, spacing: 7) {
+                messageHeader
+                messageContent
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var messageHeader: some View {
+        HStack(spacing: 6) {
+            Text(isUser ? "You" : "Agent")
+                .font(fontFamily.swiftUIFont(size: max(11, messageFontSize - 4), weight: .semibold))
+            Text(message.createdAt, style: .time)
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(.secondary.opacity(0.82))
+        }
+        .foregroundStyle(isUser ? Color.accentColor : Color.secondary)
+    }
+
+    private var messageContent: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            if let userSourceAttachment {
+                UserSourceReplyView(attachment: userSourceAttachment, onOpen: onCitation)
+            }
+            if !renderedMarkdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                markdownMessage
+            }
+            let imageURLs = generatedImageURLs(in: message.content)
+            if !imageURLs.isEmpty {
+                GeneratedImageGallery(urls: imageURLs, onPreview: onGeneratedImagePreview)
+            }
+            if failureNotice != nil {
+                HStack(spacing: 8) {
+                    ChatPanelActionButton(disabled: isBusy) {
+                        onRetryFailure(message.id)
+                    } label: {
+                        Label("Retry", systemImage: "arrow.clockwise")
+                    }
+
+                    ChatPanelActionButton(disabled: isBusy) {
+                        onNewSession()
+                    } label: {
+                        Label("New Session", systemImage: "plus.bubble")
+                    }
                 }
-                .foregroundStyle(isUser ? Color.accentColor : Color.secondary)
-
-                VStack(alignment: .leading, spacing: 9) {
-                    if let userSourceAttachment {
-                        UserSourceReplyView(attachment: userSourceAttachment, onOpen: onCitation)
-                    }
-                    if !renderedMarkdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        MarkdownMessageView(
-                            messageID: message.id,
-                            markdown: renderedMarkdown,
-                            fontSize: messageFontSize,
-                            fontFamily: fontFamily,
-                            onCitation: onCitation
-                        )
-                        .frame(width: chatBubbleContentWidth, alignment: .leading)
-                    }
-                    let imageURLs = generatedImageURLs(in: message.content)
-                    if !imageURLs.isEmpty {
-                        GeneratedImageGallery(urls: imageURLs, onPreview: onGeneratedImagePreview)
-                    }
-                    if failureNotice != nil {
-                        HStack(spacing: 8) {
-                            ChatPanelActionButton(disabled: isBusy) {
-                                onRetryFailure(message.id)
-                            } label: {
-                                Label("Retry", systemImage: "arrow.clockwise")
-                            }
-
-                            ChatPanelActionButton(disabled: isBusy) {
-                                onNewSession()
-                            } label: {
-                                Label("New Session", systemImage: "plus.bubble")
-                            }
-                        }
-                        .padding(.top, 2)
-                    }
-                }
-                .padding(.horizontal, 13)
-                .padding(.top, 10)
-                .padding(.bottom, 8)
-                .background(ChatMessageBubbleBackground(isUser: isUser))
+                .padding(.top, 2)
             }
-            .paperCodexReadableLineLimit(alignment: isUser ? .trailing : .leading)
+        }
+    }
 
-            if !isUser {
-                Spacer(minLength: 44)
-            }
-
-            if isUser {
-                ChatRoleBadge(isUser: true)
-            }
+    @ViewBuilder
+    private var markdownMessage: some View {
+        if isUser {
+            MarkdownMessageView(
+                messageID: message.id,
+                markdown: renderedMarkdown,
+                fontSize: messageFontSize,
+                fontFamily: fontFamily,
+                onCitation: onCitation
+            )
+            .frame(width: chatBubbleContentWidth, alignment: .leading)
+        } else {
+            MarkdownMessageView(
+                messageID: message.id,
+                markdown: renderedMarkdown,
+                fontSize: messageFontSize,
+                fontFamily: fontFamily,
+                onCitation: onCitation
+            )
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }
@@ -1710,32 +1746,15 @@ private struct ChatRoleBadge: View {
     }
 }
 
-private struct ChatMessageBubbleBackground: View {
-    var isUser: Bool
-
+private struct UserMessageBubbleBackground: View {
     var body: some View {
         RoundedRectangle(cornerRadius: PaperCodexCornerRadius.control)
-            .fill(fill)
+            .fill(Color.accentColor.opacity(0.08))
             .overlay(
                 RoundedRectangle(cornerRadius: PaperCodexCornerRadius.control)
-                    .stroke(stroke, lineWidth: 1)
+                    .stroke(Color.accentColor.opacity(0.16), lineWidth: 1)
             )
-            .shadow(color: shadow, radius: isUser ? 7 : 6, y: 3)
-    }
-
-    private var fill: Color {
-        if isUser {
-            return Color.accentColor.opacity(0.08)
-        }
-        return PaperCodexSurface.text
-    }
-
-    private var stroke: Color {
-        isUser ? Color.accentColor.opacity(0.16) : Color.black.opacity(0.06)
-    }
-
-    private var shadow: Color {
-        isUser ? Color.accentColor.opacity(0.10) : Color.black.opacity(0.05)
+            .shadow(color: Color.accentColor.opacity(0.10), radius: 7, y: 3)
     }
 }
 
