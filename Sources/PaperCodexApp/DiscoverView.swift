@@ -5,6 +5,10 @@ import SwiftUI
 
 private let discoverMediaHorizontalPadding: CGFloat = 14
 private let discoverRouteToolbarMinHeight: CGFloat = 126
+private let discoverPaperGridHorizontalPadding: CGFloat = 10
+private let discoverPaperGridVerticalPadding: CGFloat = 8
+private let discoverPaperGridColumnSpacing: CGFloat = 16
+private let discoverPaperGridRowSpacing: CGFloat = 14
 
 private enum DiscoverImagePreloadPolicy {
     static let visiblePaperLimit = 36
@@ -21,6 +25,14 @@ private struct DiscoverLayoutSignature: Hashable {
 private struct DiscoverImageWarmupSignature: Hashable {
     var layout: DiscoverLayoutSignature
     var imageCount: Int
+}
+
+private func discoverPaperGridColumnWidth(for containerWidth: CGFloat, columnCount: Int) -> CGFloat {
+    let safeColumnCount = max(columnCount, 1)
+    let totalHorizontalPadding = discoverPaperGridHorizontalPadding * 2
+    let totalColumnSpacing = discoverPaperGridColumnSpacing * CGFloat(safeColumnCount - 1)
+    let availableWidth = max(0, containerWidth - totalHorizontalPadding - totalColumnSpacing)
+    return floor(availableWidth / CGFloat(safeColumnCount))
 }
 
 struct DiscoverView: View {
@@ -318,6 +330,7 @@ struct DiscoverView: View {
             } else {
                 GeometryReader { proxy in
                     let columnCount = gridColumnCount(for: proxy.size.width)
+                    let columnWidth = discoverPaperGridColumnWidth(for: proxy.size.width, columnCount: columnCount)
                     let rows = paperRows(visiblePapers, columnCount: columnCount)
                     let layoutSignature = rowLayoutSignature(papers: visiblePapers, columnCount: columnCount)
                     let imagePreloadURLs = discoverImagePreloadURLs(for: visiblePapers)
@@ -328,16 +341,17 @@ struct DiscoverView: View {
 
                     ScrollViewReader { scrollProxy in
                         ScrollView {
-                            LazyVStack(alignment: .leading, spacing: 14) {
+                            LazyVStack(alignment: .leading, spacing: discoverPaperGridRowSpacing) {
                                 ForEach(Array(rows.enumerated()), id: \.offset) { rowIndex, rowPapers in
-                                    HStack(alignment: .top, spacing: 16) {
+                                    HStack(alignment: .top, spacing: discoverPaperGridColumnSpacing) {
                                         ForEach(rowPapers) { paper in
                                             discoverCard(for: paper, rowIndex: rowIndex)
+                                                .frame(width: columnWidth, alignment: .topLeading)
                                                 .id(paper.id)
                                         }
                                         ForEach(0..<max(0, columnCount - rowPapers.count), id: \.self) { _ in
                                             Color.clear
-                                                .frame(maxWidth: .infinity)
+                                                .frame(width: columnWidth)
                                         }
                                     }
                                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -348,8 +362,8 @@ struct DiscoverView: View {
                                 }
                             }
                             .scrollTargetLayout()
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 8)
+                            .padding(.horizontal, discoverPaperGridHorizontalPadding)
+                            .padding(.vertical, discoverPaperGridVerticalPadding)
                             .task(id: warmupSignature) {
                                 await warmDiscoverLocalImages(imagePreloadURLs)
                             }
@@ -839,25 +853,27 @@ struct ArxivSearchView: View {
             } else {
                 GeometryReader { proxy in
                     let columnCount = gridColumnCount(for: proxy.size.width)
+                    let columnWidth = discoverPaperGridColumnWidth(for: proxy.size.width, columnCount: columnCount)
                     let rows = paperRows(papers, columnCount: columnCount)
                     let imagePreloadURLs = discoverImagePreloadURLs(for: papers)
                     ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 14) {
+                        LazyVStack(alignment: .leading, spacing: discoverPaperGridRowSpacing) {
                             ForEach(Array(rows.enumerated()), id: \.offset) { rowIndex, rowPapers in
-                                HStack(alignment: .top, spacing: 16) {
+                                HStack(alignment: .top, spacing: discoverPaperGridColumnSpacing) {
                                     ForEach(rowPapers) { paper in
                                         discoverCard(for: paper, rowIndex: rowIndex)
+                                            .frame(width: columnWidth, alignment: .topLeading)
                                     }
                                     ForEach(0..<max(0, columnCount - rowPapers.count), id: \.self) { _ in
                                         Color.clear
-                                            .frame(maxWidth: .infinity)
+                                            .frame(width: columnWidth)
                                     }
                                 }
                                 .frame(maxWidth: .infinity, alignment: .leading)
                             }
                         }
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 8)
+                        .padding(.horizontal, discoverPaperGridHorizontalPadding)
+                        .padding(.vertical, discoverPaperGridVerticalPadding)
                         .task(id: imagePreloadURLs.map(\.path).joined(separator: "|")) {
                             await warmDiscoverLocalImages(imagePreloadURLs)
                         }

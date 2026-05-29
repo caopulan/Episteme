@@ -2997,6 +2997,15 @@ func runUILayoutSourceChecks() throws {
         "Discover paper images should use a small horizontal inset aligned with card text"
     )
     try check(
+        discoverSource.contains("private func discoverPaperGridColumnWidth(for containerWidth: CGFloat, columnCount: Int) -> CGFloat")
+            && discoverSource.contains("let columnWidth = discoverPaperGridColumnWidth(for: proxy.size.width, columnCount: columnCount)")
+            && discoverSource.components(separatedBy: ".frame(width: columnWidth, alignment: .topLeading)").count - 1 >= 2
+            && discoverSource.components(separatedBy: ".frame(width: columnWidth)").count - 1 >= 2
+            && !discoverSource.contains("Color.clear\n                                                .frame(maxWidth: .infinity)")
+            && !discoverSource.contains("Color.clear\n                                            .frame(maxWidth: .infinity)"),
+        "Discover and Search paper rows should reserve stable fixed-width grid tracks"
+    )
+    try check(
         appModelSource.contains("tokenUsage: CodexTokenUsage?")
             && appModelSource.contains("aggregateTokenUsage")
             && appModelSource.contains("Process Tokens")
