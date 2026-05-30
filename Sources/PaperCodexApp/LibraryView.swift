@@ -15,7 +15,6 @@ struct LibraryView: View {
     @State private var selectedPaperIDs: Set<String> = []
     @State private var lastSelectedPaperID: String?
     @State private var lastPaperRowClick: LibraryPaperRowClick?
-    @FocusState private var isPaperListFocused: Bool
     @State private var isShowingBulkCopy = false
     @State private var isShowingBulkTag = false
     @State private var isConfirmingBulkDelete = false
@@ -31,6 +30,7 @@ struct LibraryView: View {
     @State private var editingNoteID: String?
     @State private var selectedRecentSessionID: String?
     @State private var selectedPaperRevealRequestID: UUID?
+    @State private var paperTableFocusRequestID: UUID?
     @State private var inspectorDetailsPaperID: String?
     @State private var inspectorDetailsRequestID: UUID?
     @State private var isInspectorReadButtonHovering = false
@@ -535,65 +535,44 @@ struct LibraryView: View {
                 ContentUnavailableView("No Papers", systemImage: "doc.text.magnifyingglass")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                ScrollViewReader { scrollProxy in
-                    LibraryPaperList(papers: listState.papers) { paper in
-                        PaperRow(
-                            paper: paper,
-                            categories: categories(for: paper),
-                            tags: model.paperTagsByID[paper.id, default: []],
-                            thumbnailURLs: model.paperThumbnailURLsByID[paper.id, default: []],
-                            isImportPlaceholder: paper.isArxivImportPlaceholder,
-                            placeholderDetail: model.arxivImportPlaceholderDetail(for: paper),
-                            isSelected: model.selectedLibraryPaper?.id == paper.id,
-                            isMultiSelected: selectedPaperIDs.contains(paper.id),
-                            onToggleStar: {
-                                model.togglePaperStar(paper)
-                            },
-                            onRead: {
-                                model.openPaper(paper)
-                            }
-                        )
-                        .contentShape(Rectangle())
-                        .onDrag {
-                            outlineDraggedCategoryID = nil
-                            return NSItemProvider(object: paperDragPayload(for: paper) as NSString)
-                        } preview: {
-                            PaperDragPreview(
-                                paper: paper,
-                                selectedCount: dragPreviewPaperIDs(for: paper).count
-                            )
+                let paperTableRows = paperTableRows(for: listState.papers)
+                LibraryPaperTableView(
+                    rows: paperTableRows,
+                    selectedPaperID: model.selectedLibraryPaper?.id,
+                    revealRequestID: selectedPaperRevealRequestID,
+                    focusRequestID: paperTableFocusRequestID,
+                    onMoveSelection: moveFocusedPaperSelection(by:)
+                ) { row in
+                    let paper = row.paper
+                    PaperRow(
+                        paper: paper,
+                        categories: row.categories,
+                        tags: row.tags,
+                        thumbnailURLs: row.thumbnailURLs,
+                        isImportPlaceholder: row.isImportPlaceholder,
+                        placeholderDetail: row.placeholderDetail,
+                        isSelected: row.isSelected,
+                        isMultiSelected: row.isMultiSelected,
+                        onToggleStar: {
+                            model.togglePaperStar(paper)
+                        },
+                        onRead: {
+                            model.openPaper(paper)
                         }
-                        .onTapGesture {
-                            handlePaperRowClick(paper)
-                            isPaperListFocused = true
-                        }
-                    }
-                    .focusable()
-                    .focused($isPaperListFocused)
-                    .background(
-                        LibraryPaperKeyboardBridge(
-                            isActive: isPaperListFocused,
-                            onMoveUp: {
-                                moveFocusedPaperSelection(by: -1)
-                            },
-                            onMoveDown: {
-                                moveFocusedPaperSelection(by: 1)
-                            }
-                        )
                     )
-                    .onChange(of: model.selectedLibraryPaper?.id) { _, selectedPaperID in
-                        guard selectedPaperRevealRequestID != nil else {
-                            return
-                        }
-                        selectedPaperRevealRequestID = nil
-                        guard isPaperListFocused,
-                              let selectedPaperID,
-                              listState.paperIDs.contains(selectedPaperID) else {
-                            return
-                        }
-                        withAnimation(PaperCodexMotion.selection) {
-                            scrollProxy.scrollTo(selectedPaperID, anchor: .center)
-                        }
+                    .contentShape(Rectangle())
+                    .onDrag {
+                        outlineDraggedCategoryID = nil
+                        return NSItemProvider(object: paperDragPayload(for: paper) as NSString)
+                    } preview: {
+                        PaperDragPreview(
+                            paper: paper,
+                            selectedCount: dragPreviewPaperIDs(for: paper).count
+                        )
+                    }
+                    .onTapGesture {
+                        paperTableFocusRequestID = UUID()
+                        handlePaperRowClick(paper)
                     }
                 }
                 .overlay(alignment: .top) {
@@ -970,7 +949,7 @@ struct LibraryView: View {
         lastSelectedPaperID = nextPaper.id
         selectedPaperRevealRequestID = UUID()
         focusLibraryPaper(nextPaper)
-        isPaperListFocused = true
+        paperTableFocusRequestID = UUID()
     }
 
     private func togglePaperSelection(_ paper: Paper) {
@@ -1260,6 +1239,21 @@ struct LibraryView: View {
     private func categories(for paper: Paper) -> [PaperCodexCore.Category] {
         let ids = Set(model.paperCategoryIDsByID[paper.id, default: []])
         return model.categories.filter { ids.contains($0.id) }
+    }
+
+    private func paperTableRows(for papers: [Paper]) -> [LibraryPaperTableRow] {
+        papers.map { paper in
+            LibraryPaperTableRow(
+                paper: paper,
+                categories: categories(for: paper),
+                tags: model.paperTagsByID[paper.id, default: []],
+                thumbnailURLs: model.paperThumbnailURLsByID[paper.id, default: []],
+                isImportPlaceholder: paper.isArxivImportPlaceholder,
+                placeholderDetail: model.arxivImportPlaceholderDetail(for: paper),
+                isSelected: model.selectedLibraryPaper?.id == paper.id,
+                isMultiSelected: selectedPaperIDs.contains(paper.id)
+            )
+        }
     }
 
     private func presentPDFImportPanel() {
@@ -1886,95 +1880,6 @@ private struct LibraryCategoryTreeSnapshot {
             return left.name.localizedCaseInsensitiveCompare(right.name) == .orderedAscending
         }
         return left.sortOrder < right.sortOrder
-    }
-}
-
-private struct LibraryPaperList<RowContent: View>: View {
-    var papers: [Paper]
-    @ViewBuilder var rowContent: (Paper) -> RowContent
-
-    var body: some View {
-        List(papers) { paper in
-            rowContent(paper)
-                .id(paper.id)
-                .listRowInsets(EdgeInsets(top: 2, leading: 0, bottom: 2, trailing: 0))
-                .listRowSeparator(.hidden)
-                .listRowBackground(Color.clear)
-        }
-        .listStyle(.plain)
-        .scrollContentBackground(.hidden)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-}
-
-private struct LibraryPaperKeyboardBridge: NSViewRepresentable {
-    var isActive: Bool
-    var onMoveUp: () -> Void
-    var onMoveDown: () -> Void
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator()
-    }
-
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView(frame: .zero)
-        context.coordinator.installMonitor()
-        DispatchQueue.main.async { [weak view, weak coordinator = context.coordinator] in
-            coordinator?.targetWindow = view?.window
-        }
-        return view
-    }
-
-    func updateNSView(_ view: NSView, context: Context) {
-        context.coordinator.targetWindow = view.window
-        context.coordinator.isActive = isActive
-        context.coordinator.onMoveUp = onMoveUp
-        context.coordinator.onMoveDown = onMoveDown
-        context.coordinator.installMonitor()
-    }
-
-    final class Coordinator {
-        weak var targetWindow: NSWindow?
-        var isActive = false
-        var onMoveUp: () -> Void = {}
-        var onMoveDown: () -> Void = {}
-        private var monitor: Any?
-
-        deinit {
-            if let monitor {
-                NSEvent.removeMonitor(monitor)
-            }
-        }
-
-        func installMonitor() {
-            guard monitor == nil else {
-                return
-            }
-            monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-                self?.handleKeyDown(event) ?? event
-            }
-        }
-
-        private func handleKeyDown(_ event: NSEvent) -> NSEvent? {
-            guard isActive,
-                  targetWindow === event.window else {
-                return event
-            }
-            let disallowedModifiers = event.modifierFlags.intersection([.command, .option, .control, .shift])
-            guard disallowedModifiers.isEmpty else {
-                return event
-            }
-            switch event.keyCode {
-            case 126:
-                onMoveUp()
-                return nil
-            case 125:
-                onMoveDown()
-                return nil
-            default:
-                return event
-            }
-        }
     }
 }
 

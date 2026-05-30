@@ -969,6 +969,7 @@ func runUILayoutSourceChecks() throws {
     let libraryViewURL = root.appendingPathComponent("Sources/PaperCodexApp/LibraryView.swift")
     let librarySource = try String(contentsOf: libraryViewURL)
     let libraryCategoryOutlineSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/LibraryCategoryOutlineView.swift"))
+    let libraryPaperTableSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/LibraryPaperTableView.swift"))
     let appModelURL = root.appendingPathComponent("Sources/PaperCodexApp/AppModel.swift")
     let appModelSource = try String(contentsOf: appModelURL)
     let libraryFeatureStoreSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/LibraryFeatureStore.swift"))
@@ -1031,6 +1032,22 @@ func runUILayoutSourceChecks() throws {
             && librarySource.contains("This folder")
             && librarySource.contains("All levels"),
         "library folders should keep search, scope, count, and reading actions in one inline toolbar without a breadcrumb path"
+    )
+    try check(
+        librarySource.contains("LibraryPaperTableView(")
+            && !librarySource.contains("LibraryPaperList(")
+            && !librarySource.contains("List(papers)")
+            && !librarySource.contains("ScrollViewReader")
+            && !librarySource.contains("LibraryPaperKeyboardBridge")
+            && libraryPaperTableSource.contains("NSTableView")
+            && libraryPaperTableSource.contains("NSScrollView")
+            && libraryPaperTableSource.contains("NSViewRepresentable")
+            && libraryPaperTableSource.contains("NSHostingView")
+            && libraryPaperTableSource.contains("LibraryPaperTableRow")
+            && libraryPaperTableSource.contains("scrollRowToVisibleCentered")
+            && libraryPaperTableSource.contains("keyDown(with event:")
+            && libraryPaperTableSource.contains("reloadData()"),
+        "library paper list should use a native NSTableView-backed scroll surface with row reuse, keyboard navigation, and centered reveal"
     )
     try check(
         librarySource.contains("private var sidebarLists: some View") &&
@@ -1266,9 +1283,12 @@ func runUILayoutSourceChecks() throws {
     try check(
         librarySource.contains("@State private var selectedPaperRevealRequestID")
             && librarySource.contains("selectedPaperRevealRequestID = UUID()")
-            && librarySource.contains("guard selectedPaperRevealRequestID != nil")
-            && !librarySource.contains(".onChange(of: model.selectedLibraryPaper?.id) { _, selectedPaperID in\n                        guard isPaperListFocused"),
-        "paper clicks should not trigger animated scroll-to-center; only keyboard navigation should request reveal"
+            && librarySource.contains("@State private var paperTableFocusRequestID")
+            && librarySource.contains("revealRequestID: selectedPaperRevealRequestID")
+            && libraryPaperTableSource.contains("lastRevealRequestID")
+            && libraryPaperTableSource.contains("scrollRowToVisibleCentered")
+            && !librarySource.contains("scrollProxy.scrollTo(selectedPaperID, anchor: .center)"),
+        "paper clicks should not trigger animated scroll-to-center; only native table keyboard navigation should request reveal"
     )
     try check(
         librarySource.contains("@State private var inspectorDetailsPaperID")
@@ -2079,11 +2099,13 @@ func runUILayoutSourceChecks() throws {
         "reader chat header should use a compact single-row control layout with smaller session actions"
     )
     try check(
-        librarySource.contains("LibraryPaperList")
-            && librarySource.contains(".listStyle(.plain)")
+        librarySource.contains("LibraryPaperTableView(")
+            && libraryPaperTableSource.contains("NSTableView")
+            && libraryPaperTableSource.contains("NSScrollView")
+            && libraryPaperTableSource.contains("NSHostingView")
             && librarySource.contains("paperRowThumbnailLimit")
             && librarySource.contains("paperRowThumbnailMaxPixelSize"),
-        "library paper scrolling should use a virtualized plain list with a bounded thumbnail strip"
+        "library paper scrolling should use a native table scroll surface with a bounded thumbnail strip"
     )
     try check(
         localThumbnailSource.contains("LocalThumbnailDecodeGate")
@@ -2461,16 +2483,17 @@ func runUILayoutSourceChecks() throws {
         "Library focused papers should have direct keyboard commands for reading and chat"
     )
     try check(
-        librarySource.contains("@FocusState private var isPaperListFocused")
-            && librarySource.contains("ScrollViewReader { scrollProxy in")
-            && librarySource.contains("LibraryPaperKeyboardBridge(")
-            && librarySource.contains("NSEvent.addLocalMonitorForEvents(matching: .keyDown)")
-            && librarySource.contains("case 126:")
-            && librarySource.contains("case 125:")
+        librarySource.contains("@State private var paperTableFocusRequestID")
+            && librarySource.contains("focusRequestID: paperTableFocusRequestID")
+            && librarySource.contains("onMoveSelection: moveFocusedPaperSelection(by:)")
+            && libraryPaperTableSource.contains("override func keyDown(with event:")
+            && libraryPaperTableSource.contains("case 126:")
+            && libraryPaperTableSource.contains("case 125:")
             && librarySource.contains("private func moveFocusedPaperSelection(by offset: Int)")
-            && librarySource.contains("scrollProxy.scrollTo(selectedPaperID, anchor: .center)")
-            && librarySource.contains("isPaperListFocused = true"),
-        "Library paper lists should support focused arrow-key browsing and keep the selected row visible"
+            && libraryPaperTableSource.contains("scrollRowToVisibleCentered")
+            && librarySource.contains("paperTableFocusRequestID = UUID()")
+            && !librarySource.contains("NSEvent.addLocalMonitorForEvents(matching: .keyDown)"),
+        "Library paper lists should support focused native table arrow-key browsing and keep the selected row visible"
     )
     try check(
         rootViewSource.contains("GlobalOperationStatusView"),
@@ -2586,10 +2609,11 @@ func runUILayoutSourceChecks() throws {
         "library folder hierarchy should use native outline indentation instead of custom SwiftUI connector drawing"
     )
     try check(
-        (librarySource.contains("LibraryPaperList(papers: visiblePapers)")
-            || librarySource.contains("LibraryPaperList(papers: listState.papers)"))
-            && librarySource.contains("listRowInsets"),
-        "library paper rows should reduce inter-card gaps and make the card hit area larger"
+        librarySource.contains("LibraryPaperTableView(")
+            && librarySource.contains("rows: paperTableRows")
+            && libraryPaperTableSource.contains("tableView.rowHeight")
+            && libraryPaperTableSource.contains("heightOfRow"),
+        "library paper rows should keep dense, stable native table row sizing instead of SwiftUI list row insets"
     )
     try check(
         librarySource.contains("categoryManagementSheet"),
