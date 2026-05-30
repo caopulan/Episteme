@@ -2717,152 +2717,38 @@ private struct SavedActionBadge: View {
 }
 
 private struct SaveActionButton: View {
-    @State private var isHovering = false
-
     var isBusy: Bool
     var action: () -> Void
 
     var body: some View {
-        Button(action: action) {
-            Label("Add", systemImage: "tray.and.arrow.down")
-                .font(.paperCodexSystem(size: 13, weight: .semibold))
-                .padding(.horizontal, 10)
-                .frame(height: 26)
-        }
-        .buttonStyle(SaveActionButtonStyle(isBusy: isBusy, isHovering: isHovering))
-        .disabled(isBusy)
-        .help("Add to Library")
+        PaperCodexCardActionButton(
+            title: "Add",
+            systemImage: "tray.and.arrow.down",
+            kind: .success,
+            disabled: isBusy,
+            help: "Add to Library",
+            action: action
+        )
         .fixedSize()
         .layoutPriority(1)
-        .onHover { hovering in
-            withAnimation(.easeOut(duration: 0.12)) {
-                isHovering = hovering
-            }
-        }
-    }
-}
-
-private struct SaveActionButtonStyle: ButtonStyle {
-    var isBusy: Bool
-    var isHovering: Bool
-
-    private let tint = Color(nsColor: .systemGreen)
-
-    func makeBody(configuration: Configuration) -> some View {
-        let isPressed = configuration.isPressed && !isBusy
-        configuration.label
-            .foregroundStyle(foregroundColor(isPressed: isPressed))
-            .background(
-                RoundedRectangle(cornerRadius: 7)
-                    .fill(backgroundColor(isPressed: isPressed))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 7)
-                            .stroke(borderColor(isPressed: isPressed), lineWidth: 1)
-                    )
-            )
-            .shadow(color: shadowColor(isPressed: isPressed), radius: isPressed ? 4 : 7, y: isPressed ? 1 : 3)
-            .scaleEffect(isPressed ? 0.965 : (isHovering && !isBusy ? 1.025 : 1), anchor: .center)
-            .animation(PaperCodexMotion.press, value: configuration.isPressed)
-            .animation(PaperCodexMotion.hover, value: isHovering)
-            .animation(PaperCodexMotion.hover, value: isBusy)
-    }
-
-    private func foregroundColor(isPressed: Bool) -> Color {
-        if isBusy {
-            return Color.secondary.opacity(0.6)
-        }
-        return isPressed || isHovering ? tint : Color.primary.opacity(0.86)
-    }
-
-    private func backgroundColor(isPressed: Bool) -> Color {
-        if isPressed {
-            return tint.opacity(0.20)
-        }
-        return isHovering && !isBusy ? tint.opacity(0.13) : Color(nsColor: .controlBackgroundColor)
-    }
-
-    private func borderColor(isPressed: Bool) -> Color {
-        if isPressed {
-            return tint.opacity(0.58)
-        }
-        return isHovering && !isBusy ? tint.opacity(0.44) : Color.black.opacity(0.12)
-    }
-
-    private func shadowColor(isPressed: Bool) -> Color {
-        if isBusy {
-            return .clear
-        }
-        return isPressed || isHovering ? tint.opacity(isPressed ? 0.12 : 0.18) : .clear
     }
 }
 
 private struct StableOpenButton: View {
-    @State private var isHovering = false
-
     var isBusy: Bool
     var action: () -> Void
 
     var body: some View {
-        Button(action: action) {
-            Label("Open", systemImage: "book")
-                .font(.paperCodexSystem(size: 13, weight: .semibold))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 11)
-                .frame(height: 26)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(StableOpenButtonStyle(isBusy: isBusy, isHovering: isHovering))
-        .disabled(isBusy)
-        .opacity(isBusy ? 0.65 : 1)
-        .help("Open in reader")
+        PaperCodexCardActionButton(
+            title: "Open",
+            systemImage: "book",
+            kind: .primary,
+            disabled: isBusy,
+            help: "Open in reader",
+            action: action
+        )
         .fixedSize()
         .layoutPriority(2)
-        .onHover { hovering in
-            withAnimation(.easeOut(duration: 0.12)) {
-                isHovering = hovering
-            }
-        }
-    }
-}
-
-private struct StableOpenButtonStyle: ButtonStyle {
-    var isBusy: Bool
-    var isHovering: Bool
-
-    private let tint = Color(nsColor: .systemBlue)
-
-    func makeBody(configuration: Configuration) -> some View {
-        let isPressed = configuration.isPressed && !isBusy
-        configuration.label
-            .background(backgroundColor(isPressed: isPressed))
-            .clipShape(RoundedRectangle(cornerRadius: 7))
-            .overlay(
-                RoundedRectangle(cornerRadius: 7)
-                    .stroke(isPressed ? Color.white.opacity(0.36) : Color.clear, lineWidth: 1)
-            )
-            .shadow(color: shadowColor(isPressed: isPressed), radius: isPressed ? 4 : 8, y: isPressed ? 1 : 3)
-            .scaleEffect(isPressed ? 0.965 : (isHovering && !isBusy ? 1.025 : 1), anchor: .center)
-            .contentShape(Rectangle())
-            .animation(PaperCodexMotion.press, value: configuration.isPressed)
-            .animation(PaperCodexMotion.hover, value: isHovering)
-            .animation(PaperCodexMotion.hover, value: isBusy)
-    }
-
-    private func backgroundColor(isPressed: Bool) -> Color {
-        if isBusy {
-            return Color.gray.opacity(0.55)
-        }
-        if isPressed {
-            return tint.opacity(0.82)
-        }
-        return isHovering ? tint.opacity(0.92) : tint
-    }
-
-    private func shadowColor(isPressed: Bool) -> Color {
-        if isBusy {
-            return .clear
-        }
-        return isPressed || isHovering ? tint.opacity(isPressed ? 0.16 : 0.26) : .clear
     }
 }
 

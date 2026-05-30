@@ -1889,13 +1889,23 @@ func runUILayoutSourceChecks() throws {
         "chat markdown web view should resolve bundled math assets relative to the app resources directory"
     )
     try check(
-        discoverSource.contains("private struct SaveActionButtonStyle")
-            && discoverSource.contains("private struct StableOpenButtonStyle")
-            && discoverSource.components(separatedBy: "configuration.isPressed").count - 1 >= 2
-            && discoverSource.components(separatedBy: "PaperCodexMotion.press").count - 1 >= 2
-            && discoverSource.contains(".buttonStyle(SaveActionButtonStyle(")
-            && discoverSource.contains(".buttonStyle(StableOpenButtonStyle("),
-        "Discover card save and open actions should provide immediate pressed feedback before busy work starts"
+        actionButtonSource.contains("struct PaperCodexCardActionButton: View")
+            && actionButtonSource.contains("private struct NativePaperCodexCardActionButton: NSViewRepresentable")
+            && actionButtonSource.contains("private final class NativePaperCodexCardActionButtonView: NSButton")
+            && actionButtonSource.components(separatedBy: "override func mouseDown(with event: NSEvent)").count - 1 >= 5
+            && actionButtonSource.components(separatedBy: "setAccessibilityRole(.button)").count - 1 >= 5
+            && actionButtonSource.components(separatedBy: "CATransaction.setAnimationDuration").count - 1 >= 5
+            && discoverSource.contains("PaperCodexCardActionButton(")
+            && discoverSource.contains("title: \"Add\"")
+            && discoverSource.contains("kind: .success")
+            && discoverSource.contains("title: \"Open\"")
+            && discoverSource.contains("kind: .primary")
+            && discoverSource.contains("disabled: isBusy")
+            && !discoverSource.contains("private struct SaveActionButtonStyle")
+            && !discoverSource.contains("private struct StableOpenButtonStyle")
+            && !discoverSource.contains(".buttonStyle(SaveActionButtonStyle(")
+            && !discoverSource.contains(".buttonStyle(StableOpenButtonStyle("),
+        "Discover card save and open actions should use shared native AppKit buttons before busy work starts"
     )
     if let resourceButtonRange = discoverSource.range(of: "private struct ResourceLinkButton: View"),
        let resourceLinkEndRange = discoverSource.range(of: "private struct PaperResourceLink", range: resourceButtonRange.upperBound..<discoverSource.endIndex) {
