@@ -449,18 +449,26 @@ struct LibraryView: View {
                     .padding(.top, LibraryLayout.splitPaneTopInset)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                HSplitView {
-                    primaryContentPane
-                        .padding(.top, LibraryLayout.splitPaneTopInset)
-                        .frame(minWidth: LibraryLayout.libraryPrimaryPaneMinimumWidth)
-                    secondaryContentPane
-                        .padding(.top, LibraryLayout.splitPaneTopInset)
-                        .frame(
-                            minWidth: LibraryLayout.libraryInspectorMinimumWidth,
-                            idealWidth: LibraryLayout.libraryInspectorIdealWidth,
-                            maxWidth: LibraryLayout.libraryInspectorMaximumWidth
-                        )
-                }
+                LibraryContentSplitView(
+                    primaryMinimumWidth: LibraryLayout.libraryPrimaryPaneMinimumWidth,
+                    secondaryMinimumWidth: LibraryLayout.libraryInspectorMinimumWidth,
+                    secondaryIdealWidth: LibraryLayout.libraryInspectorIdealWidth,
+                    secondaryMaximumWidth: LibraryLayout.libraryInspectorMaximumWidth,
+                    {
+                        primaryContentPane
+                            .padding(.top, LibraryLayout.splitPaneTopInset)
+                            .frame(minWidth: LibraryLayout.libraryPrimaryPaneMinimumWidth)
+                    },
+                    secondary: {
+                        secondaryContentPane
+                            .padding(.top, LibraryLayout.splitPaneTopInset)
+                            .frame(
+                                minWidth: LibraryLayout.libraryInspectorMinimumWidth,
+                                idealWidth: LibraryLayout.libraryInspectorIdealWidth,
+                                maxWidth: LibraryLayout.libraryInspectorMaximumWidth
+                            )
+                    }
+                )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }

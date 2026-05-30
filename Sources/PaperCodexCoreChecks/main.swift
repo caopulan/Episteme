@@ -971,6 +971,8 @@ func runUILayoutSourceChecks() throws {
     let libraryCategoryOutlineSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/LibraryCategoryOutlineView.swift"))
     let libraryPaperTableSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/LibraryPaperTableView.swift"))
     let libraryToolbarSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/LibraryToolbarView.swift"))
+    let libraryContentSplitURL = root.appendingPathComponent("Sources/PaperCodexApp/LibraryContentSplitView.swift")
+    let libraryContentSplitSource = FileManager.default.fileExists(atPath: libraryContentSplitURL.path) ? try String(contentsOf: libraryContentSplitURL) : ""
     let appModelURL = root.appendingPathComponent("Sources/PaperCodexApp/AppModel.swift")
     let appModelSource = try String(contentsOf: appModelURL)
     let libraryFeatureStoreSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/LibraryFeatureStore.swift"))
@@ -1023,6 +1025,14 @@ func runUILayoutSourceChecks() throws {
             && librarySource.contains(".frame(minWidth: LibraryLayout.libraryPrimaryPaneMinimumWidth)")
             && librarySource.contains("minWidth: LibraryLayout.libraryInspectorMinimumWidth"),
         "library split panes should use compact shared minimum widths so the middle pane is not clipped by side columns in narrow windows"
+    )
+    try check(
+        librarySource.contains("LibraryContentSplitView(")
+            && libraryContentSplitSource.contains("NSSplitView")
+            && libraryContentSplitSource.contains("LibraryContentSplitContainerView")
+            && libraryContentSplitSource.contains("Library Content Split")
+            && !librarySource.contains("HSplitView"),
+        "library list and inspector panes should use a native AppKit split view instead of SwiftUI HSplitView"
     )
     try check(
         librarySource.contains("LibraryRootFolderRow")
