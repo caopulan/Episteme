@@ -1378,6 +1378,8 @@ func runUILayoutSourceChecks() throws {
     let appKitMenuSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/PaperCodexMainMenu.swift"))
     let chatViewURL = root.appendingPathComponent("Sources/PaperCodexApp/ChatView.swift")
     let chatSource = try String(contentsOf: chatViewURL)
+    let agentTerminalSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/AgentTerminalView.swift"))
+    let agentTerminalNativeSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/AgentTerminalNativePanelView.swift"))
     let chatAppearanceURL = root.appendingPathComponent("Sources/PaperCodexApp/ChatAppearance.swift")
     let chatAppearanceSource = FileManager.default.fileExists(atPath: chatAppearanceURL.path) ? try String(contentsOf: chatAppearanceURL) : ""
     let chatMarkdownRendererSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexCore/ChatMarkdownRenderer.swift"))
@@ -1743,6 +1745,24 @@ func runUILayoutSourceChecks() throws {
             && readerSessionToolbarSource.contains("renameButton")
             && !chatSource.contains("private struct ReaderChatHeaderActionButton: View"),
         "reader chat header actions should be native AppKit controls with direct pressed feedback before session operations"
+    )
+    try check(
+        agentTerminalSource.contains("AgentTerminalNativePanelView(")
+            && agentTerminalNativeSource.contains("NSViewRepresentable")
+            && agentTerminalNativeSource.contains("AgentTerminalContainerView")
+            && agentTerminalNativeSource.contains("NSPopUpButton")
+            && agentTerminalNativeSource.contains("NSStepper")
+            && agentTerminalNativeSource.contains("NSTextView")
+            && agentTerminalNativeSource.contains("NSScrollView")
+            && agentTerminalNativeSource.contains("runtimePopup")
+            && agentTerminalNativeSource.contains("outputTextView")
+            && agentTerminalNativeSource.contains("inputTextView")
+            && agentTerminalNativeSource.contains("sendButton")
+            && agentTerminalNativeSource.contains("startStopButton")
+            && !agentTerminalSource.contains("private var terminalToolbar: some View")
+            && !agentTerminalSource.contains("struct AgentTerminalOutputView: View")
+            && !agentTerminalSource.contains("TextField(\"Terminal input\""),
+        "reader terminal panel should use native AppKit controls for runtime selection, terminal output, sizing, and input"
     )
     if let composerRange = chatSource.range(of: "private var composer: some View"),
        let composerEndRange = chatSource.range(of: "private var composerTopDivider", range: composerRange.upperBound..<chatSource.endIndex) {
@@ -5340,6 +5360,7 @@ func runAgentRuntimeSourceChecks() throws {
     let sourceRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
     let ptySource = try String(contentsOf: sourceRoot.appendingPathComponent("Sources/PaperCodexCore/LocalPTYProcess.swift"))
     let terminalViewSource = try String(contentsOf: sourceRoot.appendingPathComponent("Sources/PaperCodexApp/AgentTerminalView.swift"))
+    let terminalNativeSource = try String(contentsOf: sourceRoot.appendingPathComponent("Sources/PaperCodexApp/AgentTerminalNativePanelView.swift"))
     let chatViewSource = try String(contentsOf: sourceRoot.appendingPathComponent("Sources/PaperCodexApp/ChatView.swift"))
     let readerSessionToolbarSource = try String(contentsOf: sourceRoot.appendingPathComponent("Sources/PaperCodexApp/ReaderSessionToolbarView.swift"))
     let appModelSource = try String(contentsOf: sourceRoot.appendingPathComponent("Sources/PaperCodexApp/AppModel.swift"))
@@ -5356,12 +5377,18 @@ func runAgentRuntimeSourceChecks() throws {
     )
     try check(
         terminalViewSource.contains("struct AgentTerminalView")
-            && terminalViewSource.contains("AgentTerminalOutputView")
+            && terminalViewSource.contains("AgentTerminalNativePanelView")
             && terminalViewSource.contains("terminalInputDraft")
-            && terminalViewSource.contains("startAgentTerminal")
-            && terminalViewSource.contains("sendAgentTerminalInput")
-            && terminalViewSource.contains("resizeAgentTerminal")
-            && terminalViewSource.contains("stopAgentTerminal"),
+            && terminalViewSource.contains("model.startAgentTerminal")
+            && terminalViewSource.contains("model.sendAgentTerminalInput")
+            && terminalViewSource.contains("model.resizeAgentTerminal")
+            && terminalViewSource.contains("model.stopAgentTerminal")
+            && terminalNativeSource.contains("AgentTerminalContainerView")
+            && terminalNativeSource.contains("outputTextView")
+            && terminalNativeSource.contains("inputTextView")
+            && terminalNativeSource.contains("startStopButton")
+            && terminalNativeSource.contains("sendButton")
+            && terminalNativeSource.contains("resizeButton"),
         "AgentTerminalView should expose launch, input, resize, output, and stop controls"
     )
     try check(

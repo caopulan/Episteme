@@ -226,6 +226,16 @@
 "Refresh Codex Status" = "刷新 Codex 状态";
 "Codex" = "Codex";
 "Running" = "运行中";
+"Agent Runtime" = "Agent 运行时";
+"Columns" = "列数";
+"Rows" = "行数";
+"Resize Terminal" = "调整 Terminal 尺寸";
+"Start Terminal" = "启动 Terminal";
+"Stop Terminal" = "停止 Terminal";
+"Terminal unavailable" = "Terminal 不可用";
+"Terminal input" = "Terminal 输入";
+"Terminal output" = "Terminal 输出";
+"Send Input" = "发送输入";
 "Replying to source" = "正在引用来源";
 "Remove source" = "移除来源";
 "Quoted source" = "引用来源";
