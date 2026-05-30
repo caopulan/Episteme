@@ -797,10 +797,9 @@ struct ArxivSearchView: View {
                         }
 
                         ForEach(requiredCategoryOptions, id: \.self) { category in
-                            Toggle(category, isOn: requiredCategoryBinding(for: category))
-                                .toggleStyle(.checkbox)
-                                .font(.paperCodexSystem(size: 13))
-                                .lineLimit(1)
+                            SidebarFilterButton(title: category, selected: model.arxivSearchRequiredCategories.contains(category)) {
+                                toggleRequiredCategory(category)
+                            }
                         }
                     }
 
@@ -992,21 +991,14 @@ struct ArxivSearchView: View {
         .frame(maxWidth: .infinity, minHeight: discoverRouteToolbarMinHeight, alignment: .topLeading)
     }
 
-    private func requiredCategoryBinding(for category: String) -> Binding<Bool> {
-        Binding(
-            get: {
-                model.arxivSearchRequiredCategories.contains(category)
-            },
-            set: { isSelected in
-                var categories = model.arxivSearchRequiredCategories
-                if isSelected {
-                    categories.append(category)
-                } else {
-                    categories.removeAll { $0 == category }
-                }
-                model.arxivSearchRequiredCategories = categories
-            }
-        )
+    private func toggleRequiredCategory(_ category: String) {
+        var categories = model.arxivSearchRequiredCategories
+        if categories.contains(category) {
+            categories.removeAll { $0 == category }
+        } else {
+            categories.append(category)
+        }
+        model.arxivSearchRequiredCategories = categories
     }
 
     private func removeRequiredCategory(_ category: String) {
@@ -1154,88 +1146,227 @@ private enum DiscoverSimilarityBucket: String, CaseIterable, Identifiable {
     }
 }
 
-private struct SidebarFilterButton: View {
-    @State private var isHovering = false
+private enum NativeSidebarFilterMetrics {
+    static let rowHeight: CGFloat = 31
+    static let iconWidth: CGFloat = 18
+    static let horizontalInset: CGFloat = 9
+    static let cornerRadius: CGFloat = PaperCodexCornerRadius.control
+}
 
+private struct SidebarFilterButton: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var title: String
     var detail: String?
     var selected: Bool
     var action: () -> Void
 
     var body: some View {
-        Button(action: action) {
-            HStack(spacing: 8) {
-                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
-                    .frame(width: 18)
-                    .foregroundStyle(selected ? Color.accentColor : Color.secondary)
-                Text(LocalizedStringKey(title))
-                    .lineLimit(1)
-                Spacer()
-                if let detail {
-                    Text(detail)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .padding(.horizontal, 9)
-            .padding(.vertical, 6)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(SidebarFilterButtonStyle(selected: selected, isHovering: isHovering))
-        .onHover { hovering in
-            withAnimation(.easeOut(duration: 0.12)) {
-                isHovering = hovering
-            }
-        }
+        NativeSidebarFilterButton(
+            title: title,
+            detail: detail,
+            selected: selected,
+            reduceMotion: reduceMotion,
+            action: action
+        )
+        .frame(maxWidth: .infinity, minHeight: NativeSidebarFilterMetrics.rowHeight, maxHeight: NativeSidebarFilterMetrics.rowHeight)
     }
 }
 
-private struct SidebarFilterButtonStyle: ButtonStyle {
+private struct NativeSidebarFilterButton: NSViewRepresentable {
+    var title: String
+    var detail: String?
     var selected: Bool
-    var isHovering: Bool
+    var reduceMotion: Bool
+    var action: () -> Void
 
-    func makeBody(configuration: Configuration) -> some View {
-        let isPressed = configuration.isPressed
-        let showsSelectionFeedback = selected || configuration.isPressed
-        configuration.label
-            .background(rowBackground(isPressed: isPressed, showsSelectionFeedback: showsSelectionFeedback))
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-            .shadow(color: shadowColor(isPressed: isPressed), radius: isPressed ? 3 : 5, y: isPressed ? 1 : 2)
-            .scaleEffect(isPressed ? 0.982 : (isHovering && !selected ? 1.01 : 1), anchor: .center)
-            .animation(PaperCodexMotion.press, value: configuration.isPressed)
-            .animation(PaperCodexMotion.hover, value: isHovering)
-            .animation(PaperCodexMotion.selection, value: selected)
+    func makeNSView(context: Context) -> NativeSidebarFilterButtonView {
+        let view = NativeSidebarFilterButtonView()
+        view.apply(title: title, detail: detail, selected: selected, reduceMotion: reduceMotion, action: action)
+        return view
     }
 
-    private func rowBackground(isPressed: Bool, showsSelectionFeedback: Bool) -> some View {
-        RoundedRectangle(cornerRadius: 8)
-            .fill(rowFill(isPressed: isPressed, showsSelectionFeedback: showsSelectionFeedback))
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(rowStroke(isPressed: isPressed), lineWidth: 1)
-            )
+    func updateNSView(_ view: NativeSidebarFilterButtonView, context: Context) {
+        view.apply(title: title, detail: detail, selected: selected, reduceMotion: reduceMotion, action: action)
+    }
+}
+
+private final class NativeSidebarFilterButtonView: NSButton {
+    private let iconView = NSImageView()
+    private let titleLabel = NSTextField(labelWithString: "")
+    private let detailLabel = NSTextField(labelWithString: "")
+    private var trackingArea: NSTrackingArea?
+    private var pressHandler: () -> Void = {}
+    private var isHovering = false
+    private var isPressed = false
+    private var isSelectedRow = false
+    private var reduceMotion = false
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
     }
 
-    private func rowFill(isPressed: Bool, showsSelectionFeedback: Bool) -> Color {
-        if showsSelectionFeedback {
-            return Color.accentColor.opacity(isPressed ? 0.16 : 0.12)
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override var isFlipped: Bool {
+        true
+    }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: NativeSidebarFilterMetrics.rowHeight)
+    }
+
+    func apply(title: String, detail: String?, selected: Bool, reduceMotion: Bool, action: @escaping () -> Void) {
+        pressHandler = action
+        self.reduceMotion = reduceMotion
+        isSelectedRow = selected
+
+        let localizedTitle = NSLocalizedString(title, comment: "")
+        titleLabel.stringValue = localizedTitle
+        detailLabel.stringValue = detail ?? ""
+        detailLabel.isHidden = detail == nil
+        iconView.image = NSImage(
+            systemSymbolName: selected ? "checkmark.circle.fill" : "circle",
+            accessibilityDescription: localizedTitle
+        )
+        toolTip = detail.map { "\(localizedTitle) \($0)" } ?? localizedTitle
+        setAccessibilityLabel(localizedTitle)
+        setAccessibilityValue(selected ? NSLocalizedString("Selected", comment: "") : nil)
+        updateAppearance()
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea {
+            removeTrackingArea(trackingArea)
         }
-        return isHovering ? Color(nsColor: .textBackgroundColor) : Color.clear
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.activeInKeyWindow, .mouseEnteredAndExited, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        trackingArea = area
     }
 
-    private func rowStroke(isPressed: Bool) -> Color {
-        if isPressed {
-            return Color.accentColor.opacity(0.42)
-        }
-        return isHovering ? Color.accentColor.opacity(0.20) : Color.clear
+    override func mouseEntered(with event: NSEvent) {
+        isHovering = true
+        updateAppearance()
     }
 
-    private func shadowColor(isPressed: Bool) -> Color {
-        if isPressed {
-            return Color.accentColor.opacity(0.10)
+    override func mouseExited(with event: NSEvent) {
+        isHovering = false
+        updateAppearance()
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        setPressed(true)
+        super.mouseDown(with: event)
+        setPressed(false)
+    }
+
+    private func setup() {
+        translatesAutoresizingMaskIntoConstraints = false
+        title = ""
+        isBordered = false
+        bezelStyle = .regularSquare
+        imagePosition = .noImage
+        focusRingType = .none
+        setButtonType(.momentaryChange)
+        target = self
+        action = #selector(performPress)
+        setAccessibilityElement(true)
+        setAccessibilityRole(.button)
+        wantsLayer = true
+        layer?.cornerRadius = NativeSidebarFilterMetrics.cornerRadius
+        layer?.masksToBounds = false
+
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+        iconView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 13, weight: .semibold)
+        iconView.imageScaling = .scaleProportionallyDown
+
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        titleLabel.font = .systemFont(ofSize: 13)
+        titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.maximumNumberOfLines = 1
+        titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        detailLabel.translatesAutoresizingMaskIntoConstraints = false
+        detailLabel.font = .systemFont(ofSize: 11)
+        detailLabel.lineBreakMode = .byTruncatingTail
+        detailLabel.maximumNumberOfLines = 1
+        detailLabel.alignment = .right
+        detailLabel.setContentHuggingPriority(.required, for: .horizontal)
+        detailLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        [iconView, titleLabel, detailLabel].forEach(addSubview(_:))
+        NSLayoutConstraint.activate([
+            iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: NativeSidebarFilterMetrics.horizontalInset),
+            iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            iconView.widthAnchor.constraint(equalToConstant: NativeSidebarFilterMetrics.iconWidth),
+            iconView.heightAnchor.constraint(equalToConstant: NativeSidebarFilterMetrics.iconWidth),
+            titleLabel.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 8),
+            titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: detailLabel.leadingAnchor, constant: -8),
+            detailLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            detailLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -NativeSidebarFilterMetrics.horizontalInset)
+        ])
+        updateAppearance()
+    }
+
+    @objc private func performPress() {
+        pressHandler()
+    }
+
+    private func setPressed(_ pressed: Bool) {
+        isPressed = pressed
+        updateAppearance()
+    }
+
+    private func updateAppearance() {
+        let accent = NSColor.controlAccentColor
+        let iconColor: NSColor = isSelectedRow ? accent : .secondaryLabelColor
+        iconView.contentTintColor = iconColor
+        titleLabel.textColor = isSelectedRow ? .labelColor : .labelColor.withAlphaComponent(0.90)
+        detailLabel.textColor = .secondaryLabelColor
+
+        let background: NSColor
+        let border: NSColor
+        if isSelectedRow || isPressed {
+            background = accent.withAlphaComponent(isPressed ? 0.16 : 0.12)
+            border = isPressed ? accent.withAlphaComponent(0.42) : .clear
+        } else if isHovering {
+            background = NSColor.textBackgroundColor
+            border = accent.withAlphaComponent(0.20)
+        } else {
+            background = .clear
+            border = .clear
         }
-        return isHovering ? Color.black.opacity(0.06) : .clear
+
+        layer?.backgroundColor = background.cgColor
+        layer?.borderWidth = border == .clear ? 0 : 1
+        layer?.borderColor = border.cgColor
+        layer?.shadowColor = NSColor.black.cgColor
+        layer?.shadowOpacity = isPressed ? 0.10 : (isHovering ? 0.06 : 0)
+        layer?.shadowRadius = isPressed ? 3 : (isHovering ? 5 : 0)
+        layer?.shadowOffset = CGSize(width: 0, height: isPressed ? -1 : -2)
+
+        let targetScale: CGFloat
+        if reduceMotion {
+            targetScale = 1
+        } else if isPressed {
+            targetScale = 0.982
+        } else {
+            targetScale = isHovering && !isSelectedRow ? 1.01 : 1
+        }
+        CATransaction.begin()
+        CATransaction.setDisableActions(reduceMotion)
+        CATransaction.setAnimationDuration(reduceMotion ? 0 : (isPressed ? 0.05 : 0.12))
+        layer?.transform = CATransform3DMakeScale(targetScale, targetScale, 1)
+        CATransaction.commit()
     }
 }
 

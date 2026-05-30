@@ -1914,12 +1914,16 @@ func runUILayoutSourceChecks() throws {
         throw CheckFailure(description: "Discover media preview button source should remain inspectable")
     }
     try check(
-        discoverSource.contains("private struct SidebarFilterButtonStyle")
-            && discoverSource.contains(".buttonStyle(SidebarFilterButtonStyle(")
-            && discoverSource.contains("selected || configuration.isPressed")
-            && discoverSource.components(separatedBy: "configuration.isPressed").count - 1 >= 3
-            && discoverSource.components(separatedBy: "PaperCodexMotion.press").count - 1 >= 3,
-        "Discover and Search sidebar filter buttons should provide immediate pressed feedback before list recalculation"
+        discoverSource.contains("private struct NativeSidebarFilterButton: NSViewRepresentable")
+            && discoverSource.contains("NativeSidebarFilterButtonView")
+            && discoverSource.contains("final class NativeSidebarFilterButtonView: NSButton")
+            && discoverSource.contains("override func mouseDown(with event: NSEvent)")
+            && discoverSource.contains("setAccessibilityRole(.button)")
+            && discoverSource.contains("setAccessibilityValue(selected ?")
+            && discoverSource.contains("CATransaction.setAnimationDuration")
+            && !discoverSource.contains("private struct SidebarFilterButtonStyle")
+            && !discoverSource.contains(".buttonStyle(SidebarFilterButtonStyle("),
+        "Discover and Search sidebar filter buttons should use native AppKit buttons with immediate pressed feedback before list recalculation"
     )
     if let filterChipRange = discoverSource.range(of: "private struct DiscoverFilterChip: View"),
        let filterChipEndRange = discoverSource.range(of: "private struct ArxivSearchYearField", range: filterChipRange.upperBound..<discoverSource.endIndex) {
@@ -1943,6 +1947,8 @@ func runUILayoutSourceChecks() throws {
             arxivSearchSource.contains("PaperCodexIconButton(\n                    title: sortOrderTitle")
                 && arxivSearchSource.contains("private var sortOrderTitle: String")
                 && arxivSearchSource.contains("private var sortOrderSystemImage: String")
+                && arxivSearchSource.contains("toggleRequiredCategory(category)")
+                && !arxivSearchSource.contains("Toggle(category, isOn: requiredCategoryBinding")
                 && !arxivSearchSource.contains(".buttonStyle(.bordered)"),
             "Search sort direction should use shared immediate icon press feedback instead of the generic bordered button"
         )
