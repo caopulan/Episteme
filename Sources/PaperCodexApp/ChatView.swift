@@ -456,22 +456,18 @@ private struct SessionNotesPanel: View {
     var body: some View {
         Group {
             if let paper = model.selectedPaper {
-                VStack(spacing: 0) {
-                    notesToolbar(for: paper)
-                    Divider()
-                    SessionNotesWorkspace(
-                        paper: paper,
-                        notes: model.paperNotesByID[paper.id, default: []],
-                        selectedNoteID: $selectedNoteID,
-                        noteTitle: $noteTitle,
-                        noteBody: $noteBody,
-                        editingNoteID: $editingNoteID,
-                        onSelect: edit,
-                        onNew: clearNoteDraft,
-                        onSave: saveNote,
-                        onDelete: deleteNote
-                    )
-                }
+                SessionNotesNativePanelView(
+                    paper: paper,
+                    notes: model.paperNotesByID[paper.id, default: []],
+                    selectedNoteID: $selectedNoteID,
+                    noteTitle: $noteTitle,
+                    noteBody: $noteBody,
+                    editingNoteID: $editingNoteID,
+                    onSelect: edit,
+                    onNew: clearNoteDraft,
+                    onSave: saveNote,
+                    onDelete: deleteNote
+                )
                 .onAppear {
                     model.loadPaperNotes(for: paper)
                 }
@@ -485,31 +481,6 @@ private struct SessionNotesPanel: View {
                 model.loadPaperNotes(for: paper)
             }
         }
-    }
-
-    private func notesToolbar(for paper: Paper) -> some View {
-        let notes = model.paperNotesByID[paper.id, default: []]
-        return HStack(spacing: 10) {
-            Label("Paper Notes", systemImage: "note.text")
-                .font(.paperCodexSystem(size: 13.5, weight: .semibold))
-            Text(paper.title)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .truncationMode(.tail)
-            Spacer()
-            Text("\(notes.count)")
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
-                .frame(minWidth: 22, alignment: .trailing)
-                .contentTransition(.numericText())
-            PaperCodexIconButton(title: "New Note", systemImage: "plus", tint: .accentColor) {
-                clearNoteDraft()
-            }
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-        .background(Color(nsColor: .controlBackgroundColor))
     }
 
     private func edit(_ note: PaperNote) {
@@ -538,182 +509,6 @@ private struct SessionNotesPanel: View {
         editingNoteID = nil
         noteTitle = ""
         noteBody = ""
-    }
-}
-
-private struct SessionNotesWorkspace: View {
-    var paper: Paper
-    var notes: [PaperNote]
-    @Binding var selectedNoteID: String?
-    @Binding var noteTitle: String
-    @Binding var noteBody: String
-    @Binding var editingNoteID: String?
-    var onSelect: (PaperNote) -> Void
-    var onNew: () -> Void
-    var onSave: (Paper) -> Void
-    var onDelete: (PaperNote) -> Void
-
-    var body: some View {
-        HSplitView {
-            noteList
-                .frame(minWidth: 190, idealWidth: 240, maxWidth: 330, maxHeight: .infinity)
-            noteEditor
-                .frame(minWidth: 260, maxWidth: .infinity, maxHeight: .infinity)
-        }
-        .background(Color(nsColor: .windowBackgroundColor))
-    }
-
-    private var noteList: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text("Notes")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                PaperCodexIconButton(title: "New Note", systemImage: "plus", tint: .accentColor) {
-                    onNew()
-                }
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-
-            Divider()
-
-            if notes.isEmpty {
-                VStack(spacing: 8) {
-                    Image(systemName: "note.text")
-                        .font(.paperCodexSystem(size: 24))
-                        .foregroundStyle(.tertiary)
-                    Text("No notes")
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                ScrollView {
-                    LazyVStack(spacing: 1) {
-                        ForEach(notes) { note in
-                            SessionNoteListRow(
-                                note: note,
-                                isSelected: note.id == selectedNoteID,
-                                onSelect: {
-                                    onSelect(note)
-                                },
-                                onDelete: {
-                                    onDelete(note)
-                                }
-                            )
-                        }
-                    }
-                    .padding(.vertical, 6)
-                }
-            }
-        }
-        .background(Color(nsColor: .controlBackgroundColor))
-    }
-
-    private var noteEditor: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                Label(editingNoteID == nil ? "New Note" : "Edit Note", systemImage: "square.and.pencil")
-                    .font(.paperCodexSystem(size: 13, weight: .semibold))
-                Spacer()
-                if editingNoteID != nil {
-                    ChatPanelActionButton {
-                        onNew()
-                    } label: {
-                        Text("Cancel")
-                    }
-                }
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-
-            Divider()
-
-            VStack(spacing: 10) {
-                TextField("Note title", text: $noteTitle)
-                    .textFieldStyle(.roundedBorder)
-
-                TextEditor(text: $noteBody)
-                    .font(.paperCodexSystem(size: 13))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .scrollContentBackground(.hidden)
-                    .background(Color(nsColor: .textBackgroundColor))
-                    .clipShape(RoundedRectangle(cornerRadius: 7))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 7)
-                            .stroke(Color.black.opacity(0.08), lineWidth: 1)
-                    )
-
-                HStack {
-                    ChatPanelActionButton(
-                        kind: .primary,
-                        disabled: noteTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                            && noteBody.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    ) {
-                        onSave(paper)
-                    } label: {
-                        Label(editingNoteID == nil ? "Add Note" : "Save Note", systemImage: "checkmark")
-                    }
-
-                    Spacer()
-
-                    Text(paper.title)
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                }
-            }
-            .padding(14)
-        }
-        .background(Color(nsColor: .windowBackgroundColor))
-    }
-}
-
-private struct SessionNoteListRow: View {
-    @State private var isHovering = false
-
-    var note: PaperNote
-    var isSelected: Bool
-    var onSelect: () -> Void
-    var onDelete: () -> Void
-
-    var body: some View {
-        HStack(alignment: .center, spacing: 6) {
-            Button(action: onSelect) {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(note.title)
-                        .font(.paperCodexSystem(size: 12.8, weight: .semibold))
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-                    if !note.bodyMarkdown.isEmpty {
-                        Text(note.bodyMarkdown)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(2)
-                    }
-                }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 7)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(SessionNoteListRowButtonStyle(selected: isSelected, isHovering: isHovering))
-            .onHover { hovering in
-                withAnimation(PaperCodexMotion.hover) {
-                    isHovering = hovering
-                }
-            }
-
-            PaperCodexIconButton(title: "Delete Note", systemImage: "trash", tint: .red) {
-                onDelete()
-            }
-        }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 3)
-        .contentShape(Rectangle())
     }
 }
 
@@ -839,54 +634,6 @@ private struct ChatPanelActionButtonStyle: ButtonStyle {
             return 1
         }
         return isPressed ? 0.97 : (isHovering ? 1.02 : 1)
-    }
-}
-
-private struct SessionNoteListRowButtonStyle: ButtonStyle {
-    var selected: Bool
-    var isHovering: Bool
-
-    func makeBody(configuration: Configuration) -> some View {
-        let isPressed = configuration.isPressed
-        configuration.label
-            .background(
-                RoundedRectangle(cornerRadius: 7)
-                    .fill(backgroundColor(isPressed: isPressed))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 7)
-                    .stroke(borderColor(isPressed: isPressed), lineWidth: 1)
-            )
-            .overlay(alignment: .leading) {
-                if selected || isPressed {
-                    Capsule()
-                        .fill(Color.accentColor.opacity(selected ? 0.72 : 0.48))
-                        .frame(width: 3, height: 22)
-                        .padding(.leading, 3)
-                        .transition(.opacity.combined(with: .scale(scale: 0.86)))
-                }
-            }
-            .scaleEffect(isPressed ? 0.988 : (isHovering ? 1.008 : 1), anchor: .center)
-            .animation(PaperCodexMotion.press, value: configuration.isPressed)
-            .animation(PaperCodexMotion.hover, value: isHovering)
-            .animation(PaperCodexMotion.selection, value: selected)
-    }
-
-    private func backgroundColor(isPressed: Bool) -> Color {
-        if isPressed {
-            return Color.accentColor.opacity(0.16)
-        }
-        if selected {
-            return Color.accentColor.opacity(0.12)
-        }
-        return isHovering ? Color(nsColor: .textBackgroundColor) : Color.clear
-    }
-
-    private func borderColor(isPressed: Bool) -> Color {
-        if isPressed {
-            return Color.accentColor.opacity(0.38)
-        }
-        return isHovering ? Color.accentColor.opacity(0.20) : Color.clear
     }
 }
 

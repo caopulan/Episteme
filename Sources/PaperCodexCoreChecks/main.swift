@@ -1387,6 +1387,7 @@ func runUILayoutSourceChecks() throws {
     let readerViewSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/ReaderView.swift"))
     let readerToolbarSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/ReaderToolbarView.swift"))
     let readerSessionToolbarSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/ReaderSessionToolbarView.swift"))
+    let sessionNotesNativeSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/SessionNotesNativePanelView.swift"))
     let windowTabBarSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/WindowChromeTabBar.swift"))
     let homeChromeSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/WindowChrome.swift"))
     let localThumbnailSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/LocalThumbnailImage.swift"))
@@ -1778,29 +1779,24 @@ func runUILayoutSourceChecks() throws {
     } else {
         throw CheckFailure(description: "reader chat composer source should remain inspectable")
     }
-    if let sessionNotesRange = chatSource.range(of: "private struct SessionNotesWorkspace: View"),
-       let sessionNotesEndRange = chatSource.range(of: "private enum ChatComposerLayout", range: sessionNotesRange.upperBound..<chatSource.endIndex) {
-        let sessionNotesSource = String(chatSource[sessionNotesRange.lowerBound..<sessionNotesEndRange.lowerBound])
-        try check(
-            sessionNotesSource.contains("private struct ChatPanelActionButton<Label: View>: View")
-                && sessionNotesSource.contains("private struct ChatPanelActionButtonStyle: ButtonStyle")
-                && sessionNotesSource.contains("private enum ChatPanelActionButtonKind")
-                && sessionNotesSource.contains(".buttonStyle(ChatPanelActionButtonStyle(")
-                && sessionNotesSource.contains("private struct SessionNoteListRowButtonStyle: ButtonStyle")
-                && sessionNotesSource.contains(".buttonStyle(SessionNoteListRowButtonStyle(")
-                && sessionNotesSource.contains("PaperCodexIconButton(title: \"New Note\"")
-                && sessionNotesSource.contains("PaperCodexIconButton(title: \"Delete Note\"")
-                && sessionNotesSource.contains("configuration.isPressed")
-                && sessionNotesSource.contains("PaperCodexMotion.press")
-                && !sessionNotesSource.contains(".buttonStyle(.borderedProminent)")
-                && !sessionNotesSource.contains(".buttonStyle(.bordered)")
-                && !sessionNotesSource.contains(".buttonStyle(.borderless)")
-                && !sessionNotesSource.contains(".buttonStyle(.plain)"),
-            "reader notes panel actions should provide immediate pressed feedback before note edits or deletes"
-        )
-    } else {
-        throw CheckFailure(description: "reader notes workspace source should remain inspectable")
-    }
+    try check(
+        chatSource.contains("SessionNotesNativePanelView(")
+            && sessionNotesNativeSource.contains("NSViewRepresentable")
+            && sessionNotesNativeSource.contains("SessionNotesContainerView")
+            && sessionNotesNativeSource.contains("NSSplitView")
+            && sessionNotesNativeSource.contains("NSTableView")
+            && sessionNotesNativeSource.contains("NSTextField")
+            && sessionNotesNativeSource.contains("NSTextView")
+            && sessionNotesNativeSource.contains("NSScrollView")
+            && sessionNotesNativeSource.contains("newNoteButton")
+            && sessionNotesNativeSource.contains("deleteNoteButton")
+            && sessionNotesNativeSource.contains("saveNoteButton")
+            && sessionNotesNativeSource.contains("cancelEditButton")
+            && !chatSource.contains("private struct SessionNotesWorkspace: View")
+            && !chatSource.contains("private struct SessionNoteListRow: View")
+            && !chatSource.contains("SessionNoteListRowButtonStyle"),
+        "reader notes panel should use a native AppKit split workspace with selectable notes and editor actions"
+    )
     if let messageBubbleRange = chatSource.range(of: "private struct MessageBubble: View"),
        let messageBubbleEndRange = chatSource.range(of: "private struct GeneratedImageGallery", range: messageBubbleRange.upperBound..<chatSource.endIndex) {
         let messageBubbleSource = String(chatSource[messageBubbleRange.lowerBound..<messageBubbleEndRange.lowerBound])
@@ -2439,11 +2435,12 @@ func runUILayoutSourceChecks() throws {
         "session paper-notes tab should load, edit, and delete persisted paper notes"
     )
     try check(
-        chatSource.contains("SessionNotesWorkspace")
-            && chatSource.contains("HSplitView")
-            && chatSource.contains("SessionNoteListRow")
-            && chatSource.contains("selectedNoteID"),
-        "session paper-notes panel should use a refined split workspace with selectable notes and an editor"
+        chatSource.contains("SessionNotesNativePanelView(")
+            && sessionNotesNativeSource.contains("NSSplitView")
+            && sessionNotesNativeSource.contains("NSTableView")
+            && sessionNotesNativeSource.contains("selectedNoteID")
+            && sessionNotesNativeSource.contains("editingNoteID"),
+        "session paper-notes panel should use a refined native split workspace with selectable notes and an editor"
     )
     try check(
         chatSource.contains("WindowSafeComposerResizeHandle") && chatSource.contains("mouseDownCanMoveWindow"),

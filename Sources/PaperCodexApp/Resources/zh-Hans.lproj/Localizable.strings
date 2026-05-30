@@ -134,6 +134,8 @@
 "Notes" = "笔记";
 "No notes" = "没有笔记";
 "Note title" = "笔记标题";
+"Note body" = "笔记正文";
+"No body" = "无正文";
 "Watched Folders" = "监控文件夹";
 "Add Folder" = "添加文件夹";
 "No Folders" = "没有文件夹";
