@@ -209,6 +209,7 @@
 "Select text in the PDF, then ask Codex in this session. The selected source appears as a quoted reply." = "在 PDF 中选择文本，然后在本会话中询问 Codex。选中的来源会作为引用回复出现。";
 "Session" = "会话";
 "Session Panel" = "会话面板";
+"Select Session" = "选择会话";
 "Chat" = "对话";
 "Rename" = "重命名";
 "Rename Session" = "重命名会话";

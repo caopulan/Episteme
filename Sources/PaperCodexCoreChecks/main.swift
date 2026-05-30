@@ -1384,6 +1384,7 @@ func runUILayoutSourceChecks() throws {
     let saveToLibrarySource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/SaveToLibrarySheet.swift"))
     let readerViewSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/ReaderView.swift"))
     let readerToolbarSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/ReaderToolbarView.swift"))
+    let readerSessionToolbarSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/ReaderSessionToolbarView.swift"))
     let windowTabBarSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/WindowChromeTabBar.swift"))
     let homeChromeSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/WindowChrome.swift"))
     let localThumbnailSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/LocalThumbnailImage.swift"))
@@ -1718,7 +1719,8 @@ func runUILayoutSourceChecks() throws {
             && discoverSource.contains("PaperCodexToolbarButton")
             && (librarySource.contains("PaperCodexToolbarButton")
                 || (libraryToolbarSource.contains("LibraryNativeToolbarView") && libraryToolbarSource.contains("NSButton")))
-            && (chatSource.contains("PaperCodexToolbarButton") || chatSource.contains("ReaderChatHeaderActionButton"))
+            && (chatSource.contains("PaperCodexToolbarButton")
+                || readerSessionToolbarSource.contains("ReaderSessionToolbarView") && readerSessionToolbarSource.contains("NSButton"))
             && !discoverSource.contains("private struct ToolbarActionButton"),
         "common toolbar and icon actions should use shared controls, with reader-specific compact header actions only where layout requires them"
     )
@@ -1732,20 +1734,16 @@ func runUILayoutSourceChecks() throws {
             && !actionButtonSource.contains(".buttonStyle(.plain)"),
         "shared toolbar and icon actions should provide immediate pressed feedback"
     )
-    if let readerHeaderButtonRange = chatSource.range(of: "private struct ReaderChatHeaderActionButton: View"),
-       let readerHeaderButtonEndRange = chatSource.range(of: "private struct SessionNotesPanel", range: readerHeaderButtonRange.upperBound..<chatSource.endIndex) {
-        let readerHeaderButtonSource = String(chatSource[readerHeaderButtonRange.lowerBound..<readerHeaderButtonEndRange.lowerBound])
-        try check(
-            readerHeaderButtonSource.contains("private struct ReaderChatHeaderActionButtonStyle: ButtonStyle")
-                && readerHeaderButtonSource.contains(".buttonStyle(ReaderChatHeaderActionButtonStyle(")
-                && readerHeaderButtonSource.contains("configuration.isPressed")
-                && readerHeaderButtonSource.contains("PaperCodexMotion.press")
-                && !readerHeaderButtonSource.contains(".buttonStyle(.plain)"),
-            "reader chat header actions should provide immediate pressed feedback before session operations"
-        )
-    } else {
-        throw CheckFailure(description: "reader chat header button source should remain inspectable")
-    }
+    try check(
+        readerSessionToolbarSource.contains("ReaderSessionToolbarView")
+            && readerSessionToolbarSource.contains("NSSegmentedControl")
+            && readerSessionToolbarSource.contains("NSPopUpButton")
+            && readerSessionToolbarSource.contains("NSButton")
+            && readerSessionToolbarSource.contains("newSessionButton")
+            && readerSessionToolbarSource.contains("renameButton")
+            && !chatSource.contains("private struct ReaderChatHeaderActionButton: View"),
+        "reader chat header actions should be native AppKit controls with direct pressed feedback before session operations"
+    )
     if let composerRange = chatSource.range(of: "private var composer: some View"),
        let composerEndRange = chatSource.range(of: "private var composerTopDivider", range: composerRange.upperBound..<chatSource.endIndex) {
         let composerSource = String(chatSource[composerRange.lowerBound..<composerEndRange.lowerBound])
@@ -2117,12 +2115,14 @@ func runUILayoutSourceChecks() throws {
         "reader paper switching should live in a native PDF toolbar as a compact dropdown with add/remove actions"
     )
     try check(
-        chatSource.contains("ReaderChatHeaderActionButton")
-            && chatSource.contains("private var sessionBar: some View {\n        HStack(spacing: 8)")
-            && chatSource.contains(".padding(.vertical, 5)")
-            && chatSource.contains(".frame(height: 24)")
-            && chatSource.contains(".font(.paperCodexSystem(size: 11.5"),
-        "reader chat header should use a compact single-row control layout with smaller session actions"
+        chatSource.contains("ReaderSessionToolbarView(")
+            && readerSessionToolbarSource.contains("panelSegmentedControl")
+            && readerSessionToolbarSource.contains("sessionPopup")
+            && readerSessionToolbarSource.contains("newSessionButton")
+            && readerSessionToolbarSource.contains("renameButton")
+            && !chatSource.contains("Picker(\"Session Panel\"")
+            && !chatSource.contains("ReaderChatHeaderActionButton"),
+        "reader chat header should use a compact native single-row control layout with smaller session actions"
     )
     try check(
         librarySource.contains("LibraryPaperTableView(")
@@ -2396,19 +2396,21 @@ func runUILayoutSourceChecks() throws {
             && windowTabBarSource.contains(".animation(PaperCodexMotion.accessible(PaperCodexMotion.selection, reduceMotion: reduceMotion), value: model.readerTabState.activePaperID)"),
         "Reader tabs should support keyboard switching and keep the active tab visibly centered"
     )
-    if let panelPickerRange = chatSource.range(of: "Picker(\"Session Panel\""),
-       let sessionPickerRange = chatSource.range(of: "Picker(\"Session\"") {
+    if let panelPickerRange = readerSessionToolbarSource.range(of: "panelSegmentedControl"),
+       let sessionPickerRange = readerSessionToolbarSource.range(of: "sessionPopup") {
         try check(
             panelPickerRange.lowerBound < sessionPickerRange.lowerBound,
             "session panel tabs should sit at the far left of the same row as the session picker"
         )
     } else {
-        throw CheckFailure(description: "session bar should include both the panel tabs and session picker")
+        throw CheckFailure(description: "native session bar should include both the panel tabs and session picker")
     }
     try check(
-        chatSource.contains("private var sessionBar: some View {\n        HStack(spacing: 8)")
-            && chatSource.contains("Divider()\n                .frame(height: 18)"),
-        "session picker should stay right within a compact single-row session bar"
+        chatSource.contains("ReaderSessionToolbarView(")
+            && readerSessionToolbarSource.contains("firstSeparator")
+            && readerSessionToolbarSource.contains("heightAnchor.constraint(equalToConstant: 18)")
+            && !chatSource.contains("private var sessionBar: some View {\n        HStack(spacing: 8)"),
+        "session picker should stay right within a compact native single-row session bar"
     )
     try check(
         chatSource.contains("model.loadPaperNotes(for: paper)")
@@ -2894,7 +2896,8 @@ func runUILayoutSourceChecks() throws {
     try check(
         chatSource.contains("Label(\"Rename\", systemImage: \"pencil\")")
             || chatSource.contains("PaperCodexToolbarButton(\n                title: \"Rename\"")
-            || chatSource.contains("ReaderChatHeaderActionButton(\n                title: \"Rename\""),
+            || chatSource.contains("ReaderChatHeaderActionButton(\n                title: \"Rename\"")
+            || readerSessionToolbarSource.contains("renameButton"),
         "chat session rename should be exposed as a direct button after New"
     )
     try check(
@@ -5338,6 +5341,7 @@ func runAgentRuntimeSourceChecks() throws {
     let ptySource = try String(contentsOf: sourceRoot.appendingPathComponent("Sources/PaperCodexCore/LocalPTYProcess.swift"))
     let terminalViewSource = try String(contentsOf: sourceRoot.appendingPathComponent("Sources/PaperCodexApp/AgentTerminalView.swift"))
     let chatViewSource = try String(contentsOf: sourceRoot.appendingPathComponent("Sources/PaperCodexApp/ChatView.swift"))
+    let readerSessionToolbarSource = try String(contentsOf: sourceRoot.appendingPathComponent("Sources/PaperCodexApp/ReaderSessionToolbarView.swift"))
     let appModelSource = try String(contentsOf: sourceRoot.appendingPathComponent("Sources/PaperCodexApp/AppModel.swift"))
 
     try check(
@@ -5363,7 +5367,7 @@ func runAgentRuntimeSourceChecks() throws {
     try check(
         chatViewSource.contains("case terminal")
             && chatViewSource.contains("AgentTerminalView()")
-            && chatViewSource.contains("Label(\"Terminal\", systemImage: \"terminal\")")
+            && readerSessionToolbarSource.contains("(\"terminal\", \"Terminal\")")
             && chatViewSource.contains("$0.kind == .thinking || $0.kind == .tool || $0.kind == .answer || $0.kind == .usage"),
         "ChatView should add a Terminal session panel tab and show tool events in active agent runs"
     )

@@ -191,57 +191,25 @@ struct ChatView: View {
     }
 
     private var sessionBar: some View {
-        HStack(spacing: 8) {
-            Picker("Session Panel", selection: $model.selectedSessionPanelTab) {
-                Label("Chat", systemImage: "text.bubble").tag(SessionPanelTab.chat)
-                Label("Terminal", systemImage: "terminal").tag(SessionPanelTab.terminal)
-                Label("Notes", systemImage: "note.text").tag(SessionPanelTab.notes)
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(width: 220)
-            .help("Session Panel")
-
-            Divider()
-                .frame(height: 18)
-
-            Picker("Session", selection: Binding(
-                get: { model.selectedSession?.id ?? "" },
-                set: { model.selectSession($0) }
-            )) {
-                ForEach(model.sessions) { session in
-                    Text(sessionMenuTitle(session)).tag(session.id)
-                }
-            }
-            .labelsHidden()
-            .frame(minWidth: 120, maxWidth: .infinity)
-
-            ReaderChatHeaderActionButton(title: "New", systemImage: "plus", tint: .blue) {
+        ReaderSessionToolbarView(
+            selectedPanelTab: model.selectedSessionPanelTab,
+            sessions: model.sessions,
+            selectedSessionID: model.selectedSession?.id,
+            onSelectPanelTab: { tab in
+                model.selectedSessionPanelTab = tab
+            },
+            onSelectSession: { sessionID in
+                model.selectSession(sessionID)
+            },
+            onNewSession: {
                 model.newSessionButtonTapped()
+            },
+            onRenameSession: { session in
+                renameSessionTitle = session.title
+                sessionPendingRename = session
             }
-
-            ReaderChatHeaderActionButton(
-                title: "Rename",
-                systemImage: "pencil",
-                tint: .gray,
-                disabled: model.selectedSession == nil
-            ) {
-                if let session = model.selectedSession {
-                    renameSessionTitle = session.title
-                    sessionPendingRename = session
-                }
-            }
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 5)
-        .controlSize(.small)
-    }
-
-    private func sessionMenuTitle(_ session: PaperSession) -> String {
-        guard session.paperIDs.count > 1 else {
-            return session.title
-        }
-        return "\(session.title) · \(session.paperIDs.count) papers"
+        )
+        .frame(maxWidth: .infinity, minHeight: 34, idealHeight: 34, maxHeight: 34)
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy) {
@@ -475,104 +443,6 @@ private struct ChatSendButtonStyle: ButtonStyle {
             return 1
         }
         return isPressed ? 0.90 : (isHovering ? 1.06 : 1)
-    }
-}
-
-private struct ReaderChatHeaderActionButton: View {
-    @State private var isHovering = false
-
-    var title: String
-    var systemImage: String
-    var tint: Color
-    var disabled = false
-    var action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Label {
-                Text(LocalizedStringKey(title))
-                    .lineLimit(1)
-            } icon: {
-                Image(systemName: systemImage)
-            }
-            .font(.paperCodexSystem(size: 11.5, weight: .semibold))
-            .padding(.horizontal, 8)
-            .frame(height: 24)
-        }
-        .buttonStyle(ReaderChatHeaderActionButtonStyle(tint: tint, disabled: disabled, isHovering: isHovering))
-        .disabled(disabled)
-        .help(title)
-        .onHover { hovering in
-            withAnimation(PaperCodexMotion.hover) {
-                isHovering = hovering
-            }
-        }
-    }
-}
-
-private struct ReaderChatHeaderActionButtonStyle: ButtonStyle {
-    var tint: Color
-    var disabled: Bool
-    var isHovering: Bool
-
-    func makeBody(configuration: Configuration) -> some View {
-        let isPressed = configuration.isPressed && !disabled
-        configuration.label
-            .foregroundStyle(foregroundColor(isPressed: isPressed))
-            .background(
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(backgroundColor(isPressed: isPressed))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 6)
-                            .stroke(borderColor(isPressed: isPressed), lineWidth: 1)
-                    )
-            )
-            .shadow(color: shadowColor(isPressed: isPressed), radius: isPressed ? 3 : 5, y: isPressed ? 1 : 2)
-            .scaleEffect(scale(isPressed: isPressed), anchor: .center)
-            .animation(PaperCodexMotion.press, value: configuration.isPressed)
-            .animation(PaperCodexMotion.hover, value: isHovering)
-            .animation(PaperCodexMotion.hover, value: disabled)
-    }
-
-    private func foregroundColor(isPressed: Bool) -> Color {
-        if disabled {
-            return Color.secondary.opacity(0.55)
-        }
-        return isPressed || isHovering ? tint : Color.primary.opacity(0.82)
-    }
-
-    private func backgroundColor(isPressed: Bool) -> Color {
-        if disabled {
-            return Color(nsColor: .controlBackgroundColor).opacity(0.55)
-        }
-        if isPressed {
-            return tint.opacity(0.18)
-        }
-        return isHovering ? tint.opacity(0.12) : Color(nsColor: .controlBackgroundColor)
-    }
-
-    private func borderColor(isPressed: Bool) -> Color {
-        if disabled {
-            return Color.black.opacity(0.06)
-        }
-        if isPressed {
-            return tint.opacity(0.56)
-        }
-        return isHovering ? tint.opacity(0.38) : Color.black.opacity(0.10)
-    }
-
-    private func shadowColor(isPressed: Bool) -> Color {
-        guard !disabled, isPressed || isHovering else {
-            return .clear
-        }
-        return tint.opacity(isPressed ? 0.12 : 0.16)
-    }
-
-    private func scale(isPressed: Bool) -> CGFloat {
-        if disabled {
-            return 1
-        }
-        return isPressed ? 0.965 : (isHovering ? 1.025 : 1)
     }
 }
 
