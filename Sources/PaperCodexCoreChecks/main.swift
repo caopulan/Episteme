@@ -1514,6 +1514,14 @@ func runUILayoutSourceChecks() throws {
     }
     try check(
         appShellSource.contains("struct PrimaryNavigationSection")
+            && appShellSource.contains("NativePrimaryNavigationView(")
+            && appShellSource.contains("NativePrimaryNavigationContainerView")
+            && appShellSource.contains("NativePrimaryNavigationRowButton")
+            && appShellSource.contains("NSStackView")
+            && appShellSource.contains("NSButton")
+            && appShellSource.contains("override func mouseDown(with event: NSEvent)")
+            && appShellSource.contains("setAccessibilityRole(.button)")
+            && !appShellSource.contains("SidebarRowButton(")
             && appShellSource.contains("title: \"Library\"")
             && appShellSource.contains("model.goToLibrary()")
             && appShellSource.contains("title: \"探索\"")
@@ -1558,6 +1566,7 @@ func runUILayoutSourceChecks() throws {
     )
     try check(
         appShellSource.contains("PrimaryNavigationSection")
+            && appShellSource.contains("NativePrimaryNavigationView(")
             && appShellSource.contains("title: \"Library\"")
             && appShellSource.contains("title: \"探索\"")
             && appShellSource.contains("title: \"搜索\"")
