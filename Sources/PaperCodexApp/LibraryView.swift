@@ -24,11 +24,7 @@ struct LibraryView: View {
     @State private var categoryPendingDelete: PaperCodexCore.Category?
     @State private var tagPendingManagement: PaperTag?
     @State private var tagPendingDelete: PaperTag?
-    @State private var draggedCategoryID: String?
-    @State private var liveCategoryDropKey: String?
-    @State private var categoryDragPreviewCategories: [PaperCodexCore.Category]?
-    @State private var categoryDragCommitTarget: CategoryDragDropTarget?
-    @State private var categoryDragResetToken: UUID?
+    @State private var outlineDraggedCategoryID: String?
     @State private var watchedFolderPendingRemoval: WatchedFolder?
     @State private var noteTitle = ""
     @State private var noteBody = ""
@@ -74,7 +70,7 @@ struct LibraryView: View {
     }
 
     private var sidebarCategories: [PaperCodexCore.Category] {
-        categoryDragPreviewCategories ?? model.categories
+        model.categories
     }
 
     private var sortedPapers: [Paper] {
@@ -355,24 +351,32 @@ struct LibraryView: View {
                 countText: "\(model.papers.count)",
                 isSelected: selectedLibrarySurface == .papers && selectedCategoryID == nil && selectedTagID == nil,
                 canDropCategory: {
-                    guard let draggedCategoryID else {
+                    guard let outlineDraggedCategoryID else {
                         return true
                     }
                     return CategoryMovePlanner.canMoveCategory(
-                        draggedCategoryID,
+                        outlineDraggedCategoryID,
                         toParent: nil,
                         in: sidebarCategories
                     )
                 },
                 onDropPapers: { paperIDs in
+                    outlineDraggedCategoryID = nil
                     model.movePapers(paperIDs, toCategory: nil)
                     selectRootLibrary()
                 },
                 onDropCategory: { droppedCategoryID in
+                    guard CategoryMovePlanner.canMoveCategory(
+                        droppedCategoryID,
+                        toParent: nil,
+                        in: sidebarCategories
+                    ) else {
+                        return
+                    }
                     withAnimation(.spring(response: 0.24, dampingFraction: 0.86)) {
                         model.moveCategory(droppedCategoryID, toParent: nil)
                     }
-                    clearCategoryDragPreview()
+                    outlineDraggedCategoryID = nil
                 }
             ) {
                 selectRootLibrary()
@@ -380,100 +384,37 @@ struct LibraryView: View {
             if sidebarCategories.isEmpty {
                 SidebarEmptyText("No categories")
             } else {
-                VStack(alignment: .leading, spacing: LibraryLayout.categoryTreeRowSpacing) {
-                    ForEach(categoryTree.visibleItems) { item in
-                        CategorySidebarRow(
-                            title: item.category.name,
-                            countText: "\(paperCount(inCategory: item.category.id))",
-                            systemImage: selectedCategoryID == item.category.id ? "folder.fill" : "folder",
-                            isSelected: selectedLibrarySurface == .papers && selectedCategoryID == item.category.id,
-                            depth: item.depth,
-                            connectorContinuations: item.connectorContinuations,
-                            hasChildren: categoryTree.hasChildren(item.category.id),
-                            isExpanded: !collapsedCategoryIDs.contains(item.category.id),
-                            isPinned: item.category.isPinned,
-                            categoryDragPayload: categoryDragPayload(for: item.category),
-                            onDragCategory: {
-                                clearCategoryDragPreview()
-                                draggedCategoryID = item.category.id
-                            },
-                            canDropCategory: { placement in
-                                guard let draggedCategoryID else {
-                                    return true
-                                }
-                                if draggedCategoryID == item.category.id {
-                                    return categoryDragCommitTarget != nil
-                                }
-                                return CategoryMovePlanner.canDropCategory(
-                                    draggedCategoryID,
-                                    ontoCategory: item.category.id,
-                                    placement: placement,
-                                    in: sidebarCategories
-                                )
-                            },
-                            onPreviewCategoryDrop: { placement in
-                                guard let draggedCategoryID else {
-                                    return
-                                }
-                                previewCategoryDrop(
-                                    draggedCategoryID,
-                                    relativeTo: item.category.id,
-                                    placement: placement
-                                )
-                            },
-                            onCategoryDropExited: {
-                                scheduleCategoryDragPreviewReset()
-                            },
-                            onToggle: {
-                                toggleCategoryCollapsed(item.category.id)
-                            },
-                            onSelect: {
-                                selectLibraryCategory(item.category.id)
-                            },
-                            onCreateChild: {
-                                newCategoryParentID = item.category.id
-                                startCreatingCategory(parentID: item.category.id)
-                            },
-                            onManage: {
-                                categoryPendingManagement = item.category
-                            },
-                            onTogglePinned: {
-                                model.setCategoryPinned(item.category.id, pinned: !item.category.isPinned)
-                            },
-                            onDropPapers: { paperIDs in
-                                dropPaperIDs(paperIDs, ontoCategory: item.category.id)
-                                selectLibraryCategory(item.category.id)
-                            },
-                            onDropCategory: { droppedCategoryID, placement in
-                                let dropTarget: CategoryDragDropTarget
-                                if droppedCategoryID == item.category.id, let categoryDragCommitTarget {
-                                    dropTarget = categoryDragCommitTarget
-                                } else if droppedCategoryID != item.category.id {
-                                    dropTarget = CategoryDragDropTarget(
-                                        targetCategoryID: item.category.id,
-                                        placement: placement
-                                    )
-                                } else {
-                                    clearCategoryDragPreview()
-                                    return
-                                }
-                                withAnimation(.spring(response: 0.24, dampingFraction: 0.86)) {
-                                    switch dropTarget.placement {
-                                    case .inside:
-                                        model.moveCategory(droppedCategoryID, toParent: dropTarget.targetCategoryID)
-                                    case .before, .after:
-                                        model.reorderCategory(
-                                            droppedCategoryID,
-                                            relativeTo: dropTarget.targetCategoryID,
-                                            placement: dropTarget.placement
-                                        )
-                                    }
-                                }
-                                clearCategoryDragPreview()
-                            }
-                        )
+                LibraryCategoryOutlineView(
+                    categories: sidebarCategories,
+                    selectedCategoryID: selectedLibrarySurface == .papers ? selectedCategoryID : nil,
+                    collapsedCategoryIDs: $collapsedCategoryIDs,
+                    paperCountsByCategoryID: model.libraryDerivedState.categoryPaperCountsByID,
+                    categoryDragPayloadPrefix: LibraryLayout.categoryDragPayloadPrefix,
+                    onSelect: selectLibraryCategory,
+                    onCreateChild: { category in
+                        newCategoryParentID = category.id
+                        startCreatingCategory(parentID: category.id)
+                    },
+                    onManage: { category in
+                        categoryPendingManagement = category
+                    },
+                    onTogglePinned: { category in
+                        model.setCategoryPinned(category.id, pinned: !category.isPinned)
+                    },
+                    onBeginCategoryDrag: { categoryID in
+                        outlineDraggedCategoryID = categoryID
+                    },
+                    onEndCategoryDrag: {
+                        outlineDraggedCategoryID = nil
+                    },
+                    canDropCategory: canDropCategory(_:to:),
+                    onDropCategory: dropCategory(_:to:),
+                    onDropPapers: { paperIDs, category in
+                        dropPaperIDs(paperIDs, ontoCategory: category.id)
+                        selectLibraryCategory(category.id)
                     }
-                }
+                )
+                .frame(height: max(1, CGFloat(categoryTree.visibleItems.count)) * LibraryLayout.categoryTreeConnectorHeight)
             }
         }
     }
@@ -614,7 +555,7 @@ struct LibraryView: View {
                         )
                         .contentShape(Rectangle())
                         .onDrag {
-                            clearCategoryDragPreview()
+                            outlineDraggedCategoryID = nil
                             return NSItemProvider(object: paperDragPayload(for: paper) as NSString)
                         } preview: {
                             PaperDragPreview(
@@ -1215,16 +1156,6 @@ struct LibraryView: View {
         width < LibraryLayout.compactContentWidthThreshold
     }
 
-    private func toggleCategoryCollapsed(_ categoryID: String) {
-        withAnimation(PaperCodexMotion.selection) {
-            if collapsedCategoryIDs.contains(categoryID) {
-                collapsedCategoryIDs.remove(categoryID)
-            } else {
-                collapsedCategoryIDs.insert(categoryID)
-            }
-        }
-    }
-
     private func dropPaperIDs(_ paperIDs: [String], ontoCategory categoryID: String) {
         if shouldMoveDroppedPapers(toCategory: categoryID) {
             model.movePapers(paperIDs, toCategory: categoryID)
@@ -1233,73 +1164,41 @@ struct LibraryView: View {
         }
     }
 
-    private func previewCategoryDrop(
-        _ draggedCategoryID: String,
-        relativeTo targetCategoryID: String,
-        placement: LibraryCategoryDropPlacement
-    ) {
-        cancelCategoryDragPreviewReset()
-        guard draggedCategoryID != targetCategoryID else {
-            return
-        }
-        guard placement == .before || placement == .after else {
-            return
-        }
-        let dropKey = "\(draggedCategoryID)|\(targetCategoryID)|\(placement)"
-        guard liveCategoryDropKey != dropKey else {
-            return
-        }
-        let previewBaseCategories = sidebarCategories
-        guard CategoryMovePlanner.canDropCategory(
-            draggedCategoryID,
-            ontoCategory: targetCategoryID,
-            placement: placement,
-            in: previewBaseCategories
-        ) else {
-            return
-        }
-        guard let previewCategories = try? CategoryMovePlanner.reorderedCategories(
-            movingCategoryID: draggedCategoryID,
-            relativeTo: targetCategoryID,
-            placement: placement,
-            in: previewBaseCategories
-        ), previewCategories != previewBaseCategories else {
-            return
-        }
-        liveCategoryDropKey = dropKey
-        categoryDragCommitTarget = CategoryDragDropTarget(
-            targetCategoryID: targetCategoryID,
-            placement: placement
-        )
-        withAnimation(.spring(response: 0.22, dampingFraction: 0.82)) {
-            categoryDragPreviewCategories = previewCategories
-        }
-    }
-
-    private func clearCategoryDragPreview() {
-        draggedCategoryID = nil
-        liveCategoryDropKey = nil
-        categoryDragPreviewCategories = nil
-        categoryDragCommitTarget = nil
-        categoryDragResetToken = nil
-    }
-
-    private func cancelCategoryDragPreviewReset() {
-        categoryDragResetToken = nil
-    }
-
-    private func scheduleCategoryDragPreviewReset() {
-        guard categoryDragPreviewCategories != nil else {
-            return
-        }
-        let resetToken = UUID()
-        categoryDragResetToken = resetToken
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-            guard categoryDragResetToken == resetToken else {
-                return
+    private func canDropCategory(_ categoryID: String, to target: LibraryCategoryOutlineDropTarget) -> Bool {
+        switch target.placement {
+        case .inside:
+            return CategoryMovePlanner.canMoveCategory(
+                categoryID,
+                toParent: target.targetCategoryID,
+                in: sidebarCategories
+            )
+        case .before, .after:
+            guard let targetCategoryID = target.targetCategoryID else {
+                return false
             }
-            withAnimation(.easeOut(duration: 0.16)) {
-                clearCategoryDragPreview()
+            return CategoryMovePlanner.canDropCategory(
+                categoryID,
+                ontoCategory: targetCategoryID,
+                placement: target.placement,
+                in: sidebarCategories
+            )
+        }
+    }
+
+    private func dropCategory(_ categoryID: String, to target: LibraryCategoryOutlineDropTarget) {
+        withAnimation(.spring(response: 0.24, dampingFraction: 0.86)) {
+            switch target.placement {
+            case .inside:
+                model.moveCategory(categoryID, toParent: target.targetCategoryID)
+            case .before, .after:
+                guard let targetCategoryID = target.targetCategoryID else {
+                    return
+                }
+                model.reorderCategory(
+                    categoryID,
+                    relativeTo: targetCategoryID,
+                    placement: target.placement
+                )
             }
         }
     }
@@ -1309,10 +1208,6 @@ struct LibraryView: View {
             return false
         }
         return categoryID == selectedCategoryID || model.categoryIsDescendant(categoryID, of: selectedCategoryID)
-    }
-
-    private func paperCount(inCategory categoryID: String) -> Int {
-        model.libraryDerivedState.categoryPaperCountsByID[categoryID, default: 0]
     }
 
     private func paperCount(forTag tagID: String) -> Int {
@@ -1360,10 +1255,6 @@ struct LibraryView: View {
 
     private func paperDragPayload(for paper: Paper) -> String {
         paperIDsForDrag(startingWith: paper).joined(separator: "\n")
-    }
-
-    private func categoryDragPayload(for category: PaperCodexCore.Category) -> String {
-        "\(LibraryLayout.categoryDragPayloadPrefix)\(category.id)"
     }
 
     private func categories(for paper: Paper) -> [PaperCodexCore.Category] {
@@ -1432,24 +1323,6 @@ struct LibraryView: View {
             .flatMap { category in
                 [CategoryListItem(category: category, depth: depth)]
                     + flattenedCategoryItems(parentID: category.id, depth: depth + 1)
-            }
-    }
-
-    private func visibleCategoryItems(parentID: String? = nil, depth: Int = 0) -> [CategoryListItem] {
-        model.categories
-            .filter { $0.parentID == parentID }
-            .sorted { left, right in
-                if left.isPinned != right.isPinned {
-                    return left.isPinned
-                }
-                if left.sortOrder == right.sortOrder {
-                    return left.name.localizedCaseInsensitiveCompare(right.name) == .orderedAscending
-                }
-                return left.sortOrder < right.sortOrder
-            }
-            .flatMap { category in
-                let children = collapsedCategoryIDs.contains(category.id) ? [] : visibleCategoryItems(parentID: category.id, depth: depth + 1)
-                return [CategoryListItem(category: category, depth: depth)] + children
             }
     }
 
@@ -1590,14 +1463,8 @@ private struct WatchedFolderRow: View {
 private struct CategoryListItem: Identifiable {
     var category: PaperCodexCore.Category
     var depth: Int
-    var connectorContinuations: [Bool] = []
 
     var id: String { category.id }
-}
-
-private struct CategoryDragDropTarget: Equatable {
-    var targetCategoryID: String
-    var placement: LibraryCategoryDropPlacement
 }
 
 struct LibraryPaperArxivMetadata: Equatable {
@@ -1963,8 +1830,6 @@ private struct LibraryInspectorReadButtonStyle: ButtonStyle {
 private struct LibraryCategoryTreeSnapshot {
     var visibleItems: [CategoryListItem]
 
-    private var childrenByParentID: [String: [PaperCodexCore.Category]]
-
     init(categories: [PaperCodexCore.Category], collapsedCategoryIDs: Set<String>) {
         var rootCategories: [PaperCodexCore.Category] = []
         var childrenByParentID: [String: [PaperCodexCore.Category]] = [:]
@@ -1982,34 +1847,24 @@ private struct LibraryCategoryTreeSnapshot {
             childrenByParentID[parentID, default: []].sort(by: Self.sortCategories)
         }
 
-        self.childrenByParentID = childrenByParentID
         self.visibleItems = Self.visibleItems(
             categories: rootCategories,
             childrenByParentID: childrenByParentID,
             collapsedCategoryIDs: collapsedCategoryIDs,
-            depth: 0,
-            ancestorContinuations: []
+            depth: 0
         )
-    }
-
-    func hasChildren(_ categoryID: String) -> Bool {
-        childrenByParentID[categoryID]?.isEmpty == false
     }
 
     private static func visibleItems(
         categories: [PaperCodexCore.Category],
         childrenByParentID: [String: [PaperCodexCore.Category]],
         collapsedCategoryIDs: Set<String>,
-        depth: Int,
-        ancestorContinuations: [Bool]
+        depth: Int
     ) -> [CategoryListItem] {
-        categories.enumerated().flatMap { index, category in
-            let isLast = index == categories.count - 1
-            let connectorContinuations = depth == 0 ? [] : ancestorContinuations + [!isLast]
+        categories.flatMap { category in
             let item = CategoryListItem(
                 category: category,
-                depth: depth,
-                connectorContinuations: connectorContinuations
+                depth: depth
             )
             guard !collapsedCategoryIDs.contains(category.id) else {
                 return [item]
@@ -2018,8 +1873,7 @@ private struct LibraryCategoryTreeSnapshot {
                 categories: childrenByParentID[category.id, default: []],
                 childrenByParentID: childrenByParentID,
                 collapsedCategoryIDs: collapsedCategoryIDs,
-                depth: depth + 1,
-                ancestorContinuations: connectorContinuations
+                depth: depth + 1
             )
         }
     }
@@ -2142,24 +1996,9 @@ private enum LibraryLayout {
     static let paperRowThumbnailLimit = 3
     static let paperRowThumbnailMaxPixelSize = 128
     static let inspectorDetailSettleDelayNanoseconds: UInt64 = 80_000_000
-    static let categoryTreeRowSpacing: CGFloat = 0
     static let categoryTreeConnectorHeight: CGFloat = 32
-    static let categoryTreeIndentWidth: CGFloat = 22
-    static let categoryTreeFolderButtonLeadingPadding: CGFloat = 8
-    static let categoryTreeFolderIconWidth: CGFloat = 17
-    static let categoryTreeConnectorTargetInset: CGFloat = 7
-    static let categoryTreeConnectorLineWidth: CGFloat = 1
-    static let categoryTreeConnectorOpacity = 0.16
     static let categoryDropContentTypes: [UTType] = [.plainText]
     static let categoryDragPayloadPrefix = "papercodex-category-id:"
-
-    static var categoryTreeFolderIconCenterX: CGFloat {
-        categoryTreeFolderButtonLeadingPadding + categoryTreeFolderIconWidth / 2
-    }
-
-    static func categoryTreeFolderIconCenterX(depth: Int) -> CGFloat {
-        categoryTreeFolderIconCenterX + CGFloat(depth) * categoryTreeIndentWidth
-    }
 
     static func droppedCategoryID(from payload: String) -> String? {
         guard payload.hasPrefix(categoryDragPayloadPrefix) else {
@@ -3128,254 +2967,6 @@ private struct FlowLayout: Layout {
     }
 }
 
-private struct CategorySidebarRow: View {
-    @State private var isHovering = false
-    @State private var isDropTargeted = false
-    @State private var dropPlacement: LibraryCategoryDropPlacement?
-
-    var title: String
-    var countText: String
-    var systemImage: String
-    var isSelected: Bool
-    var depth: Int
-    var connectorContinuations: [Bool]
-    var hasChildren: Bool
-    var isExpanded: Bool
-    var isPinned: Bool
-    var categoryDragPayload: String
-    var onDragCategory: () -> Void
-    var canDropCategory: (LibraryCategoryDropPlacement) -> Bool
-    var onPreviewCategoryDrop: (LibraryCategoryDropPlacement) -> Void
-    var onCategoryDropExited: () -> Void
-    var onToggle: () -> Void
-    var onSelect: () -> Void
-    var onCreateChild: () -> Void
-    var onManage: () -> Void
-    var onTogglePinned: () -> Void
-    var onDropPapers: ([String]) -> Void
-    var onDropCategory: (String, LibraryCategoryDropPlacement) -> Void
-
-    var body: some View {
-        ZStack(alignment: .trailing) {
-            HStack(spacing: 8) {
-                Button(action: toggleFolderExpansion) {
-                    Image(systemName: folderIconName)
-                        .frame(width: 17)
-                        .foregroundStyle(isSelected || isExpanded ? Color.accentColor : Color.secondary)
-                }
-                .buttonStyle(.plain)
-                .help(folderIconHelp)
-
-                Button(action: onSelect) {
-                    HStack(spacing: 0) {
-                        Text(title)
-                            .font(.paperCodexSystem(size: 13, weight: isSelected ? .semibold : .medium))
-                            .lineLimit(1)
-                        Spacer(minLength: 58)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .buttonStyle(.plain)
-                .help(title)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 7)
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(isSelected ? Color.accentColor.opacity(0.13) : (isHovering ? Color.primary.opacity(0.045) : Color.clear))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(isSelected ? Color.accentColor.opacity(0.22) : Color.clear, lineWidth: 1)
-            )
-            .padding(.leading, CGFloat(depth) * LibraryLayout.categoryTreeIndentWidth)
-            .frame(minHeight: LibraryLayout.categoryTreeConnectorHeight)
-            .background(alignment: .leading) {
-                CategoryTreeConnector(
-                    depth: depth,
-                    connectorContinuations: connectorContinuations
-                )
-                .allowsHitTesting(false)
-            }
-
-            if isDropActive {
-                Label(dropLabel, systemImage: dropIconName)
-                    .font(.paperCodexSystem(size: 11, weight: .semibold))
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 4)
-                    .foregroundStyle(Color.accentColor)
-                    .background(Capsule().fill(Color.accentColor.opacity(0.16)))
-                    .padding(.trailing, 6)
-                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
-            } else {
-                HStack(spacing: 3) {
-                    Text(countText)
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                        .contentTransition(.numericText())
-                    if isHovering || isSelected {
-                        Button(action: onCreateChild) {
-                            Image(systemName: "plus")
-                                .font(.paperCodexSystem(size: 11, weight: .semibold))
-                                .frame(width: 22, height: 22)
-                                .foregroundStyle(Color.accentColor)
-                                .background(Circle().fill(Color.accentColor.opacity(isHovering ? 0.16 : 0.10)))
-                                .contentShape(Circle())
-                        }
-                        .buttonStyle(.plain)
-                        .help("New subcategory under \(title)")
-
-                        Button(action: onTogglePinned) {
-                            Image(systemName: isPinned ? "pin.fill" : "pin")
-                                .font(.paperCodexSystem(size: 11, weight: .bold))
-                                .frame(width: 22, height: 22)
-                                .foregroundStyle(isPinned ? Color.accentColor : Color.secondary)
-                        }
-                        .buttonStyle(.plain)
-                        .help(isPinned ? "Unpin \(title)" : "Pin \(title)")
-
-                        Button(action: onManage) {
-                            Image(systemName: "ellipsis")
-                                .font(.paperCodexSystem(size: 11, weight: .bold))
-                                .frame(width: 22, height: 22)
-                        }
-                        .buttonStyle(.plain)
-                        .help("Manage \(title)")
-                    }
-                }
-                .padding(.trailing, 6)
-                .transition(.opacity.combined(with: .scale(scale: 0.92)))
-            }
-        }
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(isDropActive ? Color.accentColor.opacity(0.12) : Color.clear)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(isDropActive ? Color.accentColor.opacity(0.55) : Color.clear, lineWidth: 1.5)
-        )
-        .overlay(alignment: dropLineAlignment) {
-            if dropPlacement == .before || dropPlacement == .after {
-                Capsule()
-                    .fill(Color.accentColor)
-                    .frame(height: 2)
-                    .padding(.leading, CGFloat(depth) * LibraryLayout.categoryTreeIndentWidth + 8)
-                    .padding(.trailing, 8)
-                    .transition(.opacity)
-            }
-        }
-        .scaleEffect(isDropActive ? 1.02 : 1, anchor: .center)
-        .animation(PaperCodexMotion.hover, value: isHovering)
-        .animation(PaperCodexMotion.selection, value: isSelected)
-        .animation(PaperCodexMotion.hover, value: isDropActive)
-        .animation(.easeOut(duration: 0.10), value: dropPlacement)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .contentShape(Rectangle())
-        .onDrag {
-            onDragCategory()
-            return NSItemProvider(object: categoryDragPayload as NSString)
-        }
-        .onDrop(
-            of: LibraryLayout.categoryDropContentTypes,
-            delegate: CategorySidebarDropDelegate(
-                isTargeted: $isDropTargeted,
-                placement: $dropPlacement,
-                canDrop: canDropCategory,
-                onPreviewDrop: onPreviewCategoryDrop,
-                onDropExited: onCategoryDropExited,
-                onDrop: loadDroppedItems(from:placement:)
-            )
-        )
-        .help("Drop papers or folders into \(title)")
-        .onHover { hovering in
-            withAnimation(.easeOut(duration: 0.12)) {
-                isHovering = hovering
-            }
-        }
-    }
-
-    private var isDropActive: Bool {
-        isDropTargeted
-    }
-
-    private var dropLabel: String {
-        switch dropPlacement {
-        case .before:
-            "Before"
-        case .after:
-            "After"
-        case .inside, .none:
-            "Drop"
-        }
-    }
-
-    private var dropIconName: String {
-        switch dropPlacement {
-        case .before, .after:
-            "arrow.up.arrow.down"
-        case .inside, .none:
-            "arrow.down.doc"
-        }
-    }
-
-    private var dropLineAlignment: Alignment {
-        dropPlacement == .after ? .bottom : .top
-    }
-
-    private var folderIconName: String {
-        hasChildren ? (isExpanded ? "folder.fill" : "folder") : systemImage
-    }
-
-    private var folderIconHelp: String {
-        guard hasChildren else {
-            return title
-        }
-        return isExpanded ? "Collapse \(title)" : "Expand \(title)"
-    }
-
-    private func toggleFolderExpansion() {
-        if hasChildren {
-            onToggle()
-        } else {
-            onSelect()
-        }
-    }
-
-    private func loadDroppedItems(from providers: [NSItemProvider], placement: LibraryCategoryDropPlacement) -> Bool {
-        let textProviders = providers.filter { $0.canLoadObject(ofClass: NSString.self) }
-        guard !textProviders.isEmpty else {
-            return false
-        }
-        for provider in textProviders {
-            provider.loadObject(ofClass: NSString.self) { object, _ in
-                guard let payload = (object as? NSString).map(String.init) else {
-                    return
-                }
-                let trimmedPayload = payload.trimmingCharacters(in: .whitespacesAndNewlines)
-                if let droppedCategoryID = LibraryLayout.droppedCategoryID(from: trimmedPayload) {
-                    DispatchQueue.main.async {
-                        onDropCategory(droppedCategoryID, placement)
-                    }
-                    return
-                }
-                let paperIDs = trimmedPayload
-                    .components(separatedBy: .whitespacesAndNewlines)
-                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                    .filter { !$0.isEmpty }
-                guard !paperIDs.isEmpty else {
-                    return
-                }
-                DispatchQueue.main.async {
-                    onDropPapers(paperIDs)
-                }
-            }
-        }
-        return true
-    }
-}
-
 private struct LibraryRootFolderDropDelegate: DropDelegate {
     @Binding var isTargeted: Bool
     var canDropCategory: () -> Bool
@@ -3412,137 +3003,6 @@ private struct LibraryRootFolderDropDelegate: DropDelegate {
             return true
         }
         return canDropCategory()
-    }
-}
-
-private struct CategorySidebarDropDelegate: DropDelegate {
-    @Binding var isTargeted: Bool
-    @Binding var placement: LibraryCategoryDropPlacement?
-    var canDrop: (LibraryCategoryDropPlacement) -> Bool
-    var onPreviewDrop: (LibraryCategoryDropPlacement) -> Void
-    var onDropExited: () -> Void
-    var onDrop: ([NSItemProvider], LibraryCategoryDropPlacement) -> Bool
-
-    func validateDrop(info: DropInfo) -> Bool {
-        info.hasItemsConforming(to: LibraryLayout.categoryDropContentTypes) && validPlacement(for: info) != nil
-    }
-
-    func dropEntered(info: DropInfo) {
-        _ = updateDropState(info: info)
-    }
-
-    func dropUpdated(info: DropInfo) -> DropProposal? {
-        updateDropState(info: info) == nil ? nil : DropProposal(operation: .move)
-    }
-
-    func dropExited(info: DropInfo) {
-        isTargeted = false
-        placement = nil
-        onDropExited()
-    }
-
-    func performDrop(info: DropInfo) -> Bool {
-        guard let finalPlacement = validPlacement(for: info) else {
-            isTargeted = false
-            placement = nil
-            return false
-        }
-        isTargeted = false
-        placement = nil
-        return onDrop(info.itemProviders(for: LibraryLayout.categoryDropContentTypes), finalPlacement)
-    }
-
-    private func updateDropState(info: DropInfo) -> LibraryCategoryDropPlacement? {
-        let candidatePlacement = placement(for: info)
-        if isTargeted, placement == candidatePlacement {
-            return candidatePlacement
-        }
-        guard canDrop(candidatePlacement) else {
-            isTargeted = false
-            placement = nil
-            return nil
-        }
-        let validPlacement = candidatePlacement
-        isTargeted = true
-        placement = validPlacement
-        onPreviewDrop(validPlacement)
-        return validPlacement
-    }
-
-    private func validPlacement(for info: DropInfo) -> LibraryCategoryDropPlacement? {
-        let placement = placement(for: info)
-        return canDrop(placement) ? placement : nil
-    }
-
-    private func placement(for info: DropInfo) -> LibraryCategoryDropPlacement {
-        let rowHeight = max(LibraryLayout.categoryTreeConnectorHeight, 1)
-        let y = min(max(info.location.y, 0), rowHeight)
-        if y < rowHeight * 0.28 {
-            return .before
-        }
-        if y > rowHeight * 0.72 {
-            return .after
-        }
-        return .inside
-    }
-}
-
-private struct CategoryTreeConnector: View {
-    var depth: Int
-    var connectorContinuations: [Bool]
-
-    var body: some View {
-        if depth == 0 || connectorContinuations.isEmpty {
-            Color.clear
-                .frame(height: LibraryLayout.categoryTreeConnectorHeight)
-        } else {
-            TreeConnectorLevel(
-                depth: depth,
-                connectorContinuations: connectorContinuations
-            )
-            .stroke(
-                Color.primary.opacity(LibraryLayout.categoryTreeConnectorOpacity),
-                style: StrokeStyle(
-                    lineWidth: LibraryLayout.categoryTreeConnectorLineWidth,
-                    lineCap: .butt,
-                    lineJoin: .round
-                )
-            )
-            .frame(
-                width: LibraryLayout.categoryTreeFolderIconCenterX(depth: depth) + 1,
-                height: LibraryLayout.categoryTreeConnectorHeight
-            )
-        }
-    }
-}
-
-private struct TreeConnectorLevel: Shape {
-    var depth: Int
-    var connectorContinuations: [Bool]
-
-    func path(in rect: CGRect) -> Path {
-        Path { path in
-            let midY = rect.midY
-            let currentIconX = LibraryLayout.categoryTreeFolderIconCenterX(depth: depth)
-            let currentTargetX = currentIconX - LibraryLayout.categoryTreeConnectorTargetInset
-            let parentIconX = LibraryLayout.categoryTreeFolderIconCenterX(depth: depth - 1)
-            let currentBranchContinues = connectorContinuations.indices.contains(depth - 1)
-                ? connectorContinuations[depth - 1]
-                : false
-
-            if depth > 1 {
-                for level in 0..<(depth - 1) where connectorContinuations.indices.contains(level) && connectorContinuations[level] {
-                    let ancestorIconX = LibraryLayout.categoryTreeFolderIconCenterX(depth: level)
-                    path.move(to: CGPoint(x: ancestorIconX, y: rect.minY))
-                    path.addLine(to: CGPoint(x: ancestorIconX, y: rect.maxY))
-                }
-            }
-
-            path.move(to: CGPoint(x: parentIconX, y: rect.minY))
-            path.addLine(to: CGPoint(x: parentIconX, y: currentBranchContinues ? rect.maxY : midY))
-            path.move(to: CGPoint(x: parentIconX, y: midY))
-            path.addLine(to: CGPoint(x: currentTargetX, y: midY))
-        }
     }
 }
 

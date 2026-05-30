@@ -968,6 +968,7 @@ func runUILayoutSourceChecks() throws {
     let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
     let libraryViewURL = root.appendingPathComponent("Sources/PaperCodexApp/LibraryView.swift")
     let librarySource = try String(contentsOf: libraryViewURL)
+    let libraryCategoryOutlineSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/LibraryCategoryOutlineView.swift"))
     let appModelURL = root.appendingPathComponent("Sources/PaperCodexApp/AppModel.swift")
     let appModelSource = try String(contentsOf: appModelURL)
     let libraryFeatureStoreSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/LibraryFeatureStore.swift"))
@@ -981,21 +982,36 @@ func runUILayoutSourceChecks() throws {
         "library list and inspector panes should share the same top inset constant"
     )
     try check(
-        librarySource.contains("CategorySidebarRow"),
-        "library category rows should have a dedicated hoverable row component"
+        librarySource.contains("LibraryCategoryOutlineView(")
+            && !librarySource.contains("CategorySidebarRow(")
+            && !librarySource.contains("private struct CategorySidebarRow")
+            && libraryCategoryOutlineSource.contains("NSOutlineView")
+            && libraryCategoryOutlineSource.contains("NSOutlineViewDataSource")
+            && libraryCategoryOutlineSource.contains("NSOutlineViewDelegate")
+            && libraryCategoryOutlineSource.contains("outlineViewSelectionDidChange")
+            && libraryCategoryOutlineSource.contains("outlineViewItemDidExpand")
+            && libraryCategoryOutlineSource.contains("outlineViewItemDidCollapse")
+            && libraryCategoryOutlineSource.contains("pasteboardWriterForItem")
+            && libraryCategoryOutlineSource.contains("validateDrop")
+            && libraryCategoryOutlineSource.contains("acceptDrop")
+            && libraryCategoryOutlineSource.contains("CategoryOutlineCellView")
+            && libraryCategoryOutlineSource.contains("onCreateChild")
+            && libraryCategoryOutlineSource.contains("onTogglePinned")
+            && libraryCategoryOutlineSource.contains("onBeginCategoryDrag")
+            && libraryCategoryOutlineSource.contains("onEndCategoryDrag")
+            && libraryCategoryOutlineSource.contains("onManage"),
+        "library folder tree should use a native NSOutlineView with selection, expansion, drag/drop, and row actions"
     )
     try check(
-        librarySource.contains("private var folderIconName: String")
-            && librarySource.contains("private var folderIconHelp: String")
-            && librarySource.contains("Button(action: toggleFolderExpansion)")
-            && librarySource.contains("Button(action: onSelect)")
-            && librarySource.contains("private func toggleFolderExpansion()")
-            && librarySource.contains("hasChildren ? (isExpanded ? \"folder.fill\" : \"folder\") : systemImage")
+        libraryCategoryOutlineSource.contains("folderIconName")
+            && libraryCategoryOutlineSource.contains("folderIconHelp")
+            && libraryCategoryOutlineSource.contains("NSImage(systemSymbolName:")
+            && libraryCategoryOutlineSource.contains("outlineView.isExpandable(node)")
             && !librarySource.contains("\"chevron.down\"")
             && !librarySource.contains("\"chevron.right\"")
             && !librarySource.contains("categoryTreeChevronWidth")
             && !librarySource.contains("categoryTreeChevronIconSpacing"),
-        "library folder rows should use the folder icon itself for expanded/collapsed state and remove chevron expand controls"
+        "library folder rows should keep folder-state iconography while avoiding custom SwiftUI chevron expand controls"
     )
     try check(
         librarySource.contains("SidebarSplitLayout(minContentWidth: LibraryLayout.libraryContentMinimumWidth)")
@@ -1027,7 +1043,7 @@ func runUILayoutSourceChecks() throws {
         "library category rows should expose a direct child-category creation action"
     )
     try check(
-        librarySource.contains("newCategoryParentID = item.category.id"),
+        librarySource.contains("newCategoryParentID = category.id"),
         "hover category add buttons should preselect the hovered category as parent"
     )
     try check(
@@ -1105,8 +1121,10 @@ func runUILayoutSourceChecks() throws {
         "library paper rows should expose selected paper IDs as an NSItemProvider drag payload"
     )
     try check(
-        librarySource.contains("CategorySidebarDropDelegate")
-            && librarySource.contains("LibraryLayout.categoryDropContentTypes"),
+        libraryCategoryOutlineSource.contains("registerForDraggedTypes([.string])")
+            && libraryCategoryOutlineSource.contains("case .papers")
+            && libraryCategoryOutlineSource.contains("onDropPapers")
+            && librarySource.contains("dropPaperIDs(paperIDs, ontoCategory: category.id)"),
         "library category rows should accept dropped paper IDs as plain text payloads"
     )
     try check(
@@ -1138,7 +1156,7 @@ func runUILayoutSourceChecks() throws {
         "library category rows should accept native plain-text paper drag payloads"
     )
     try check(
-        librarySource.contains("dropPaperIDs(paperIDs, ontoCategory: item.category.id)"),
+        librarySource.contains("dropPaperIDs(paperIDs, ontoCategory: category.id)"),
         "dropping papers onto a folder should decide copy vs move from the current folder context"
     )
     try check(
@@ -1148,44 +1166,48 @@ func runUILayoutSourceChecks() throws {
         "paper folder operations should expose explicit copy and move success notices"
     )
     try check(
-        librarySource.contains("categoryDragPayload(for: item.category)") &&
-            librarySource.contains("onDropCategory") &&
-            librarySource.contains("droppedCategoryID"),
+        libraryCategoryOutlineSource.contains("pasteboardWriterForItem")
+            && libraryCategoryOutlineSource.contains("categoryDragPayloadPrefix")
+            && libraryCategoryOutlineSource.contains("onDropCategory")
+            && librarySource.contains("dropCategory(_:to:)"),
         "library category rows should support dragging folders onto other folders"
     )
     try check(
-        librarySource.contains("LibraryCategoryDropPlacement")
-            && librarySource.contains("CategorySidebarDropDelegate")
+        libraryCategoryOutlineSource.contains("LibraryCategoryDropPlacement")
+            && libraryCategoryOutlineSource.contains("validateDrop")
+            && libraryCategoryOutlineSource.contains("acceptDrop")
+            && librarySource.contains("LibraryCategoryOutlineDropTarget")
             && appModelSource.contains("func reorderCategory("),
         "library category rows should support animated folder reordering before or after sibling rows"
     )
     try check(
-        librarySource.contains("@State private var draggedCategoryID")
-            && librarySource.contains("@State private var liveCategoryDropKey")
-            && librarySource.contains("@State private var categoryDragPreviewCategories")
-            && librarySource.contains("@State private var categoryDragCommitTarget")
-            && librarySource.contains("LibraryCategoryTreeSnapshot(\n            categories: sidebarCategories")
-            && librarySource.contains("canDropCategory: { placement in")
+        !librarySource.contains("@State private var draggedCategoryID")
+            && !librarySource.contains("@State private var liveCategoryDropKey")
+            && !librarySource.contains("@State private var categoryDragPreviewCategories")
+            && !librarySource.contains("@State private var categoryDragCommitTarget")
+            && !librarySource.contains("CategorySidebarDropDelegate")
+            && !librarySource.contains("CategoryDragDropTarget")
+            && librarySource.contains("@State private var outlineDraggedCategoryID")
+            && librarySource.contains("onBeginCategoryDrag")
+            && librarySource.contains("onEndCategoryDrag")
+            && libraryCategoryOutlineSource.contains("private func dropTarget(")
+            && libraryCategoryOutlineSource.contains("draggingSession session: NSDraggingSession")
+            && libraryCategoryOutlineSource.contains("canDropCategory(categoryID, target)")
+            && libraryCategoryOutlineSource.contains("return .move")
+            && librarySource.contains("private func canDropCategory(_ categoryID: String, to target: LibraryCategoryOutlineDropTarget) -> Bool")
+            && librarySource.contains("CategoryMovePlanner.canMoveCategory(")
             && librarySource.contains("CategoryMovePlanner.canDropCategory(")
-            && librarySource.contains("onPreviewCategoryDrop")
-            && librarySource.contains("categoryDragCommitTarget = CategoryDragDropTarget")
-            && librarySource.contains("onCategoryDropExited")
-            && librarySource.contains("scheduleCategoryDragPreviewReset()")
-            && librarySource.contains("if isTargeted, placement == candidatePlacement")
-            && librarySource.contains("onPreviewDrop(validPlacement)")
-            && !librarySource.contains("if let validPlacement = updateDropState(info: info) {\n            onPreviewDrop(validPlacement)")
-            && librarySource.contains("CategoryMovePlanner.reorderedCategories(")
-            && librarySource.contains("categoryDragPreviewCategories = previewCategories")
-            && !librarySource.contains("postsNotice: false")
-            && !librarySource.contains("visibleItems.map(\\.id)")
+            && librarySource.contains("model.moveCategory(categoryID, toParent: target.targetCategoryID)")
+            && librarySource.contains("model.reorderCategory(")
             && librarySource.contains("LibraryRootFolderDropDelegate")
             && librarySource.contains("if isTargeted {\n            return true\n        }")
-            && librarySource.contains("return canDropCategory()")
             && librarySource.contains("CategoryMovePlanner.canMoveCategory(")
+            && librarySource.contains("droppedCategoryID")
+            && librarySource.contains("toParent: nil")
             && appModelSource.contains("func reorderCategory(")
             && appModelSource.contains("postsNotice: Bool = true")
             && appModelSource.contains("if postsNotice {"),
-        "library folder dragging should reject invalid targets, allow top-level moves, and preview live sibling reordering without database writes, duplicate dropUpdated work, or stale canceled previews"
+        "library folder dragging should reject invalid outline targets through NSOutlineView, allow top-level moves, and commit sibling reordering without stale SwiftUI preview state"
     )
     try check(
         libraryFeatureStoreSource.contains("struct LibrarySelection")
@@ -1256,8 +1278,9 @@ func runUILayoutSourceChecks() throws {
         "library inspector should defer heavy per-paper details until selection settles so row selection can paint first"
     )
     try check(
-        librarySource.contains("onTogglePinned")
-            && librarySource.contains("pin.fill")
+        libraryCategoryOutlineSource.contains("onTogglePinned")
+            && libraryCategoryOutlineSource.contains("pin.fill")
+            && librarySource.contains("model.setCategoryPinned(category.id, pinned: !category.isPinned)")
             && appModelSource.contains("func setCategoryPinned("),
         "library category rows should expose folder pinning within the current parent level"
     )
@@ -2552,26 +2575,15 @@ func runUILayoutSourceChecks() throws {
         "dragging a library paper should carry the selected paper set when the row is part of a multi-selection"
     )
     try check(
-        librarySource.contains("CategoryTreeConnector")
-            && librarySource.contains("TreeConnectorLevel")
-            && librarySource.contains("connectorContinuations")
-            && librarySource.contains("categoryTreeRowSpacing: CGFloat = 0")
+        libraryCategoryOutlineSource.contains("outlineView.indentationPerLevel")
+            && libraryCategoryOutlineSource.contains("outlineView.rowHeight = 32")
             && librarySource.contains("categoryTreeConnectorHeight: CGFloat = 32")
-            && librarySource.contains("categoryTreeIndentWidth")
-            && librarySource.contains("categoryTreeFolderIconCenterX")
-            && librarySource.contains("categoryTreeConnectorTargetInset")
-            && librarySource.contains("categoryTreeConnectorLineWidth")
-            && librarySource.contains("categoryTreeConnectorOpacity")
-            && librarySource.contains("ancestorContinuations + [!isLast]")
-            && librarySource.contains("Color.primary.opacity(LibraryLayout.categoryTreeConnectorOpacity)")
-            && librarySource.contains("lineWidth: LibraryLayout.categoryTreeConnectorLineWidth")
-            && librarySource.contains("lineCap: .butt")
-            && librarySource.contains("currentIconX")
-            && librarySource.contains("currentTargetX")
-            && librarySource.contains("parentIconX")
+            && !librarySource.contains("CategoryTreeConnector")
+            && !librarySource.contains("TreeConnectorLevel")
+            && !librarySource.contains("connectorContinuations")
             && !librarySource.contains("index == connectorContinuations.count - 1 ? 0.34 : 0.18")
             && !librarySource.contains("CategoryDepthGuide"),
-        "library folder hierarchy should render continuous, uniform connectors aligned from folder icon column to folder icon column"
+        "library folder hierarchy should use native outline indentation instead of custom SwiftUI connector drawing"
     )
     try check(
         (librarySource.contains("LibraryPaperList(papers: visiblePapers)")
