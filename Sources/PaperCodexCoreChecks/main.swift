@@ -1387,6 +1387,7 @@ func runUILayoutSourceChecks() throws {
     let readerViewSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/ReaderView.swift"))
     let readerToolbarSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/ReaderToolbarView.swift"))
     let readerSessionToolbarSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/ReaderSessionToolbarView.swift"))
+    let chatComposerNativeSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/ChatComposerNativePanelView.swift"))
     let sessionNotesNativeSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/SessionNotesNativePanelView.swift"))
     let windowTabBarSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/WindowChromeTabBar.swift"))
     let homeChromeSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/WindowChrome.swift"))
@@ -1707,11 +1708,12 @@ func runUILayoutSourceChecks() throws {
         "settings should expose runtime selection, enablement, diagnostics, auth, model/provider overrides, and MCP mode"
     )
     try check(
-        chatSource.contains("AgentStatusLine")
+        chatSource.contains("ChatComposerNativePanelView(")
             && chatSource.contains("selectedChatRuntimeDisplayName")
             && chatSource.contains("selectedChatRuntimeDiagnostic")
             && chatSource.contains("setSelectedChatRuntimeID")
-            && chatSource.contains("Stop Agent")
+            && chatComposerNativeSource.contains("Stop Agent")
+            && chatComposerNativeSource.contains("runtimePopup")
             && !chatSource.contains("Stop Codex")
             && !chatSource.contains("ask Codex in this session"),
         "reader chat controls should present runtime-neutral agent labels instead of Codex-only labels"
@@ -1765,20 +1767,28 @@ func runUILayoutSourceChecks() throws {
             && !agentTerminalSource.contains("TextField(\"Terminal input\""),
         "reader terminal panel should use native AppKit controls for runtime selection, terminal output, sizing, and input"
     )
-    if let composerRange = chatSource.range(of: "private var composer: some View"),
-       let composerEndRange = chatSource.range(of: "private var composerTopDivider", range: composerRange.upperBound..<chatSource.endIndex) {
-        let composerSource = String(chatSource[composerRange.lowerBound..<composerEndRange.lowerBound])
-        try check(
-            chatSource.contains("private struct ChatSendButtonStyle: ButtonStyle")
-                && composerSource.contains(".buttonStyle(ChatSendButtonStyle(")
-                && chatSource.contains("configuration.isPressed && isEnabled")
-                && chatSource.contains("PaperCodexMotion.press")
-                && !composerSource.contains(".buttonStyle(.plain)"),
-            "reader chat send and stop button should provide immediate pressed feedback before agent work starts or cancels"
-        )
-    } else {
-        throw CheckFailure(description: "reader chat composer source should remain inspectable")
-    }
+    try check(
+        chatSource.contains("ChatComposerNativePanelView(")
+            && chatComposerNativeSource.contains("NSViewRepresentable")
+            && chatComposerNativeSource.contains("ChatComposerContainerView")
+            && chatComposerNativeSource.contains("NSPopUpButton")
+            && chatComposerNativeSource.contains("NSTextView")
+            && chatComposerNativeSource.contains("NSScrollView")
+            && chatComposerNativeSource.contains("NSButton")
+            && chatComposerNativeSource.contains("quickPromptPopup")
+            && chatComposerNativeSource.contains("runtimePopup")
+            && chatComposerNativeSource.contains("modelPopup")
+            && chatComposerNativeSource.contains("reasoningPopup")
+            && chatComposerNativeSource.contains("refreshButton")
+            && chatComposerNativeSource.contains("inputTextView")
+            && chatComposerNativeSource.contains("sendButton")
+            && chatComposerNativeSource.contains("hasMarkedText()")
+            && !chatSource.contains("private struct QuickPromptLine: View")
+            && !chatSource.contains("private struct AgentStatusLine: View")
+            && !chatSource.contains("private struct ComposerTextView: NSViewRepresentable")
+            && !chatSource.contains("private struct ChatSendButtonStyle: ButtonStyle"),
+        "reader chat composer should use a native AppKit prompt/runtime/input/send panel"
+    )
     try check(
         chatSource.contains("SessionNotesNativePanelView(")
             && sessionNotesNativeSource.contains("NSViewRepresentable")
@@ -2467,8 +2477,8 @@ func runUILayoutSourceChecks() throws {
     )
     try check(
         chatSource.contains("availableModelIDs")
-            && chatSource.contains("ForEach(availableModelIDs, id: \\.self)")
-            && chatSource.contains("defaultModelLabel"),
+            && chatComposerNativeSource.contains("availableModelIDs")
+            && chatComposerNativeSource.contains("defaultModelLabel"),
         "chat model menu should use the same available Codex model list as settings and label the default model"
     )
     try check(
@@ -2938,7 +2948,7 @@ func runUILayoutSourceChecks() throws {
         throw CheckFailure(description: "generated image gallery source section should be present")
     }
     try check(
-        chatSource.contains("hasMarkedText()"),
+        chatComposerNativeSource.contains("hasMarkedText()"),
         "chat composer should let IME marked text handle Return before submitting"
     )
     try check(
@@ -2948,8 +2958,8 @@ func runUILayoutSourceChecks() throws {
             && appModelSource.contains("selectedSessionPanelTab = .chat")
             && chatSource.contains("focusRequestID: composerFocusRequestID")
             && chatSource.contains(".onChange(of: model.chatComposerFocusRequestID)")
-            && chatSource.contains("window?.makeFirstResponder(textView)")
-            && chatSource.contains("scrollRangeToVisible"),
+            && chatComposerNativeSource.contains("window?.makeFirstResponder(textView)")
+            && chatComposerNativeSource.contains("scrollRangeToVisible"),
         "Cmd-L should focus the Reader chat composer and switch back to the Chat tab"
     )
     try check(

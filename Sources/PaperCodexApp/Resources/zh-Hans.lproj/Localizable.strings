@@ -225,6 +225,13 @@
 "Delete Note" = "删除笔记";
 "Quick Prompt" = "快捷 Prompt";
 "Use gpt-5.4-mini" = "使用 gpt-5.4-mini";
+"Think" = "思考";
+"Send" = "发送";
+"Stop Agent" = "停止 Agent";
+"Refresh Agent Status" = "刷新 Agent 状态";
+"Checking %@" = "正在检查 %@";
+"Checking local agent runtime." = "正在检查本地 Agent 运行时。";
+"Chat input" = "对话输入";
 "Refresh Codex Status" = "刷新 Codex 状态";
 "Codex" = "Codex";
 "Running" = "运行中";

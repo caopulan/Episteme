@@ -14,7 +14,6 @@ enum SessionPanelTab: Hashable {
 struct ChatView: View {
     @EnvironmentObject private var model: AppModel
     @State private var draftsByComposerKey: [String: String] = [:]
-    @State private var isSendButtonHovered = false
     @State private var composerTextHeight = ChatComposerLayout.loadTextHeight()
     @State private var composerResizeStartHeight: CGFloat?
     @State private var sessionPendingRename: PaperSession?
@@ -255,7 +254,15 @@ struct ChatView: View {
                     }
                 }
 
-                QuickPromptLine(
+                ChatComposerNativePanelView(
+                    text: composerDraftBinding,
+                    isEditable: canEditComposer,
+                    isSending: isCurrentSessionSending,
+                    canSubmit: canUseSendButton,
+                    textHeight: composerTextHeight,
+                    fontSize: model.chatComposerFontSize,
+                    fontFamily: model.chatFontFamily,
+                    focusRequestID: composerFocusRequestID,
                     prompts: model.quickPrompts,
                     runtimeProfiles: model.agentRuntimeProfiles,
                     selectedRuntimeID: model.selectedChatRuntimeID,
@@ -269,51 +276,20 @@ struct ChatView: View {
                     onPrompt: { model.sendQuickPrompt($0) },
                     onRuntime: { model.setSelectedChatRuntimeID($0) },
                     onModelOverride: { model.setCodexModelOverride($0) },
-                    onReasoningEffort: { model.setCodexReasoningEffort($0) }
-                ) {
-                    Task {
-                        await model.refreshCodexDiagnostic()
-                        await model.refreshAvailableCodexModels()
-                        await model.refreshAgentRuntimeDiagnostics()
-                    }
-                }
-
-                HStack(alignment: .bottom, spacing: 8) {
-                    ComposerTextView(
-                        text: composerDraftBinding,
-                        isEnabled: canEditComposer,
-                        fontSize: model.chatComposerFontSize,
-                        fontFamily: model.chatFontFamily,
-                        focusRequestID: composerFocusRequestID,
-                        onSubmit: sendDraft
-                    )
-                        .frame(height: composerTextHeight)
-                        .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8)
-                                .stroke(Color.accentColor.opacity(0.16), lineWidth: 1)
-                        )
-                        .shadow(color: Color.black.opacity(0.05), radius: 6, y: 2)
-                    Button {
-                        if isCurrentSessionSending {
-                            model.cancelActiveCodexRun()
-                        } else {
-                            sendDraft()
+                    onReasoningEffort: { model.setCodexReasoningEffort($0) },
+                    onRefresh: {
+                        Task {
+                            await model.refreshCodexDiagnostic()
+                            await model.refreshAvailableCodexModels()
+                            await model.refreshAgentRuntimeDiagnostics()
                         }
-                    } label: {
-                        Image(systemName: sendButtonIcon)
-                            .font(.paperCodexSystem(size: 20, weight: .semibold))
-                            .frame(width: 36, height: 36)
+                    },
+                    onSubmit: sendDraft,
+                    onCancel: {
+                        model.cancelActiveCodexRun()
                     }
-                    .buttonStyle(ChatSendButtonStyle(tint: sendButtonColor, isEnabled: canUseSendButton, isHovering: isSendButtonHovered))
-                    .disabled(!canUseSendButton)
-                    .onHover { hovering in
-                        withAnimation(PaperCodexMotion.hover) {
-                            isSendButtonHovered = hovering
-                        }
-                    }
-                    .help(sendButtonHelp)
-                }
+                )
+                .frame(height: ChatComposerLayout.nativePanelHeight(for: composerTextHeight))
             }
             .padding(14)
         }
@@ -344,30 +320,6 @@ struct ChatView: View {
         composerResizeStartHeight = nil
     }
 
-    private var sendButtonIcon: String {
-        if isCurrentSessionSending {
-            return isSendButtonHovered ? "xmark.circle.fill" : "hourglass.circle.fill"
-        }
-        return "arrow.up.circle.fill"
-    }
-
-    private var sendButtonColor: Color {
-        if !canUseSendButton {
-            return .secondary.opacity(0.45)
-        }
-        if isCurrentSessionSending {
-            return isSendButtonHovered ? .red : .blue
-        }
-        return .accentColor
-    }
-
-    private var sendButtonHelp: String {
-        if isCurrentSessionSending {
-            return "Stop Agent"
-        }
-        return "Send"
-    }
-
     private func sendDraft() {
         let message = trimmedDraft
         guard !isCurrentSessionSending, !message.isEmpty else {
@@ -377,72 +329,6 @@ struct ChatView: View {
         Task {
             await model.sendMessage(message)
         }
-    }
-}
-
-private struct ChatSendButtonStyle: ButtonStyle {
-    var tint: Color
-    var isEnabled: Bool
-    var isHovering: Bool
-
-    func makeBody(configuration: Configuration) -> some View {
-        let isPressed = configuration.isPressed && isEnabled
-        configuration.label
-            .foregroundStyle(iconColor(isPressed: isPressed))
-            .background(
-                Circle()
-                    .fill(backgroundColor(isPressed: isPressed))
-            )
-            .overlay(
-                Circle()
-                    .stroke(borderColor(isPressed: isPressed), lineWidth: 1)
-            )
-            .shadow(color: shadowColor(isPressed: isPressed), radius: isPressed ? 4 : 8, y: isPressed ? 1 : 3)
-            .scaleEffect(scale(isPressed: isPressed), anchor: .center)
-            .animation(PaperCodexMotion.press, value: configuration.isPressed)
-            .animation(PaperCodexMotion.hover, value: isHovering)
-            .animation(PaperCodexMotion.hover, value: isEnabled)
-    }
-
-    private func iconColor(isPressed: Bool) -> Color {
-        if !isEnabled {
-            return Color.secondary.opacity(0.45)
-        }
-        return isPressed || isHovering ? tint : tint.opacity(0.92)
-    }
-
-    private func backgroundColor(isPressed: Bool) -> Color {
-        if !isEnabled {
-            return Color(nsColor: .controlBackgroundColor).opacity(0.45)
-        }
-        if isPressed {
-            return tint.opacity(0.24)
-        }
-        return tint.opacity(isHovering ? 0.18 : 0.11)
-    }
-
-    private func borderColor(isPressed: Bool) -> Color {
-        if !isEnabled {
-            return Color.clear
-        }
-        if isPressed {
-            return tint.opacity(0.62)
-        }
-        return tint.opacity(isHovering ? 0.42 : 0.18)
-    }
-
-    private func shadowColor(isPressed: Bool) -> Color {
-        guard isEnabled, isPressed || isHovering else {
-            return .clear
-        }
-        return tint.opacity(isPressed ? 0.14 : 0.20)
-    }
-
-    private func scale(isPressed: Bool) -> CGFloat {
-        guard isEnabled else {
-            return 1
-        }
-        return isPressed ? 0.90 : (isHovering ? 1.06 : 1)
     }
 }
 
@@ -637,13 +523,18 @@ private struct ChatPanelActionButtonStyle: ButtonStyle {
     }
 }
 
-private enum ChatComposerLayout {
+enum ChatComposerLayout {
     static let minimumTextHeight: CGFloat = 72
     static let maximumTextHeight: CGFloat = 220
     static let defaultTextHeight: CGFloat = 96
+    static let nativePanelVerticalChromeHeight: CGFloat = 34
 
     static func clampedTextHeight(_ height: CGFloat) -> CGFloat {
         min(max(height, minimumTextHeight), maximumTextHeight)
+    }
+
+    static func nativePanelHeight(for textHeight: CGFloat) -> CGFloat {
+        clampedTextHeight(textHeight) + nativePanelVerticalChromeHeight
     }
 
     static func loadTextHeight() -> CGFloat {
@@ -771,239 +662,6 @@ private struct WindowSafeComposerResizeHandle: NSViewRepresentable {
                 : NSColor.secondaryLabelColor.withAlphaComponent(0.34)
             color.setFill()
             NSBezierPath(roundedRect: rect, xRadius: 2, yRadius: 2).fill()
-        }
-    }
-}
-
-private struct QuickPromptLine: View {
-    var prompts: [QuickPrompt]
-    var runtimeProfiles: [AgentRuntimeProfile]
-    var selectedRuntimeID: String
-    var runtimeName: String
-    var diagnostic: AgentRuntimeDiagnostic?
-    var authSummary: String
-    var modelOverride: String
-    var availableModelIDs: [String]
-    var defaultModelID: String
-    var reasoningEffort: CodexReasoningEffort
-    var onPrompt: (QuickPrompt) -> Void
-    var onRuntime: (String) -> Void
-    var onModelOverride: (String) -> Void
-    var onReasoningEffort: (CodexReasoningEffort) -> Void
-    var onRefresh: () -> Void
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Menu {
-                ForEach(prompts) { prompt in
-                    Button(prompt.title) {
-                        onPrompt(prompt)
-                    }
-                }
-            } label: {
-                Label("Quick Prompt", systemImage: "text.bubble")
-                    .frame(minWidth: 138, alignment: .leading)
-            }
-            .menuStyle(.button)
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-
-            Spacer()
-
-            AgentStatusLine(
-                runtimeProfiles: runtimeProfiles,
-                selectedRuntimeID: selectedRuntimeID,
-                runtimeName: runtimeName,
-                diagnostic: diagnostic,
-                authSummary: authSummary,
-                modelOverride: modelOverride,
-                availableModelIDs: availableModelIDs,
-                defaultModelID: defaultModelID,
-                reasoningEffort: reasoningEffort,
-                onRuntime: onRuntime,
-                onModelOverride: onModelOverride,
-                onReasoningEffort: onReasoningEffort,
-                onRefresh: onRefresh
-            )
-            .frame(maxWidth: 360)
-        }
-    }
-}
-
-private struct AgentStatusLine: View {
-    var runtimeProfiles: [AgentRuntimeProfile]
-    var selectedRuntimeID: String
-    var runtimeName: String
-    var diagnostic: AgentRuntimeDiagnostic?
-    var authSummary: String
-    var modelOverride: String
-    var availableModelIDs: [String]
-    var defaultModelID: String
-    var reasoningEffort: CodexReasoningEffort
-    var onRuntime: (String) -> Void
-    var onModelOverride: (String) -> Void
-    var onReasoningEffort: (CodexReasoningEffort) -> Void
-    var onRefresh: () -> Void
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: iconName)
-                .foregroundStyle(tint)
-            Text(title)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-            Spacer()
-            Menu {
-                ForEach(runtimeProfiles) { profile in
-                    Button {
-                        onRuntime(profile.id)
-                    } label: {
-                        if profile.id == selectedRuntimeID {
-                            Label(profile.displayName, systemImage: "checkmark")
-                        } else {
-                            Text(profile.displayName)
-                        }
-                    }
-                }
-            } label: {
-                Label(runtimeName, systemImage: "terminal")
-                    .labelStyle(.titleAndIcon)
-            }
-            .menuStyle(.button)
-            .buttonStyle(.borderless)
-            .controlSize(.small)
-
-            if selectedRuntimeID == "codex", shouldOfferCompatibleModel {
-                Button("Use gpt-5.4-mini") {
-                    onModelOverride("gpt-5.4-mini")
-                }
-                .buttonStyle(.borderless)
-                .controlSize(.small)
-            }
-            if selectedRuntimeID == "codex" {
-                Menu {
-                    Button {
-                        onModelOverride("")
-                    } label: {
-                        if modelOverride.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            Label(defaultModelLabel, systemImage: "checkmark")
-                        } else {
-                            Text(defaultModelLabel)
-                        }
-                    }
-                    Divider()
-                    ForEach(availableModelIDs, id: \.self) { modelID in
-                        Button {
-                            onModelOverride(modelID)
-                        } label: {
-                            if modelID == modelOverride.trimmingCharacters(in: .whitespacesAndNewlines) {
-                                Label(modelID, systemImage: "checkmark")
-                            } else {
-                                Text(modelID)
-                            }
-                        }
-                    }
-                } label: {
-                    Label(modelLabel, systemImage: "slider.horizontal.3")
-                        .labelStyle(.titleAndIcon)
-                }
-                .menuStyle(.button)
-                .buttonStyle(.borderless)
-                .controlSize(.small)
-                Menu {
-                    ForEach(CodexReasoningEffort.allCases, id: \.self) { effort in
-                        Button {
-                            onReasoningEffort(effort)
-                        } label: {
-                            if effort == reasoningEffort {
-                                Label(effort.displayName, systemImage: "checkmark")
-                            } else {
-                                Text(effort.displayName)
-                            }
-                        }
-                    }
-                } label: {
-                    Label(reasoningLabel, systemImage: "brain.head.profile")
-                        .labelStyle(.titleAndIcon)
-                }
-                .menuStyle(.button)
-                .buttonStyle(.borderless)
-                .controlSize(.small)
-            }
-            Button(action: onRefresh) {
-                Image(systemName: "arrow.clockwise")
-            }
-            .buttonStyle(.borderless)
-            .controlSize(.small)
-            .help("Refresh Agent Status")
-        }
-        .help(detail)
-    }
-
-    private var title: String {
-        guard let diagnostic else {
-            return "Checking \(runtimeName)"
-        }
-        if let version = diagnostic.version {
-            return "\(diagnostic.title) · \(version)"
-        }
-        return diagnostic.title
-    }
-
-    private var detail: String {
-        let status = diagnostic?.detail ?? "Checking local agent runtime."
-        return "\(status)\n\(authSummary)"
-    }
-
-    private var modelLabel: String {
-        let trimmed = modelOverride.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? defaultModelLabel : trimmed
-    }
-
-    private var defaultModelLabel: String {
-        let trimmed = defaultModelID.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? "Default" : "Default (\(trimmed))"
-    }
-
-    private var reasoningLabel: String {
-        "Think \(reasoningEffort.displayName)"
-    }
-
-    private var shouldOfferCompatibleModel: Bool {
-        diagnostic?.title == "Codex model incompatible"
-            && modelOverride.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
-    private var iconName: String {
-        guard let diagnostic else {
-            return "circle.dotted"
-        }
-        switch diagnostic.state {
-        case .checking:
-            return "clock"
-        case .ready:
-            return "checkmark.circle.fill"
-        case .warning:
-            return "exclamationmark.triangle.fill"
-        case .blocked:
-            return "xmark.circle.fill"
-        }
-    }
-
-    private var tint: Color {
-        guard let diagnostic else {
-            return .secondary
-        }
-        switch diagnostic.state {
-        case .checking:
-            return .secondary
-        case .ready:
-            return .green
-        case .warning:
-            return .orange
-        case .blocked:
-            return .red
         }
     }
 }
@@ -1639,121 +1297,6 @@ private struct MarkdownMessageView: View {
         }
         .onChange(of: fontFamily) {
             height = 24
-        }
-    }
-}
-
-private struct ComposerTextView: NSViewRepresentable {
-    @Binding var text: String
-    var isEnabled: Bool
-    var fontSize: Double
-    var fontFamily: ChatFontFamily
-    var focusRequestID: UUID?
-    var onSubmit: () -> Void
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(text: $text, onSubmit: onSubmit)
-    }
-
-    func makeNSView(context: Context) -> NSScrollView {
-        let scrollView = NSScrollView()
-        scrollView.borderType = .noBorder
-        scrollView.hasVerticalScroller = true
-        scrollView.drawsBackground = false
-
-        let textView = SendingTextView()
-        textView.delegate = context.coordinator
-        textView.onSubmit = context.coordinator.submit
-        textView.isRichText = false
-        textView.isAutomaticQuoteSubstitutionEnabled = false
-        textView.isAutomaticDashSubstitutionEnabled = false
-        textView.isAutomaticTextReplacementEnabled = false
-        textView.font = fontFamily.nsFont(size: fontSize)
-        textView.typingAttributes[.font] = fontFamily.nsFont(size: fontSize)
-        textView.textContainerInset = NSSize(width: 8, height: 8)
-        textView.drawsBackground = false
-        textView.string = text
-        textView.minSize = NSSize(width: 0, height: 72)
-        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
-        textView.isVerticallyResizable = true
-        textView.isHorizontallyResizable = false
-        textView.autoresizingMask = [.width]
-        textView.textContainer?.containerSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
-        textView.textContainer?.widthTracksTextView = true
-
-        scrollView.documentView = textView
-        return scrollView
-    }
-
-    func updateNSView(_ scrollView: NSScrollView, context: Context) {
-        context.coordinator.onSubmit = onSubmit
-        guard let textView = scrollView.documentView as? SendingTextView else {
-            return
-        }
-        textView.onSubmit = context.coordinator.submit
-        textView.isEditable = isEnabled
-        textView.textColor = isEnabled ? .labelColor : .secondaryLabelColor
-        let nsFont = fontFamily.nsFont(size: fontSize)
-        textView.font = nsFont
-        textView.typingAttributes[.font] = nsFont
-        if textView.string != text {
-            textView.string = text
-        }
-        context.coordinator.focusIfNeeded(textView, focusRequestID: focusRequestID)
-    }
-
-    final class Coordinator: NSObject, NSTextViewDelegate {
-        @Binding var text: String
-        var onSubmit: () -> Void
-        private var lastHandledFocusRequestID: UUID?
-
-        init(text: Binding<String>, onSubmit: @escaping () -> Void) {
-            _text = text
-            self.onSubmit = onSubmit
-        }
-
-        func textDidChange(_ notification: Notification) {
-            guard let textView = notification.object as? NSTextView else {
-                return
-            }
-            text = textView.string
-        }
-
-        func submit() {
-            onSubmit()
-        }
-
-        func focusIfNeeded(_ textView: SendingTextView, focusRequestID: UUID?) {
-            guard let focusRequestID, focusRequestID != lastHandledFocusRequestID else {
-                return
-            }
-            lastHandledFocusRequestID = focusRequestID
-            DispatchQueue.main.async { [weak textView] in
-                guard let textView else {
-                    return
-                }
-                textView.window?.makeFirstResponder(textView)
-                let insertionPoint = NSRange(location: textView.string.utf16.count, length: 0)
-                textView.setSelectedRange(insertionPoint)
-                textView.scrollRangeToVisible(insertionPoint)
-            }
-        }
-    }
-
-    final class SendingTextView: NSTextView {
-        var onSubmit: (() -> Void)?
-
-        override func keyDown(with event: NSEvent) {
-            let isReturn = event.keyCode == 36 || event.keyCode == 76
-            if isReturn, !event.modifierFlags.contains(.shift) {
-                if hasMarkedText() {
-                    super.keyDown(with: event)
-                    return
-                }
-                onSubmit?()
-                return
-            }
-            super.keyDown(with: event)
         }
     }
 }
