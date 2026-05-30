@@ -312,6 +312,61 @@ func runReaderPositionRepositoryChecks() throws {
     try check(reopenedPositionA == positionA, "reader position should survive repository reopen")
 }
 
+func runAppKitLifecycleSourceChecks() throws {
+    let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+    let rootViewSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/PaperCodexApp.swift"))
+    let mainSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/PaperCodexMain.swift"))
+    let delegateSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/PaperCodexApplicationDelegate.swift"))
+    let windowControllerSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/PaperCodexMainWindowController.swift"))
+    let menuSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/PaperCodexMainMenu.swift"))
+
+    try check(
+        mainSource.contains("@main")
+            && mainSource.contains("NSApplication.shared")
+            && mainSource.contains("PaperCodexApplicationDelegate")
+            && mainSource.contains("app.run()"),
+        "Episteme should boot through an AppKit NSApplication main loop"
+    )
+    try check(
+        delegateSource.contains("NSApplicationDelegate")
+            && delegateSource.contains("PaperCodexMainWindowController")
+            && delegateSource.contains("PaperCodexMainMenuController")
+            && delegateSource.contains("applicationShouldHandleReopen"),
+        "AppKit application delegate should own the model, main window controller, menu controller, and Dock reopen behavior"
+    )
+    try check(
+        windowControllerSource.contains("final class PaperCodexMainWindowController: NSWindowController")
+            && windowControllerSource.contains("NSHostingView(rootView:")
+            && windowControllerSource.contains(".fullSizeContentView")
+            && windowControllerSource.contains("titlebarAppearsTransparent")
+            && windowControllerSource.contains("installTitlebarDoubleClickZoomMonitor"),
+        "main window should be an AppKit window controller that hosts the existing root view and owns native chrome behavior"
+    )
+    try check(
+        menuSource.contains("final class PaperCodexMainMenuController")
+            && menuSource.contains("NSMenuItemValidation")
+            && menuSource.contains("makeMainMenu() -> NSMenu")
+            && menuSource.contains(#"#selector(goToLibrary)"#)
+            && menuSource.contains(#"#selector(showDiscover)"#)
+            && menuSource.contains(#"#selector(showSearch)"#)
+            && menuSource.contains(#"#selector(newSession)"#)
+            && menuSource.contains(#"#selector(focusChatComposer)"#)
+            && menuSource.contains(#"#selector(fitPDFWidth)"#),
+        "native AppKit menu should preserve the app's navigation, session, focus, and PDF commands"
+    )
+    try check(
+        !rootViewSource.contains("@main")
+            && !rootViewSource.contains("WindowGroup")
+            && !rootViewSource.contains(".windowStyle(")
+            && !rootViewSource.contains(".commands {")
+            && !rootViewSource.contains("PaperCodexCommands")
+            && !rootViewSource.contains("WindowChromeConfigurator()")
+            && rootViewSource.contains("struct RootView: View")
+            && rootViewSource.contains("paperCodexTypographyScale()"),
+        "SwiftUI root content should remain a hosted content view rather than owning the application/window lifecycle"
+    )
+}
+
 func runMCPChecks() throws {
     let fixture = try makeMCPFixture(withPaper: true)
     let service = PaperCodexMCPService(repository: fixture.repository, supportRoot: fixture.root)
@@ -1254,6 +1309,8 @@ func runUILayoutSourceChecks() throws {
     let collectionViewURL = root.appendingPathComponent("Sources/PaperCodexApp/CollectionView.swift")
     let collectionViewExists = FileManager.default.fileExists(atPath: collectionViewURL.path)
     let appSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/PaperCodexApp.swift"))
+    let appKitWindowControllerSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/PaperCodexMainWindowController.swift"))
+    let appKitMenuSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/PaperCodexMainMenu.swift"))
     let chatViewURL = root.appendingPathComponent("Sources/PaperCodexApp/ChatView.swift")
     let chatSource = try String(contentsOf: chatViewURL)
     let chatAppearanceURL = root.appendingPathComponent("Sources/PaperCodexApp/ChatAppearance.swift")
@@ -1341,7 +1398,7 @@ func runUILayoutSourceChecks() throws {
             && appModelSource.contains("var route: AppRoute {\n        get { navigation.route }\n        set { navigation.route = newValue }\n    }")
             && appModelSource.contains("final class AppNavigation: ObservableObject {\n    @Published var route: AppRoute = .library")
             && !appModelSource.contains("final class AppModel: ObservableObject {\n    @Published var route")
-            && appSource.contains(".environmentObject(model.navigation)")
+            && appKitWindowControllerSource.contains(".environmentObject(model.navigation)")
             && appSource.contains("@EnvironmentObject private var navigation: AppNavigation")
             && appShellSource.contains("@EnvironmentObject private var navigation: AppNavigation")
             && appSource.contains("private let initiallyMountedRoutes: Set<AppRoute>")
@@ -2152,8 +2209,11 @@ func runUILayoutSourceChecks() throws {
         "Paper Codex typography should raise ordinary fixed font sizes while leaving already-large fonts alone"
     )
     try check(
-        rootViewSource.contains(".windowStyle(.hiddenTitleBar)"),
-        "app window should hide the standard title bar"
+        !rootViewSource.contains(".windowStyle(")
+            && appKitWindowControllerSource.contains(".fullSizeContentView")
+            && appKitWindowControllerSource.contains("titlebarAppearsTransparent = true")
+            && appKitWindowControllerSource.contains("titleVisibility = .hidden"),
+        "AppKit main window should hide the standard title bar and embed app content into the full-size chrome"
     )
     try check(
         rootViewSource.contains("mountRoute(newRoute)")
@@ -2164,8 +2224,9 @@ func runUILayoutSourceChecks() throws {
         "top-level route switching should mount the requested page synchronously and avoid geometry-changing page transitions"
     )
     try check(
-        rootViewSource.contains("WindowChromeConfigurator()"),
-        "root view should install the native window chrome configurator"
+        !rootViewSource.contains("WindowChromeConfigurator()")
+            && appKitWindowControllerSource.contains("installTitlebarDoubleClickZoomMonitor"),
+        "native window chrome behavior should live in the AppKit window controller, not a SwiftUI background probe"
     )
     try check(
         rootViewSource.contains("PaperCodexWindowTabBar")
@@ -2182,13 +2243,14 @@ func runUILayoutSourceChecks() throws {
         "root chrome should keep a fixed titlebar tab strip with a persistent Home tab for library, explore, search, settings, and recent conversations"
     )
     try check(
-        windowChromeSource.contains(".fullSizeContentView")
-            && windowChromeSource.contains("titlebarAppearsTransparent = true")
-            && windowChromeSource.contains("titleVisibility = .hidden"),
+        appKitWindowControllerSource.contains(".fullSizeContentView")
+            && appKitWindowControllerSource.contains("titlebarAppearsTransparent = true")
+            && appKitWindowControllerSource.contains("titleVisibility = .hidden"),
         "window chrome should embed traffic-light controls into full-size app content"
     )
     try check(
-        windowChromeSource.contains("window.isMovableByWindowBackground = false")
+        appKitWindowControllerSource.contains("window.isMovableByWindowBackground = false")
+            && !appKitWindowControllerSource.contains("window.isMovableByWindowBackground = true")
             && !windowChromeSource.contains("window.isMovableByWindowBackground = true"),
         "window background dragging should stay disabled so PDFKit content drags cannot move the whole app"
     )
@@ -2204,9 +2266,9 @@ func runUILayoutSourceChecks() throws {
         "sidebar splitter should handle resize in an AppKit view that cannot initiate window dragging"
     )
     try check(
-        windowChromeSource.contains("installTitlebarDoubleClickZoomMonitor")
-            && windowChromeSource.contains("clickCount == 2")
-            && windowChromeSource.contains("performZoom(nil)"),
+        appKitWindowControllerSource.contains("installTitlebarDoubleClickZoomMonitor")
+            && appKitWindowControllerSource.contains("clickCount == 2")
+            && appKitWindowControllerSource.contains("performZoom(nil)"),
         "hidden-titlebar windows should preserve double-click-to-zoom behavior in the top chrome area"
     )
     try check(
@@ -2235,13 +2297,10 @@ func runUILayoutSourceChecks() throws {
         "session conversation area should provide a tabbed paper-notes view"
     )
     try check(
-        rootViewSource.contains("Button(\"Show Reader Chat\")")
-            && rootViewSource.contains(".keyboardShortcut(\"1\", modifiers: [.command, .option])")
-            && rootViewSource.contains("Button(\"Show Reader Terminal\")")
-            && rootViewSource.contains(".keyboardShortcut(\"2\", modifiers: [.command, .option])")
-            && rootViewSource.contains("Button(\"Show Reader Notes\")")
-            && rootViewSource.contains(".keyboardShortcut(\"3\", modifiers: [.command, .option])")
-            && rootViewSource.contains("canUseReaderPanelCommand")
+        appKitMenuSource.contains("item(\"Show Reader Chat\", action: #selector(showReaderChat), key: \"1\", modifiers: [.command, .option])")
+            && appKitMenuSource.contains("item(\"Show Reader Terminal\", action: #selector(showReaderTerminal), key: \"2\", modifiers: [.command, .option])")
+            && appKitMenuSource.contains("item(\"Show Reader Notes\", action: #selector(showReaderNotes), key: \"3\", modifiers: [.command, .option])")
+            && appKitMenuSource.contains("case #selector(focusChatComposer), #selector(showReaderChat), #selector(showReaderTerminal), #selector(showReaderNotes):")
             && appModelSource.contains("func showReaderSessionPanel(_ tab: SessionPanelTab)")
             && chatSource.contains(".id(model.selectedSessionPanelTab)")
             && chatSource.contains(".transition(.opacity.combined(with: .move(edge: .trailing)))")
@@ -2249,11 +2308,9 @@ func runUILayoutSourceChecks() throws {
         "Reader session panels should be keyboard-switchable and animate panel content changes"
     )
     try check(
-        rootViewSource.contains("Button(\"Select Previous Reader Tab\")")
-            && rootViewSource.contains(".keyboardShortcut(\"[\", modifiers: [.command, .shift])")
-            && rootViewSource.contains("Button(\"Select Next Reader Tab\")")
-            && rootViewSource.contains(".keyboardShortcut(\"]\", modifiers: [.command, .shift])")
-            && rootViewSource.contains("canUseReaderTabSwitchCommand")
+        appKitMenuSource.contains("item(\"Select Previous Reader Tab\", action: #selector(selectPreviousReaderTab), key: \"[\", modifiers: [.command, .shift])")
+            && appKitMenuSource.contains("item(\"Select Next Reader Tab\", action: #selector(selectNextReaderTab), key: \"]\", modifiers: [.command, .shift])")
+            && appKitMenuSource.contains("case #selector(selectPreviousReaderTab), #selector(selectNextReaderTab):")
             && appModelSource.contains("func selectPreviousReaderTab()")
             && appModelSource.contains("func selectNextReaderTab()")
             && windowTabBarSource.contains("ScrollViewReader")
@@ -2349,12 +2406,12 @@ func runUILayoutSourceChecks() throws {
         "long error notices should expand into a scrollable selectable detail view"
     )
     try check(
-        rootViewSource.contains("PaperCodexCommands"),
-        "the app should expose keyboard shortcuts through a Commands scene"
+        appKitMenuSource.contains("makeMainMenu() -> NSMenu")
+            && appKitMenuSource.contains("NSMenuItemValidation"),
+        "the app should expose keyboard shortcuts through a native AppKit main menu"
     )
     try check(
-        rootViewSource.contains("Button(\"Focus Search\")")
-            && rootViewSource.contains(".keyboardShortcut(\"f\", modifiers: [.command])")
+        appKitMenuSource.contains("item(\"Focus Search\", action: #selector(focusSearch), key: \"f\")")
             && appModelSource.contains("@Published var searchFocusRequestID")
             && appModelSource.contains("func requestSearchFocus()")
             && librarySource.contains("@FocusState private var isLibrarySearchFocused")
@@ -2365,11 +2422,9 @@ func runUILayoutSourceChecks() throws {
         "Cmd-F should focus the active page search field across Library, Explore, and Search"
     )
     try check(
-        rootViewSource.contains("Button(\"Read Selected Paper\")")
-            && rootViewSource.contains(".keyboardShortcut(.return, modifiers: [.command])")
-            && rootViewSource.contains("Button(\"Chat With Selected Paper\")")
-            && rootViewSource.contains(".keyboardShortcut(.return, modifiers: [.command, .shift])")
-            && rootViewSource.contains("canUseSelectedLibraryPaperCommand")
+        appKitMenuSource.contains("item(\"Read Selected Paper\", action: #selector(readSelectedPaper), key: Self.returnKey)")
+            && appKitMenuSource.contains("item(\"Chat With Selected Paper\", action: #selector(chatWithSelectedPaper), key: Self.returnKey, modifiers: [.command, .shift])")
+            && appKitMenuSource.contains("case #selector(readSelectedPaper), #selector(chatWithSelectedPaper):")
             && appModelSource.contains("func openSelectedLibraryPaperForReading()")
             && appModelSource.contains("func openSelectedLibraryPaperForChat()")
             && appModelSource.contains("selectedLibraryPaper?.isArxivImportPlaceholder == false"),
@@ -2618,17 +2673,12 @@ func runUILayoutSourceChecks() throws {
         "PDFKit view should accept explicit toolbar commands"
     )
     try check(
-        rootViewSource.contains("Button(\"Previous PDF Page\")")
-            && rootViewSource.contains(".keyboardShortcut(.upArrow, modifiers: [.command])")
-            && rootViewSource.contains("Button(\"Next PDF Page\")")
-            && rootViewSource.contains(".keyboardShortcut(.downArrow, modifiers: [.command])")
-            && rootViewSource.contains("Button(\"Zoom PDF In\")")
-            && rootViewSource.contains(".keyboardShortcut(\"=\", modifiers: [.command])")
-            && rootViewSource.contains("Button(\"Zoom PDF Out\")")
-            && rootViewSource.contains(".keyboardShortcut(\"-\", modifiers: [.command])")
-            && rootViewSource.contains("Button(\"Fit PDF Width\")")
-            && rootViewSource.contains(".keyboardShortcut(\"0\", modifiers: [.command])")
-            && rootViewSource.contains("canUseReaderPDFCommand")
+        appKitMenuSource.contains("item(\"Previous PDF Page\", action: #selector(previousPDFPage), key: Self.upArrowKey)")
+            && appKitMenuSource.contains("item(\"Next PDF Page\", action: #selector(nextPDFPage), key: Self.downArrowKey)")
+            && appKitMenuSource.contains("item(\"Zoom PDF In\", action: #selector(zoomPDFIn), key: \"=\")")
+            && appKitMenuSource.contains("item(\"Zoom PDF Out\", action: #selector(zoomPDFOut), key: \"-\")")
+            && appKitMenuSource.contains("item(\"Fit PDF Width\", action: #selector(fitPDFWidth), key: \"0\")")
+            && appKitMenuSource.contains("case #selector(previousPDFPage), #selector(nextPDFPage), #selector(zoomPDFIn), #selector(zoomPDFOut), #selector(fitPDFWidth):")
             && appModelSource.contains("func sendPDFKitCommand(_ kind: PDFKitCommandKind)"),
         "Reader PDF paging and zooming should have direct keyboard commands"
     )
@@ -2789,8 +2839,7 @@ func runUILayoutSourceChecks() throws {
         "chat composer should let IME marked text handle Return before submitting"
     )
     try check(
-        rootViewSource.contains("Button(\"Focus Chat Composer\")")
-            && rootViewSource.contains(".keyboardShortcut(\"l\", modifiers: [.command])")
+        appKitMenuSource.contains("item(\"Focus Chat Composer\", action: #selector(focusChatComposer), key: \"l\")")
             && appModelSource.contains("@Published var chatComposerFocusRequestID")
             && appModelSource.contains("func requestChatComposerFocus()")
             && appModelSource.contains("selectedSessionPanelTab = .chat")
@@ -6468,6 +6517,10 @@ do {
     if selectedChecks.isEmpty || selectedChecks.contains("reader-positions") {
         try runReaderPositionRepositoryChecks()
         print("reader-positions: pass")
+    }
+    if selectedChecks.isEmpty || selectedChecks.contains("appkit-lifecycle-source") {
+        try runAppKitLifecycleSourceChecks()
+        print("appkit-lifecycle-source: pass")
     }
     if selectedChecks.isEmpty || selectedChecks.contains("library-derived-state") {
         try runLibraryDerivedStateChecks()
