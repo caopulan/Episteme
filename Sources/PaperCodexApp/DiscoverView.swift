@@ -3090,103 +3090,17 @@ private struct ResourceLinkButtons: View {
 }
 
 private struct ResourceLinkButton: View {
-    @State private var isHovering = false
     var link: PaperResourceLink
     var compact: Bool
 
     var body: some View {
-        Button {
+        PaperCodexResourceLinkButton(
+            title: link.title,
+            systemImage: link.systemImage,
+            compact: compact
+        ) {
             openExternalURL(link.urlString)
-        } label: {
-            labelContent
         }
-        .buttonStyle(ResourceLinkButtonStyle(isHovering: isHovering))
-        .overlay(alignment: .top) {
-            if compact && isHovering {
-                Text(link.title)
-                    .font(.paperCodexSystem(size: 11, weight: .semibold))
-                    .foregroundStyle(.primary)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 3)
-                    .background(
-                        Capsule()
-                            .fill(Color(nsColor: .textBackgroundColor))
-                            .shadow(color: Color.black.opacity(0.16), radius: 7, y: 3)
-                    )
-                    .offset(y: -28)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
-            }
-        }
-        .zIndex(isHovering ? 10 : 0)
-        .help("Open \(link.title)")
-        .onHover { hovering in
-            withAnimation(.easeOut(duration: 0.12)) {
-                isHovering = hovering
-            }
-        }
-    }
-
-    private var labelContent: some View {
-        Group {
-            if compact {
-                Label(link.title, systemImage: link.systemImage)
-                    .labelStyle(.iconOnly)
-                    .frame(width: 22, height: 22)
-            } else {
-                Label(link.title, systemImage: link.systemImage)
-                    .labelStyle(.titleAndIcon)
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 6)
-            }
-        }
-        .font(.paperCodexSystem(size: compact ? 11.5 : 13, weight: .semibold))
-    }
-}
-
-private struct ResourceLinkButtonStyle: ButtonStyle {
-    var isHovering: Bool
-
-    func makeBody(configuration: Configuration) -> some View {
-        let isPressed = configuration.isPressed
-        configuration.label
-            .foregroundStyle(foregroundColor(isPressed: isPressed))
-            .background(buttonBackground(isPressed: isPressed))
-            .shadow(color: shadowColor(isPressed: isPressed), radius: isPressed ? 3 : 5, y: isPressed ? 1 : 2)
-            .scaleEffect(isPressed ? 0.94 : (isHovering ? 1.06 : 1), anchor: .center)
-            .contentShape(RoundedRectangle(cornerRadius: 6))
-            .animation(PaperCodexMotion.press, value: configuration.isPressed)
-            .animation(PaperCodexMotion.hover, value: isHovering)
-    }
-
-    private func foregroundColor(isPressed: Bool) -> Color {
-        isPressed || isHovering ? Color.accentColor : Color.primary.opacity(0.82)
-    }
-
-    private func shadowColor(isPressed: Bool) -> Color {
-        isPressed || isHovering ? Color.accentColor.opacity(isPressed ? 0.10 : 0.14) : .clear
-    }
-
-    private func buttonBackground(isPressed: Bool) -> some View {
-        RoundedRectangle(cornerRadius: 6)
-            .fill(backgroundFill(isPressed: isPressed))
-            .overlay(
-                RoundedRectangle(cornerRadius: 6)
-                    .stroke(borderColor(isPressed: isPressed), lineWidth: 1)
-            )
-    }
-
-    private func backgroundFill(isPressed: Bool) -> Color {
-        if isPressed {
-            return Color.accentColor.opacity(0.20)
-        }
-        return isHovering ? Color.accentColor.opacity(0.13) : Color(nsColor: .controlBackgroundColor)
-    }
-
-    private func borderColor(isPressed: Bool) -> Color {
-        if isPressed {
-            return Color.accentColor.opacity(0.58)
-        }
-        return isHovering ? Color.accentColor.opacity(0.45) : Color.black.opacity(0.10)
     }
 }
 

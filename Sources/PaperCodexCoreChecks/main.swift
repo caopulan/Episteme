@@ -1911,12 +1911,20 @@ func runUILayoutSourceChecks() throws {
        let resourceLinkEndRange = discoverSource.range(of: "private struct PaperResourceLink", range: resourceButtonRange.upperBound..<discoverSource.endIndex) {
         let resourceLinkControlsSource = String(discoverSource[resourceButtonRange.lowerBound..<resourceLinkEndRange.lowerBound])
         try check(
-            resourceLinkControlsSource.contains(".buttonStyle(ResourceLinkButtonStyle(")
-                && resourceLinkControlsSource.contains("private struct ResourceLinkButtonStyle: ButtonStyle")
-                && resourceLinkControlsSource.contains("configuration.isPressed")
-                && resourceLinkControlsSource.contains("PaperCodexMotion.press")
-                && !resourceLinkControlsSource.contains(".buttonStyle(.plain)"),
-            "Discover and Search resource link buttons should provide immediate pressed feedback before opening external targets"
+            actionButtonSource.contains("struct PaperCodexResourceLinkButton: View")
+                && actionButtonSource.contains("private struct NativePaperCodexResourceLinkButton: NSViewRepresentable")
+                && actionButtonSource.contains("private final class NativePaperCodexResourceLinkButtonView: NSButton")
+                && actionButtonSource.components(separatedBy: "override func mouseDown(with event: NSEvent)").count - 1 >= 6
+                && actionButtonSource.components(separatedBy: "setAccessibilityRole(.button)").count - 1 >= 6
+                && actionButtonSource.components(separatedBy: "CATransaction.setAnimationDuration").count - 1 >= 6
+                && resourceLinkControlsSource.contains("PaperCodexResourceLinkButton(")
+                && resourceLinkControlsSource.contains("title: link.title")
+                && resourceLinkControlsSource.contains("systemImage: link.systemImage")
+                && resourceLinkControlsSource.contains("compact: compact")
+                && !resourceLinkControlsSource.contains("private struct ResourceLinkButtonStyle: ButtonStyle")
+                && !resourceLinkControlsSource.contains(".buttonStyle(ResourceLinkButtonStyle(")
+                && !resourceLinkControlsSource.contains(".buttonStyle("),
+            "Discover and Search resource link buttons should use shared native AppKit buttons before opening external targets"
         )
     } else {
         throw CheckFailure(description: "Discover resource link button source should remain inspectable")

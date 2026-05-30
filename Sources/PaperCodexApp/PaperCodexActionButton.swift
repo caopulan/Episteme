@@ -129,6 +129,53 @@ struct PaperCodexCardActionButton: View {
     }
 }
 
+struct PaperCodexResourceLinkButton: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isHovering = false
+
+    var title: String
+    var systemImage: String
+    var compact = true
+    var disabled = false
+    var action: () -> Void
+
+    var body: some View {
+        NativePaperCodexResourceLinkButton(
+            title: title,
+            systemImage: systemImage,
+            compact: compact,
+            disabled: disabled,
+            reduceMotion: reduceMotion,
+            action: action
+        )
+        .fixedSize(horizontal: true, vertical: true)
+        .overlay(alignment: .top) {
+            if compact && isHovering {
+                Text(title)
+                    .font(.paperCodexSystem(size: 11, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(
+                        Capsule()
+                            .fill(Color(nsColor: .textBackgroundColor))
+                            .shadow(color: Color.black.opacity(0.16), radius: 7, y: 3)
+                    )
+                    .offset(y: -28)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .zIndex(isHovering ? 10 : 0)
+        .help("Open \(title)")
+        .accessibilityLabel(title)
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.12)) {
+                isHovering = hovering
+            }
+        }
+    }
+}
+
 struct PaperCodexPathChipButton: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -179,6 +226,14 @@ private enum NativePaperCodexActionMetrics {
     static let cardActionIconTextSpacing: CGFloat = 5
     static let cardActionFontSize: CGFloat = 13
     static let cardActionCornerRadius: CGFloat = 7
+    static let resourceLinkCompactSize: CGFloat = 22
+    static let resourceLinkExpandedHeight: CGFloat = 28
+    static let resourceLinkHorizontalPadding: CGFloat = 9
+    static let resourceLinkIconSize: CGFloat = 11.5
+    static let resourceLinkIconWidth: CGFloat = 13
+    static let resourceLinkIconTextSpacing: CGFloat = 5
+    static let resourceLinkFontSize: CGFloat = 13
+    static let resourceLinkCornerRadius: CGFloat = 6
 }
 
 private struct NativePaperCodexToolbarButton: NSViewRepresentable {
@@ -309,6 +364,39 @@ private struct NativePaperCodexCardActionButton: NSViewRepresentable {
             title: title,
             systemImage: systemImage,
             kind: kind,
+            disabled: disabled,
+            reduceMotion: reduceMotion,
+            action: action
+        )
+    }
+}
+
+private struct NativePaperCodexResourceLinkButton: NSViewRepresentable {
+    var title: String
+    var systemImage: String
+    var compact: Bool
+    var disabled: Bool
+    var reduceMotion: Bool
+    var action: () -> Void
+
+    func makeNSView(context: Context) -> NativePaperCodexResourceLinkButtonView {
+        let view = NativePaperCodexResourceLinkButtonView()
+        view.apply(
+            title: title,
+            systemImage: systemImage,
+            compact: compact,
+            disabled: disabled,
+            reduceMotion: reduceMotion,
+            action: action
+        )
+        return view
+    }
+
+    func updateNSView(_ view: NativePaperCodexResourceLinkButtonView, context: Context) {
+        view.apply(
+            title: title,
+            systemImage: systemImage,
+            compact: compact,
             disabled: disabled,
             reduceMotion: reduceMotion,
             action: action
@@ -539,6 +627,260 @@ private final class NativePaperCodexCardActionButtonView: NSButton {
             targetScale = 0.965
         } else {
             targetScale = isHovering ? 1.025 : 1
+        }
+        CATransaction.begin()
+        CATransaction.setDisableActions(reduceMotion)
+        CATransaction.setAnimationDuration(reduceMotion ? 0 : (isPressed ? 0.05 : 0.12))
+        layer?.transform = CATransform3DMakeScale(targetScale, targetScale, 1)
+        CATransaction.commit()
+    }
+}
+
+private final class NativePaperCodexResourceLinkButtonView: NSButton {
+    private let iconView = NSImageView()
+    private let titleLabel = NSTextField(labelWithString: "")
+    private var heightConstraint: NSLayoutConstraint?
+    private var compactWidthConstraint: NSLayoutConstraint?
+    private var compactIconCenterXConstraint: NSLayoutConstraint?
+    private var expandedIconLeadingConstraint: NSLayoutConstraint?
+    private var titleLeadingConstraint: NSLayoutConstraint?
+    private var titleTrailingConstraint: NSLayoutConstraint?
+    private var trackingArea: NSTrackingArea?
+    private var pressHandler: () -> Void = {}
+    private var isCompact = true
+    private var isHovering = false
+    private var isPressed = false
+    private var isDisabled = false
+    private var reduceMotion = false
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override var isFlipped: Bool {
+        true
+    }
+
+    override var intrinsicContentSize: NSSize {
+        if isCompact {
+            return NSSize(
+                width: NativePaperCodexActionMetrics.resourceLinkCompactSize,
+                height: NativePaperCodexActionMetrics.resourceLinkCompactSize
+            )
+        }
+
+        let width = NativePaperCodexActionMetrics.resourceLinkHorizontalPadding * 2
+            + NativePaperCodexActionMetrics.resourceLinkIconWidth
+            + NativePaperCodexActionMetrics.resourceLinkIconTextSpacing
+            + titleLabel.intrinsicContentSize.width
+        return NSSize(width: ceil(width), height: NativePaperCodexActionMetrics.resourceLinkExpandedHeight)
+    }
+
+    func apply(
+        title: String,
+        systemImage: String,
+        compact: Bool,
+        disabled: Bool,
+        reduceMotion: Bool,
+        action: @escaping () -> Void
+    ) {
+        let localizedTitle = NSLocalizedString(title, comment: "")
+        pressHandler = action
+        isCompact = compact
+        isDisabled = disabled
+        self.reduceMotion = reduceMotion
+        isEnabled = !disabled
+        titleLabel.stringValue = localizedTitle
+        titleLabel.font = .systemFont(
+            ofSize: compact ? 11.5 : NativePaperCodexActionMetrics.resourceLinkFontSize,
+            weight: .semibold
+        )
+        titleLabel.isHidden = compact
+        iconView.image = NSImage(systemSymbolName: systemImage, accessibilityDescription: localizedTitle)
+        toolTip = "Open \(localizedTitle)"
+        setAccessibilityLabel(localizedTitle)
+        updateLayoutMode()
+        invalidateIntrinsicContentSize()
+        updateAppearance()
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea {
+            removeTrackingArea(trackingArea)
+        }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.activeInKeyWindow, .mouseEnteredAndExited, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isHovering = true
+        updateAppearance()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHovering = false
+        updateAppearance()
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard !isDisabled else {
+            return
+        }
+        setPressed(true)
+        super.mouseDown(with: event)
+        setPressed(false)
+    }
+
+    private func setup() {
+        translatesAutoresizingMaskIntoConstraints = false
+        title = ""
+        isBordered = false
+        bezelStyle = .regularSquare
+        imagePosition = .noImage
+        focusRingType = .none
+        setButtonType(.momentaryChange)
+        target = self
+        action = #selector(performPress)
+        setAccessibilityElement(true)
+        setAccessibilityRole(.button)
+        wantsLayer = true
+        layer?.cornerRadius = NativePaperCodexActionMetrics.resourceLinkCornerRadius
+        layer?.masksToBounds = false
+
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+        iconView.symbolConfiguration = NSImage.SymbolConfiguration(
+            pointSize: NativePaperCodexActionMetrics.resourceLinkIconSize,
+            weight: .semibold
+        )
+        iconView.imageScaling = .scaleProportionallyDown
+
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        titleLabel.font = .systemFont(
+            ofSize: NativePaperCodexActionMetrics.resourceLinkFontSize,
+            weight: .semibold
+        )
+        titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.maximumNumberOfLines = 1
+        titleLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        [iconView, titleLabel].forEach(addSubview(_:))
+
+        let heightConstraint = heightAnchor.constraint(equalToConstant: NativePaperCodexActionMetrics.resourceLinkCompactSize)
+        let compactWidthConstraint = widthAnchor.constraint(equalToConstant: NativePaperCodexActionMetrics.resourceLinkCompactSize)
+        let compactIconCenterXConstraint = iconView.centerXAnchor.constraint(equalTo: centerXAnchor)
+        let expandedIconLeadingConstraint = iconView.leadingAnchor.constraint(
+            equalTo: leadingAnchor,
+            constant: NativePaperCodexActionMetrics.resourceLinkHorizontalPadding
+        )
+        let titleLeadingConstraint = titleLabel.leadingAnchor.constraint(
+            equalTo: iconView.trailingAnchor,
+            constant: NativePaperCodexActionMetrics.resourceLinkIconTextSpacing
+        )
+        let titleTrailingConstraint = titleLabel.trailingAnchor.constraint(
+            equalTo: trailingAnchor,
+            constant: -NativePaperCodexActionMetrics.resourceLinkHorizontalPadding
+        )
+        self.heightConstraint = heightConstraint
+        self.compactWidthConstraint = compactWidthConstraint
+        self.compactIconCenterXConstraint = compactIconCenterXConstraint
+        self.expandedIconLeadingConstraint = expandedIconLeadingConstraint
+        self.titleLeadingConstraint = titleLeadingConstraint
+        self.titleTrailingConstraint = titleTrailingConstraint
+
+        NSLayoutConstraint.activate([
+            heightConstraint,
+            iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            iconView.widthAnchor.constraint(equalToConstant: NativePaperCodexActionMetrics.resourceLinkIconWidth),
+            iconView.heightAnchor.constraint(equalToConstant: NativePaperCodexActionMetrics.resourceLinkIconWidth),
+            titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor)
+        ])
+        updateLayoutMode()
+        updateAppearance()
+    }
+
+    @objc private func performPress() {
+        guard !isDisabled else {
+            return
+        }
+        pressHandler()
+    }
+
+    private func setPressed(_ pressed: Bool) {
+        isPressed = pressed
+        updateAppearance()
+    }
+
+    private func updateLayoutMode() {
+        heightConstraint?.constant = isCompact
+            ? NativePaperCodexActionMetrics.resourceLinkCompactSize
+            : NativePaperCodexActionMetrics.resourceLinkExpandedHeight
+        compactWidthConstraint?.constant = NativePaperCodexActionMetrics.resourceLinkCompactSize
+        compactWidthConstraint?.isActive = isCompact
+        compactIconCenterXConstraint?.isActive = isCompact
+        expandedIconLeadingConstraint?.isActive = !isCompact
+        titleLeadingConstraint?.isActive = !isCompact
+        titleTrailingConstraint?.isActive = !isCompact
+        needsLayout = true
+    }
+
+    private func updateAppearance() {
+        let tint = NSColor.controlAccentColor
+        let foreground: NSColor
+        let background: NSColor
+        let border: NSColor
+        let shadowOpacity: Float
+
+        if isDisabled {
+            foreground = .secondaryLabelColor.withAlphaComponent(0.45)
+            background = .controlBackgroundColor.withAlphaComponent(0.50)
+            border = .black.withAlphaComponent(0.06)
+            shadowOpacity = 0
+        } else if isPressed {
+            foreground = tint
+            background = tint.withAlphaComponent(0.20)
+            border = tint.withAlphaComponent(0.58)
+            shadowOpacity = 0.10
+        } else if isHovering {
+            foreground = tint
+            background = tint.withAlphaComponent(0.13)
+            border = tint.withAlphaComponent(0.45)
+            shadowOpacity = 0.14
+        } else {
+            foreground = .labelColor.withAlphaComponent(0.82)
+            background = .controlBackgroundColor
+            border = .black.withAlphaComponent(0.10)
+            shadowOpacity = 0
+        }
+
+        iconView.contentTintColor = foreground
+        titleLabel.textColor = foreground
+        layer?.backgroundColor = background.cgColor
+        layer?.borderWidth = 1
+        layer?.borderColor = border.cgColor
+        layer?.shadowColor = tint.cgColor
+        layer?.shadowOpacity = shadowOpacity
+        layer?.shadowRadius = isPressed ? 3 : 5
+        layer?.shadowOffset = CGSize(width: 0, height: isPressed ? -1 : -2)
+
+        let targetScale: CGFloat
+        if reduceMotion || isDisabled {
+            targetScale = 1
+        } else if isPressed {
+            targetScale = 0.94
+        } else {
+            targetScale = isHovering ? 1.06 : 1
         }
         CATransaction.begin()
         CATransaction.setDisableActions(reduceMotion)
