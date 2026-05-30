@@ -11,72 +11,38 @@ struct PaperCodexWindowTabBar: View {
     var onShowSaveToLibrary: () -> Void
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            Rectangle()
-                .fill(PaperCodexChromeTabStyle.divider)
-                .frame(height: 1)
-
-            HStack(alignment: .bottom, spacing: 0) {
-                PaperCodexHomeChromeTab(
-                    isActive: navigation.route != .reader,
-                    helpText: homeTabHelp
-                ) {
-                    selectHomeTab()
-                }
-
-                ScrollViewReader { scrollProxy in
-                    ScrollView(.horizontal) {
-                        HStack(alignment: .bottom, spacing: 0) {
-                            ForEach(model.readerTabState.tabs) { tab in
-                                PaperCodexReaderChromeTabItem(
-                                    tab: tab,
-                                    isActive: navigation.route == .reader
-                                        && (model.selectedPaper?.id == tab.paperID
-                                            || model.readerTabState.activePaperID == tab.paperID)
-                                )
-                                .id(tab.paperID)
-                                .transition(.asymmetric(
-                                    insertion: .move(edge: .trailing).combined(with: .opacity),
-                                    removal: .scale(scale: 0.96, anchor: .bottom).combined(with: .opacity)
-                                ))
-                            }
-                        }
-                        .frame(maxHeight: .infinity, alignment: .bottom)
-                        .padding(.top, 8)
-                    }
-                    .scrollIndicators(.hidden)
-                    .frame(height: PaperCodexWindowChrome.tabBarHeight)
-                    .onChange(of: model.readerTabState.activePaperID) { _, activePaperID in
-                        guard let activePaperID else {
-                            return
-                        }
-                        PaperCodexMotion.perform(PaperCodexMotion.selection, reduceMotion: reduceMotion) {
-                            scrollProxy.scrollTo(activePaperID, anchor: .center)
-                        }
-                    }
-                    .animation(PaperCodexMotion.accessible(PaperCodexMotion.selection, reduceMotion: reduceMotion), value: model.readerTabState.activePaperID)
-                    .animation(PaperCodexMotion.accessible(PaperCodexMotion.selection, reduceMotion: reduceMotion), value: readerTabIDs)
-                }
-                .layoutPriority(1)
-
-                if let paper = model.selectedPaper, !paper.isSaved {
-                    PaperCodexIconButton(title: "Save to Library", systemImage: "tray.and.arrow.down", tint: .accentColor) {
-                        onShowSaveToLibrary()
-                    }
-                    .padding(.bottom, 5)
-                }
+        NativeWindowChromeTabBarView(
+            tabs: model.readerTabState.tabs,
+            activePaperID: activeReaderPaperID,
+            isHomeActive: navigation.route != .reader,
+            homeHelpText: homeTabHelp,
+            showsSaveToLibrary: model.selectedPaper.map { !$0.isSaved } ?? false,
+            leadingInset: isWindowFullscreen ? PaperCodexWindowChrome.tabBarFullscreenLeadingInset : PaperCodexWindowChrome.tabBarTrafficLightLeadingInset,
+            reduceMotion: reduceMotion,
+            selectHome: selectHomeTab,
+            selectTab: { tab in
+                model.selectReaderTab(tab)
+            },
+            closeTab: { tab in
+                model.closeReaderTab(tab)
+            },
+            showSaveToLibrary: {
+                onShowSaveToLibrary()
             }
-            .padding(.leading, isWindowFullscreen ? PaperCodexWindowChrome.tabBarFullscreenLeadingInset : PaperCodexWindowChrome.tabBarTrafficLightLeadingInset)
-            .padding(.trailing, 10)
-            .frame(height: PaperCodexWindowChrome.tabBarHeight, alignment: .bottom)
-        }
+        )
         .frame(height: PaperCodexWindowChrome.tabBarHeight)
-        .background(PaperCodexChromeTabStyle.barBackground)
         .background(
             PaperCodexWindowFullscreenObserver { isFullscreen in
                 isWindowFullscreen = isFullscreen
             }
         )
+    }
+
+    private var activeReaderPaperID: String? {
+        guard navigation.route == .reader else {
+            return nil
+        }
+        return model.selectedPaper?.id ?? model.readerTabState.activePaperID
     }
 
     private var homeTabHelp: String {
@@ -94,10 +60,6 @@ struct PaperCodexWindowTabBar: View {
         }
     }
 
-    private var readerTabIDs: [String] {
-        model.readerTabState.tabs.map(\.paperID)
-    }
-
     private func selectHomeTab() {
         if navigation.route == .reader {
             model.returnFromReader()
@@ -107,289 +69,766 @@ struct PaperCodexWindowTabBar: View {
     }
 }
 
-private struct PaperCodexHomeChromeTab: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var isHovering = false
-
-    var isActive: Bool
-    var helpText: String
-    var action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: isActive ? "house.fill" : "house")
-                .font(.paperCodexSystem(size: 13, weight: .semibold))
-                .foregroundStyle(isActive ? Color.accentColor : Color.secondary)
-                .frame(width: PaperCodexHitTarget.chromeHomeTabWidth, height: PaperCodexHitTarget.chromeTabHeight)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(PaperCodexChromeTabButtonStyle(isActive: isActive, isHovering: isHovering, reduceMotion: reduceMotion))
-        .background(tabBackground)
-        .overlay(alignment: .bottom) {
-            if isActive {
-                Rectangle()
-                    .fill(PaperCodexChromeTabStyle.activeBackground)
-                    .frame(height: 3)
-                    .offset(y: 1)
-            }
-        }
-        .overlay(
-            chromeTabOutline
-                .stroke(tabBorder, lineWidth: isActive ? 1 : 0.8)
-        )
-        .clipShape(chromeTabShape)
-        .scaleEffect(reduceMotion ? 1 : tabScale, anchor: .bottom)
-        .animation(PaperCodexMotion.accessible(PaperCodexMotion.hover, reduceMotion: reduceMotion), value: isHovering)
-        .animation(PaperCodexMotion.accessible(PaperCodexMotion.selection, reduceMotion: reduceMotion), value: isActive)
-        .help(helpText)
-        .accessibilityLabel("Home")
-        .onHover { hovering in
-            PaperCodexMotion.perform(PaperCodexMotion.hover, reduceMotion: reduceMotion) {
-                isHovering = hovering
-            }
-        }
-    }
-
-    private var chromeTabShape: some InsettableShape {
-        UnevenRoundedRectangle(
-            topLeadingRadius: PaperCodexChromeTabStyle.cornerRadius,
-            bottomLeadingRadius: 0,
-            bottomTrailingRadius: 0,
-            topTrailingRadius: PaperCodexChromeTabStyle.cornerRadius
-        )
-    }
-
-    private var chromeTabOutline: some Shape {
-        PaperCodexChromeTabTopOutline(radius: PaperCodexChromeTabStyle.cornerRadius)
-    }
-
-    private var tabBackground: Color {
-        if isActive {
-            return PaperCodexChromeTabStyle.activeBackground
-        }
-        return isHovering ? PaperCodexChromeTabStyle.inactiveHoverBackground : PaperCodexChromeTabStyle.inactiveBackground
-    }
-
-    private var tabBorder: Color {
-        if isActive {
-            return PaperCodexChromeTabStyle.activeBorder
-        }
-        return isHovering ? PaperCodexChromeTabStyle.inactiveBorder : Color.clear
-    }
-
-    private var tabScale: CGFloat {
-        isHovering && !isActive ? 1.018 : 1
-    }
-}
-
-private struct PaperCodexReaderChromeTabItem: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @EnvironmentObject private var model: AppModel
-    var tab: ReaderPaperTab
-    var isActive: Bool
-    @State private var isHovering = false
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Button {
-                model.selectReaderTab(tab)
-            } label: {
-                HStack(spacing: 7) {
-                    Image(systemName: isActive ? "doc.text.fill" : "doc.text")
-                        .font(.paperCodexSystem(size: 13, weight: .semibold))
-                        .foregroundStyle(isActive ? Color.accentColor : Color.secondary)
-
-                    Text(tab.title)
-                        .font(.paperCodexSystem(size: 13, weight: isActive ? .semibold : .medium))
-                        .foregroundStyle(isActive ? Color.primary : Color.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-
-                    if !tab.isSaved {
-                        Circle()
-                            .fill(Color.orange)
-                            .frame(width: 6, height: 6)
-                            .help("Cached paper")
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(PaperCodexChromeTabButtonStyle(isActive: isActive, isHovering: isHovering, reduceMotion: reduceMotion))
-            .help(tab.detail.isEmpty ? tab.title : "\(tab.title)\n\(tab.detail)")
-
-            Button {
-                model.closeReaderTab(tab)
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.paperCodexSystem(size: 10, weight: .bold))
-                    .foregroundStyle(isActive ? Color.secondary : Color.secondary.opacity(0.58))
-                    .frame(width: PaperCodexHitTarget.chromeCloseButtonSize, height: PaperCodexHitTarget.chromeCloseButtonSize)
-                    .contentShape(Circle())
-            }
-            .buttonStyle(PaperCodexChromeTabCloseButtonStyle(isActive: isActive, isHovering: isHovering, reduceMotion: reduceMotion))
-            .help("Close tab")
-        }
-        .padding(.leading, 10)
-        .padding(.trailing, 7)
-        .frame(width: isActive ? 264 : 218, height: 34)
-        .background(tabBackground)
-        .overlay(alignment: .bottom) {
-            if isActive {
-                Rectangle()
-                    .fill(PaperCodexChromeTabStyle.activeBackground)
-                    .frame(height: 3)
-                    .offset(y: 1)
-            }
-        }
-        .overlay(
-            chromeTabOutline
-                .stroke(tabBorder, lineWidth: isActive ? 1 : 0.8)
-        )
-        .clipShape(chromeTabShape)
-        .shadow(
-            color: isActive && !reduceMotion ? Color.black.opacity(0.10) : Color.clear,
-            radius: isActive ? 5 : 0,
-            x: 0,
-            y: 1
-        )
-        .scaleEffect(reduceMotion ? 1 : tabScale, anchor: .bottom)
-        .animation(PaperCodexMotion.accessible(PaperCodexMotion.hover, reduceMotion: reduceMotion), value: isHovering)
-        .animation(PaperCodexMotion.accessible(PaperCodexMotion.selection, reduceMotion: reduceMotion), value: isActive)
-        .onHover { hovering in
-            PaperCodexMotion.perform(PaperCodexMotion.hover, reduceMotion: reduceMotion) {
-                isHovering = hovering
-            }
-        }
-    }
-
-    private var chromeTabShape: some InsettableShape {
-        UnevenRoundedRectangle(
-            topLeadingRadius: PaperCodexChromeTabStyle.cornerRadius,
-            bottomLeadingRadius: 0,
-            bottomTrailingRadius: 0,
-            topTrailingRadius: PaperCodexChromeTabStyle.cornerRadius
-        )
-    }
-
-    private var chromeTabOutline: some Shape {
-        PaperCodexChromeTabTopOutline(radius: PaperCodexChromeTabStyle.cornerRadius)
-    }
-
-    private var tabBackground: Color {
-        if isActive {
-            return PaperCodexChromeTabStyle.activeBackground
-        }
-        return isHovering ? PaperCodexChromeTabStyle.inactiveHoverBackground : PaperCodexChromeTabStyle.inactiveBackground
-    }
-
-    private var tabBorder: Color {
-        if isActive {
-            return PaperCodexChromeTabStyle.activeBorder
-        }
-        return isHovering ? PaperCodexChromeTabStyle.inactiveBorder : Color.clear
-    }
-
-    private var tabScale: CGFloat {
-        isHovering && !isActive ? 1.012 : 1
-    }
-}
-
-private struct PaperCodexChromeTabButtonStyle: ButtonStyle {
-    var isActive: Bool
-    var isHovering: Bool
+private struct NativeWindowChromeTabBarView: NSViewRepresentable {
+    var tabs: [ReaderPaperTab]
+    var activePaperID: String?
+    var isHomeActive: Bool
+    var homeHelpText: String
+    var showsSaveToLibrary: Bool
+    var leadingInset: CGFloat
     var reduceMotion: Bool
+    var selectHome: () -> Void
+    var selectTab: (ReaderPaperTab) -> Void
+    var closeTab: (ReaderPaperTab) -> Void
+    var showSaveToLibrary: () -> Void
 
-    func makeBody(configuration: Configuration) -> some View {
-        let isPressed = configuration.isPressed
-        configuration.label
-            .opacity(isPressed ? 0.84 : 1)
-            .scaleEffect(reduceMotion ? 1 : (isPressed ? 0.972 : 1), anchor: .bottom)
-            .background(
-                RoundedRectangle(cornerRadius: PaperCodexCornerRadius.control)
-                    .fill(pressFill(isPressed: isPressed))
-            )
-            .animation(PaperCodexMotion.accessible(PaperCodexMotion.press, reduceMotion: reduceMotion), value: configuration.isPressed)
-            .animation(PaperCodexMotion.accessible(PaperCodexMotion.hover, reduceMotion: reduceMotion), value: isHovering)
-            .animation(PaperCodexMotion.accessible(PaperCodexMotion.selection, reduceMotion: reduceMotion), value: isActive)
+    func makeNSView(context: Context) -> NativeWindowChromeTabBarContainerView {
+        let view = NativeWindowChromeTabBarContainerView()
+        view.apply(self)
+        return view
     }
 
-    private func pressFill(isPressed: Bool) -> Color {
-        if !isPressed {
-            return .clear
-        }
-        return isActive ? Color.accentColor.opacity(0.09) : Color.primary.opacity(0.06)
+    func updateNSView(_ view: NativeWindowChromeTabBarContainerView, context: Context) {
+        view.apply(self)
     }
 }
 
-private struct PaperCodexChromeTabCloseButtonStyle: ButtonStyle {
-    var isActive: Bool
-    var isHovering: Bool
-    var reduceMotion: Bool
+private final class NativeWindowChromeTabBarContainerView: NSView {
+    private let dividerView = NSView()
+    private let contentStack = NSStackView()
+    private let homeButton = NativeChromeHomeTabButton()
+    private let scrollView = NSScrollView()
+    private let tabStack = NSStackView()
+    private let saveButton = NativeSaveToLibraryChromeButton()
+    private var leadingConstraint: NSLayoutConstraint?
+    private var lastRenderedTabIDs: [String] = []
+    private var tabViewsByID: [String: NativeReaderChromeTabView] = [:]
+    private var activePaperID: String?
+    private var reduceMotion = false
+    private var selectHomeHandler: () -> Void = {}
+    private var selectTabHandler: (ReaderPaperTab) -> Void = { _ in }
+    private var closeTabHandler: (ReaderPaperTab) -> Void = { _ in }
+    private var saveToLibraryHandler: () -> Void = {}
 
-    func makeBody(configuration: Configuration) -> some View {
-        let isPressed = configuration.isPressed
-        configuration.label
-            .background(
-                Circle()
-                    .fill(backgroundFill(isPressed: isPressed))
-            )
-            .overlay(
-                Circle()
-                    .stroke(borderColor(isPressed: isPressed), lineWidth: isPressed || isHovering ? 1 : 0)
-            )
-            .scaleEffect(reduceMotion ? 1 : (isPressed ? 0.88 : (isHovering ? 1.06 : 1)), anchor: .center)
-            .animation(PaperCodexMotion.accessible(PaperCodexMotion.press, reduceMotion: reduceMotion), value: configuration.isPressed)
-            .animation(PaperCodexMotion.accessible(PaperCodexMotion.hover, reduceMotion: reduceMotion), value: isHovering)
-            .animation(PaperCodexMotion.accessible(PaperCodexMotion.selection, reduceMotion: reduceMotion), value: isActive)
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
     }
 
-    private func backgroundFill(isPressed: Bool) -> Color {
-        if isPressed {
-            return Color.accentColor.opacity(isActive ? 0.18 : 0.14)
-        }
-        return isHovering ? Color.primary.opacity(isActive ? 0.06 : 0.05) : .clear
+    required init?(coder: NSCoder) {
+        nil
     }
 
-    private func borderColor(isPressed: Bool) -> Color {
-        if isPressed {
-            return Color.accentColor.opacity(0.34)
+    override var mouseDownCanMoveWindow: Bool {
+        false
+    }
+
+    override func layout() {
+        super.layout()
+        updateTabDocumentFrame()
+        scrollActiveTabToVisible()
+    }
+
+    func apply(_ view: NativeWindowChromeTabBarView) {
+        activePaperID = view.activePaperID
+        reduceMotion = view.reduceMotion
+        selectHomeHandler = view.selectHome
+        selectTabHandler = view.selectTab
+        closeTabHandler = view.closeTab
+        saveToLibraryHandler = view.showSaveToLibrary
+        leadingConstraint?.constant = view.leadingInset
+
+        homeButton.apply(isActive: view.isHomeActive, helpText: view.homeHelpText, reduceMotion: view.reduceMotion)
+        saveButton.isHidden = !view.showsSaveToLibrary
+        saveButton.apply(reduceMotion: view.reduceMotion)
+
+        let tabIDs = view.tabs.map(\.paperID)
+        if tabIDs != lastRenderedTabIDs {
+            rebuildReaderTabs(view.tabs)
+        } else {
+            updateReaderTabs(view.tabs)
         }
-        return isHovering ? Color.primary.opacity(0.10) : .clear
+        updateTabDocumentFrame()
+        scrollActiveTabToVisible()
+        needsLayout = true
+    }
+
+    private func setup() {
+        wantsLayer = true
+        layer?.backgroundColor = PaperCodexChromeTabStyle.barBackground.cgColor
+
+        dividerView.translatesAutoresizingMaskIntoConstraints = false
+        dividerView.wantsLayer = true
+        dividerView.layer?.backgroundColor = PaperCodexChromeTabStyle.divider.cgColor
+        addSubview(dividerView)
+
+        contentStack.translatesAutoresizingMaskIntoConstraints = false
+        contentStack.orientation = .horizontal
+        contentStack.alignment = .bottom
+        contentStack.spacing = 0
+        addSubview(contentStack)
+
+        homeButton.target = self
+        homeButton.action = #selector(homePressed(_:))
+        contentStack.addArrangedSubview(homeButton)
+
+        configureScrollView()
+        contentStack.addArrangedSubview(scrollView)
+
+        saveButton.target = self
+        saveButton.action = #selector(saveToLibraryPressed(_:))
+        contentStack.addArrangedSubview(saveButton)
+
+        leadingConstraint = contentStack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: PaperCodexWindowChrome.tabBarTrafficLightLeadingInset)
+        NSLayoutConstraint.activate([
+            dividerView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            dividerView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            dividerView.bottomAnchor.constraint(equalTo: bottomAnchor),
+            dividerView.heightAnchor.constraint(equalToConstant: 1),
+            leadingConstraint!,
+            contentStack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            contentStack.bottomAnchor.constraint(equalTo: bottomAnchor),
+            contentStack.heightAnchor.constraint(equalToConstant: PaperCodexWindowChrome.tabBarHeight),
+            scrollView.heightAnchor.constraint(equalToConstant: PaperCodexWindowChrome.tabBarHeight)
+        ])
+    }
+
+    private func configureScrollView() {
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.drawsBackground = false
+        scrollView.borderType = .noBorder
+        scrollView.hasHorizontalScroller = false
+        scrollView.hasVerticalScroller = false
+        scrollView.autohidesScrollers = true
+        scrollView.scrollerStyle = .overlay
+        scrollView.contentView.postsBoundsChangedNotifications = false
+        scrollView.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        scrollView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        tabStack.orientation = .horizontal
+        tabStack.alignment = .bottom
+        tabStack.spacing = 0
+        tabStack.edgeInsets = NSEdgeInsets(top: 8, left: 0, bottom: 0, right: 0)
+        scrollView.documentView = tabStack
+    }
+
+    private func rebuildReaderTabs(_ tabs: [ReaderPaperTab]) {
+        tabStack.arrangedSubviews.forEach { subview in
+            tabStack.removeArrangedSubview(subview)
+            subview.removeFromSuperview()
+        }
+        tabViewsByID.removeAll(keepingCapacity: true)
+        lastRenderedTabIDs = tabs.map(\.paperID)
+
+        for tab in tabs {
+            let tabView = NativeReaderChromeTabView()
+            tabView.onSelect = { [weak self] tab in
+                self?.selectTab(tab)
+            }
+            tabView.onClose = { [weak self] tab in
+                self?.closeTab(tab)
+            }
+            tabView.apply(tab: tab, isActive: tab.paperID == activePaperID, reduceMotion: reduceMotion)
+            tabStack.addArrangedSubview(tabView)
+            tabViewsByID[tab.paperID] = tabView
+        }
+    }
+
+    private func updateReaderTabs(_ tabs: [ReaderPaperTab]) {
+        for tab in tabs {
+            tabViewsByID[tab.paperID]?.apply(tab: tab, isActive: tab.paperID == activePaperID, reduceMotion: reduceMotion)
+        }
+    }
+
+    private func updateTabDocumentFrame() {
+        let visibleSize = scrollView.contentView.bounds.size
+        let fittingSize = tabStack.fittingSize
+        let width = max(visibleSize.width, fittingSize.width)
+        let height = max(PaperCodexWindowChrome.tabBarHeight, visibleSize.height)
+        tabStack.setFrameSize(NSSize(width: width, height: height))
+    }
+
+    private func scrollActiveTabToVisible() {
+        guard let activePaperID,
+              let activeTabView = tabViewsByID[activePaperID],
+              scrollView.contentView.bounds.width > 0 else {
+            return
+        }
+        tabStack.layoutSubtreeIfNeeded()
+        let clipView = scrollView.contentView
+        let activeMidX = activeTabView.frame.midX
+        let maximumX = max(0, tabStack.frame.width - clipView.bounds.width)
+        let targetX = min(max(activeTabView.frame.midX - clipView.bounds.width / 2, 0), maximumX)
+        guard abs(clipView.bounds.origin.x - targetX) > 0.5 || activeMidX < clipView.bounds.minX || activeMidX > clipView.bounds.maxX else {
+            return
+        }
+        if reduceMotion {
+            clipView.scroll(to: NSPoint(x: targetX, y: 0))
+        } else {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.16
+                context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                clipView.animator().setBoundsOrigin(NSPoint(x: targetX, y: 0))
+            }
+        }
+        scrollView.reflectScrolledClipView(clipView)
+    }
+
+    private func selectTab(_ tab: ReaderPaperTab) {
+        selectTabHandler(tab)
+    }
+
+    private func closeTab(_ tab: ReaderPaperTab) {
+        closeTabHandler(tab)
+    }
+
+    @objc private func homePressed(_ sender: NSButton) {
+        selectHomeHandler()
+    }
+
+    @objc private func saveToLibraryPressed(_ sender: NSButton) {
+        saveToLibraryHandler()
+    }
+}
+
+private final class NativeChromeHomeTabButton: NSButton {
+    private var isActive = false
+    private var isHovering = false
+    private var isPressed = false
+    private var reduceMotion = false
+    private var trackingArea: NSTrackingArea?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: PaperCodexHitTarget.chromeHomeTabWidth, height: PaperCodexHitTarget.chromeTabHeight)
+    }
+
+    func apply(isActive: Bool, helpText: String, reduceMotion: Bool) {
+        self.isActive = isActive
+        self.reduceMotion = reduceMotion
+        toolTip = helpText
+        image = NSImage(systemSymbolName: isActive ? "house.fill" : "house", accessibilityDescription: "Home")
+        contentTintColor = isActive ? .controlAccentColor : .secondaryLabelColor
+        setAccessibilityLabel("Home")
+        updateAppearance()
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea {
+            removeTrackingArea(trackingArea)
+        }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.activeInKeyWindow, .mouseEnteredAndExited, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isHovering = true
+        updateAppearance()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHovering = false
+        updateAppearance()
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        setPressed(true)
+        super.mouseDown(with: event)
+        setPressed(false)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        super.mouseUp(with: event)
+    }
+
+    private func setup() {
+        translatesAutoresizingMaskIntoConstraints = false
+        isBordered = false
+        imagePosition = .imageOnly
+        focusRingType = .none
+        wantsLayer = true
+        layer?.cornerRadius = PaperCodexChromeTabStyle.cornerRadius
+        layer?.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
+        layer?.masksToBounds = true
+        widthAnchor.constraint(equalToConstant: PaperCodexHitTarget.chromeHomeTabWidth).isActive = true
+        heightAnchor.constraint(equalToConstant: PaperCodexHitTarget.chromeTabHeight).isActive = true
+        updateAppearance()
+    }
+
+    private func setPressed(_ pressed: Bool) {
+        isPressed = pressed
+        updateAppearance()
+    }
+
+    private func updateAppearance() {
+        let fill: NSColor
+        if isPressed {
+            fill = isActive ? .controlAccentColor.withAlphaComponent(0.14) : .labelColor.withAlphaComponent(0.08)
+        } else if isActive {
+            fill = PaperCodexChromeTabStyle.activeBackground
+        } else if isHovering {
+            fill = PaperCodexChromeTabStyle.inactiveHoverBackground
+        } else {
+            fill = PaperCodexChromeTabStyle.inactiveBackground
+        }
+        layer?.backgroundColor = fill.cgColor
+        layer?.borderWidth = isActive || isHovering ? 1 : 0
+        layer?.borderColor = (isActive ? PaperCodexChromeTabStyle.activeBorder : PaperCodexChromeTabStyle.inactiveBorder).cgColor
+        alphaValue = isPressed ? 0.88 : 1
+        if !reduceMotion {
+            animator().setFrameSize(intrinsicContentSize)
+        }
+    }
+}
+
+private final class NativeReaderChromeTabView: NSControl {
+    var onSelect: (ReaderPaperTab) -> Void = { _ in }
+    var onClose: (ReaderPaperTab) -> Void = { _ in }
+
+    private let iconView = NSImageView()
+    private let titleField = NSTextField(labelWithString: "")
+    private let unsavedDot = NSView()
+    private let selectButton = NativeReaderChromeSelectButton()
+    private let closeButton = NativeChromeCloseButton()
+    private var tab: ReaderPaperTab?
+    private var isActive = false
+    private var isHovering = false
+    private var isPressed = false
+    private var reduceMotion = false
+    private var trackingArea: NSTrackingArea?
+    private var widthConstraint: NSLayoutConstraint?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: isActive ? 264 : 218, height: PaperCodexHitTarget.chromeTabHeight)
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard !isHidden, alphaValue > 0, bounds.contains(point) else {
+            return nil
+        }
+        let closePoint = convert(point, to: closeButton)
+        if closeButton.bounds.contains(closePoint) {
+            return closeButton.hitTest(closePoint) ?? closeButton
+        }
+        return self
+    }
+
+    func apply(tab: ReaderPaperTab, isActive: Bool, reduceMotion: Bool) {
+        self.tab = tab
+        self.isActive = isActive
+        self.reduceMotion = reduceMotion
+        widthConstraint?.constant = isActive ? 264 : 218
+        iconView.image = NSImage(systemSymbolName: isActive ? "doc.text.fill" : "doc.text", accessibilityDescription: "Paper")
+        iconView.contentTintColor = isActive ? .controlAccentColor : .secondaryLabelColor
+        titleField.stringValue = tab.title
+        titleField.font = .systemFont(ofSize: 13, weight: isActive ? .semibold : .medium)
+        titleField.textColor = isActive ? .labelColor : .secondaryLabelColor
+        unsavedDot.isHidden = tab.isSaved
+        closeButton.contentTintColor = isActive ? .secondaryLabelColor : .tertiaryLabelColor
+        toolTip = tab.detail.isEmpty ? tab.title : "\(tab.title)\n\(tab.detail)"
+        setAccessibilityLabel(tab.title)
+        selectButton.setAccessibilityLabel(tab.title)
+        selectButton.setAccessibilityHelp(toolTip)
+        updateAppearance()
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea {
+            removeTrackingArea(trackingArea)
+        }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.activeInKeyWindow, .mouseEnteredAndExited, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isHovering = true
+        updateAppearance()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHovering = false
+        updateAppearance()
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        setPressed(true)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        let shouldSelect = isPressed && bounds.contains(convert(event.locationInWindow, from: nil))
+        setPressed(false)
+        if shouldSelect, let tab {
+            onSelect(tab)
+        }
+    }
+
+    private func setup() {
+        translatesAutoresizingMaskIntoConstraints = false
+        wantsLayer = true
+        layer?.cornerRadius = PaperCodexChromeTabStyle.cornerRadius
+        layer?.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
+        layer?.masksToBounds = true
+        setAccessibilityElement(true)
+        setAccessibilityRole(.group)
+        setContentHuggingPriority(.required, for: .horizontal)
+        setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        selectButton.target = self
+        selectButton.action = #selector(selectPressed(_:))
+        selectButton.onPressedChanged = { [weak self] pressed in
+            self?.setPressed(pressed)
+        }
+
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+        iconView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 13, weight: .semibold)
+        iconView.imageScaling = .scaleProportionallyDown
+
+        titleField.translatesAutoresizingMaskIntoConstraints = false
+        titleField.lineBreakMode = .byTruncatingTail
+        titleField.maximumNumberOfLines = 1
+        titleField.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        titleField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        unsavedDot.translatesAutoresizingMaskIntoConstraints = false
+        unsavedDot.wantsLayer = true
+        unsavedDot.layer?.backgroundColor = NSColor.systemOrange.cgColor
+        unsavedDot.layer?.cornerRadius = 3
+        unsavedDot.toolTip = "Cached paper"
+
+        closeButton.target = self
+        closeButton.action = #selector(closePressed(_:))
+        closeButton.toolTip = "Close tab"
+        closeButton.setAccessibilityLabel("Close tab")
+
+        [iconView, titleField, unsavedDot, selectButton, closeButton].forEach(addSubview(_:))
+        setAccessibilityChildren([selectButton, closeButton])
+        widthConstraint = widthAnchor.constraint(equalToConstant: 218)
+        widthConstraint?.isActive = true
+
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: PaperCodexHitTarget.chromeTabHeight),
+            selectButton.leadingAnchor.constraint(equalTo: leadingAnchor),
+            selectButton.topAnchor.constraint(equalTo: topAnchor),
+            selectButton.bottomAnchor.constraint(equalTo: bottomAnchor),
+            selectButton.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -2),
+            iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
+            iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            iconView.widthAnchor.constraint(equalToConstant: 16),
+            iconView.heightAnchor.constraint(equalToConstant: 16),
+            titleField.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 7),
+            titleField.centerYAnchor.constraint(equalTo: centerYAnchor),
+            unsavedDot.leadingAnchor.constraint(equalTo: titleField.trailingAnchor, constant: 7),
+            unsavedDot.centerYAnchor.constraint(equalTo: centerYAnchor),
+            unsavedDot.widthAnchor.constraint(equalToConstant: 6),
+            unsavedDot.heightAnchor.constraint(equalToConstant: 6),
+            closeButton.leadingAnchor.constraint(equalTo: unsavedDot.trailingAnchor, constant: 7),
+            closeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -7),
+            closeButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+            closeButton.widthAnchor.constraint(equalToConstant: PaperCodexHitTarget.chromeCloseButtonSize),
+            closeButton.heightAnchor.constraint(equalToConstant: PaperCodexHitTarget.chromeCloseButtonSize)
+        ])
+        updateAppearance()
+    }
+
+    private func setPressed(_ pressed: Bool) {
+        isPressed = pressed
+        updateAppearance()
+    }
+
+    private func updateAppearance() {
+        let fill: NSColor
+        if isPressed {
+            fill = isActive ? .controlAccentColor.withAlphaComponent(0.14) : .labelColor.withAlphaComponent(0.08)
+        } else if isActive {
+            fill = PaperCodexChromeTabStyle.activeBackground
+        } else if isHovering {
+            fill = PaperCodexChromeTabStyle.inactiveHoverBackground
+        } else {
+            fill = PaperCodexChromeTabStyle.inactiveBackground
+        }
+        layer?.backgroundColor = fill.cgColor
+        layer?.borderWidth = isActive || isHovering ? 1 : 0
+        layer?.borderColor = (isActive ? PaperCodexChromeTabStyle.activeBorder : PaperCodexChromeTabStyle.inactiveBorder).cgColor
+        alphaValue = isPressed ? 0.90 : 1
+        closeButton.isHoveringParent = isHovering || isActive
+        if !reduceMotion {
+            animator().alphaValue = alphaValue
+        }
+    }
+
+    @objc private func closePressed(_ sender: NSButton) {
+        if let tab {
+            onClose(tab)
+        }
+    }
+
+    @objc private func selectPressed(_ sender: NSButton) {
+        if let tab {
+            onSelect(tab)
+        }
+    }
+}
+
+private final class NativeReaderChromeSelectButton: NSButton {
+    var onPressedChanged: (Bool) -> Void = { _ in }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        onPressedChanged(true)
+        super.mouseDown(with: event)
+        onPressedChanged(false)
+    }
+
+    private func setup() {
+        translatesAutoresizingMaskIntoConstraints = false
+        title = ""
+        isBordered = false
+        bezelStyle = .regularSquare
+        imagePosition = .noImage
+        focusRingType = .none
+        setButtonType(.momentaryChange)
+        setAccessibilityElement(true)
+        setAccessibilityRole(.button)
+    }
+}
+
+private final class NativeChromeCloseButton: NSButton {
+    var isHoveringParent = false {
+        didSet {
+            updateAppearance()
+        }
+    }
+
+    private var isHovering = false
+    private var isPressed = false
+    private var trackingArea: NSTrackingArea?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea {
+            removeTrackingArea(trackingArea)
+        }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.activeInKeyWindow, .mouseEnteredAndExited, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isHovering = true
+        updateAppearance()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHovering = false
+        updateAppearance()
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        setPressed(true)
+        super.mouseDown(with: event)
+        setPressed(false)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        super.mouseUp(with: event)
+    }
+
+    private func setup() {
+        translatesAutoresizingMaskIntoConstraints = false
+        isBordered = false
+        image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "Close")
+        imagePosition = .imageOnly
+        contentTintColor = .secondaryLabelColor
+        focusRingType = .none
+        setAccessibilityElement(true)
+        setAccessibilityRole(.button)
+        wantsLayer = true
+        layer?.cornerRadius = PaperCodexHitTarget.chromeCloseButtonSize / 2
+        updateAppearance()
+    }
+
+    private func setPressed(_ pressed: Bool) {
+        isPressed = pressed
+        updateAppearance()
+    }
+
+    private func updateAppearance() {
+        if isPressed {
+            layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.18).cgColor
+            layer?.borderWidth = 1
+            layer?.borderColor = NSColor.controlAccentColor.withAlphaComponent(0.34).cgColor
+        } else if isHovering || isHoveringParent {
+            layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.06).cgColor
+            layer?.borderWidth = isHovering ? 1 : 0
+            layer?.borderColor = NSColor.labelColor.withAlphaComponent(0.12).cgColor
+        } else {
+            layer?.backgroundColor = NSColor.clear.cgColor
+            layer?.borderWidth = 0
+        }
+    }
+}
+
+private final class NativeSaveToLibraryChromeButton: NSButton {
+    private var isHovering = false
+    private var isPressed = false
+    private var reduceMotion = false
+    private var trackingArea: NSTrackingArea?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: 34, height: 30)
+    }
+
+    func apply(reduceMotion: Bool) {
+        self.reduceMotion = reduceMotion
+        updateAppearance()
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea {
+            removeTrackingArea(trackingArea)
+        }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.activeInKeyWindow, .mouseEnteredAndExited, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isHovering = true
+        updateAppearance()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHovering = false
+        updateAppearance()
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        setPressed(true)
+        super.mouseDown(with: event)
+        setPressed(false)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        super.mouseUp(with: event)
+    }
+
+    private func setup() {
+        translatesAutoresizingMaskIntoConstraints = false
+        isBordered = false
+        image = NSImage(systemSymbolName: "tray.and.arrow.down", accessibilityDescription: "Save to Library")
+        imagePosition = .imageOnly
+        contentTintColor = .controlAccentColor
+        toolTip = "Save to Library"
+        setAccessibilityLabel("Save to Library")
+        focusRingType = .none
+        wantsLayer = true
+        layer?.cornerRadius = PaperCodexChromeTabStyle.controlCornerRadius
+        layer?.masksToBounds = true
+        widthAnchor.constraint(equalToConstant: 34).isActive = true
+        heightAnchor.constraint(equalToConstant: 30).isActive = true
+        updateAppearance()
+    }
+
+    private func setPressed(_ pressed: Bool) {
+        isPressed = pressed
+        updateAppearance()
+    }
+
+    private func updateAppearance() {
+        let fill: NSColor
+        if isPressed {
+            fill = .controlAccentColor.withAlphaComponent(0.16)
+        } else if isHovering {
+            fill = .controlAccentColor.withAlphaComponent(0.10)
+        } else {
+            fill = .clear
+        }
+        layer?.backgroundColor = fill.cgColor
+        alphaValue = isPressed ? 0.88 : 1
+        if !reduceMotion {
+            animator().alphaValue = alphaValue
+        }
     }
 }
 
 private enum PaperCodexChromeTabStyle {
     static let cornerRadius: CGFloat = PaperCodexCornerRadius.chromeTab
-    static let barBackground = PaperCodexSurface.window
-    static let activeBackground = PaperCodexSurface.text
-    static let inactiveBackground = PaperCodexSurface.control.opacity(0.36)
-    static let inactiveHoverBackground = PaperCodexSurface.control.opacity(0.70)
-    static let divider = PaperCodexSurface.separator
-    static let activeBorder = Color.primary.opacity(0.16)
-    static let inactiveBorder = Color.primary.opacity(0.10)
-}
-
-private struct PaperCodexChromeTabTopOutline: Shape {
-    var radius: CGFloat
-
-    func path(in rect: CGRect) -> Path {
-        let radius = min(radius, rect.width / 2, rect.height)
-        var path = Path()
-        path.move(to: CGPoint(x: rect.minX, y: rect.maxY))
-        path.addLine(to: CGPoint(x: rect.minX, y: rect.minY + radius))
-        path.addQuadCurve(
-            to: CGPoint(x: rect.minX + radius, y: rect.minY),
-            control: CGPoint(x: rect.minX, y: rect.minY)
-        )
-        path.addLine(to: CGPoint(x: rect.maxX - radius, y: rect.minY))
-        path.addQuadCurve(
-            to: CGPoint(x: rect.maxX, y: rect.minY + radius),
-            control: CGPoint(x: rect.maxX, y: rect.minY)
-        )
-        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
-        return path
-    }
+    static let controlCornerRadius: CGFloat = PaperCodexCornerRadius.control
+    static var barBackground: NSColor { .windowBackgroundColor }
+    static var activeBackground: NSColor { .textBackgroundColor }
+    static var inactiveBackground: NSColor { .controlBackgroundColor.withAlphaComponent(0.36) }
+    static var inactiveHoverBackground: NSColor { .controlBackgroundColor.withAlphaComponent(0.70) }
+    static var divider: NSColor { .separatorColor }
+    static var activeBorder: NSColor { .labelColor.withAlphaComponent(0.16) }
+    static var inactiveBorder: NSColor { .labelColor.withAlphaComponent(0.10) }
 }
 
 private struct PaperCodexWindowFullscreenObserver: NSViewRepresentable {

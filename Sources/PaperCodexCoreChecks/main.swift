@@ -2016,12 +2016,20 @@ func runUILayoutSourceChecks() throws {
     }
     try check(
         windowTabBarSource.contains("PaperCodexWindowTabBar")
-            && windowTabBarSource.contains("PaperCodexReaderChromeTabItem")
+            && windowTabBarSource.contains("NativeWindowChromeTabBarView(")
+            && windowTabBarSource.contains("NativeWindowChromeTabBarContainerView")
+            && windowTabBarSource.contains("NativeChromeHomeTabButton")
+            && windowTabBarSource.contains("NativeReaderChromeTabView")
+            && windowTabBarSource.contains("NativeSaveToLibraryChromeButton")
+            && windowTabBarSource.contains("NSScrollView")
+            && windowTabBarSource.contains("NSStackView")
             && windowTabBarSource.contains("tabBarTrafficLightLeadingInset")
-            && windowTabBarSource.contains("chromeTabShape")
+            && windowTabBarSource.contains("Home: 探索")
+            && windowTabBarSource.contains("Home: 搜索")
             && windowTabBarSource.contains("PaperCodexChromeTabStyle.divider")
-            && windowTabBarSource.contains("PaperCodexChromeTabTopOutline")
-            && windowTabBarSource.contains("UnevenRoundedRectangle")
+            && !windowTabBarSource.contains("ScrollViewReader")
+            && !windowTabBarSource.contains("ScrollView(.horizontal)")
+            && !windowTabBarSource.contains("PaperCodexReaderChromeTabItem")
             && appSource.contains("VStack(spacing: 0)")
             && appSource.contains("PaperCodexWindowTabBar {\n                isShowingSaveToLibrarySheet = true\n            }")
             && appSource.contains("persistentRoutedContent\n                .frame(maxWidth: .infinity, maxHeight: .infinity)")
@@ -2036,27 +2044,36 @@ func runUILayoutSourceChecks() throws {
         "reader top tabs should be a fixed window chrome row in the root layout, not an overlay compensated by Reader padding"
     )
     try check(
-        windowTabBarSource.contains("private var tabScale")
-            && windowTabBarSource.components(separatedBy: ".scaleEffect(reduceMotion ? 1 : tabScale").count - 1 >= 2
-            && windowTabBarSource.components(separatedBy: "PaperCodexMotion.accessible(PaperCodexMotion.hover").count - 1 >= 2
-            && windowTabBarSource.contains("PaperCodexIconButton(title: \"Save to Library\""),
+        windowTabBarSource.contains("@Environment(\\.accessibilityReduceMotion)")
+            && windowTabBarSource.contains("reduceMotion:")
+            && windowTabBarSource.contains("isHovering")
+            && windowTabBarSource.contains("isPressed")
+            && windowTabBarSource.contains("NativeSaveToLibraryChromeButton")
+            && windowTabBarSource.contains("onShowSaveToLibrary()"),
         "window chrome tabs and the save-to-library control should use shared interaction affordances while respecting Reduce Motion"
     )
     try check(
-        windowTabBarSource.contains("private struct PaperCodexChromeTabButtonStyle: ButtonStyle")
-            && windowTabBarSource.contains("private struct PaperCodexChromeTabCloseButtonStyle: ButtonStyle")
-            && windowTabBarSource.contains(".buttonStyle(PaperCodexChromeTabButtonStyle(")
-            && windowTabBarSource.contains(".buttonStyle(PaperCodexChromeTabCloseButtonStyle(")
-            && windowTabBarSource.contains("configuration.isPressed")
-            && windowTabBarSource.contains("PaperCodexMotion.press")
+        windowTabBarSource.contains("override func mouseDown(with event: NSEvent)")
+            && windowTabBarSource.contains("override func mouseUp(with event: NSEvent)")
+            && windowTabBarSource.contains("override func hitTest(_ point: NSPoint)")
+            && windowTabBarSource.contains("setPressed(")
+            && windowTabBarSource.contains("closeButton.target = self")
+            && windowTabBarSource.contains("NativeReaderChromeSelectButton")
+            && windowTabBarSource.contains("selectTab(tab)")
+            && windowTabBarSource.contains("closeTab(tab)")
+            && windowTabBarSource.contains("setAccessibilityElement(true)")
+            && windowTabBarSource.contains("setAccessibilityRole(.button)")
+            && windowTabBarSource.contains("selectButton.setAccessibilityLabel(tab.title)")
+            && windowTabBarSource.contains("setAccessibilityLabel(\"Close tab\")")
             && !windowTabBarSource.contains(".buttonStyle(.plain)"),
-        "window chrome tabs should provide immediate pressed feedback for route and reader-tab switching"
+        "window chrome tabs should provide immediate native pressed feedback for route and reader-tab switching"
     )
     try check(
-        windowTabBarSource.contains("readerTabIDs")
-            && windowTabBarSource.contains(".transition(.asymmetric(")
-            && windowTabBarSource.contains(".animation(PaperCodexMotion.accessible(PaperCodexMotion.selection, reduceMotion: reduceMotion), value: readerTabIDs)"),
-        "reader tabs should animate tab insertions and removals unless Reduce Motion is enabled"
+        windowTabBarSource.contains("lastRenderedTabIDs")
+            && windowTabBarSource.contains("rebuildReaderTabs")
+            && windowTabBarSource.contains("scrollActiveTabToVisible")
+            && windowTabBarSource.contains("reduceMotion"),
+        "reader tabs should update through the native tab strip and keep the active tab centered"
     )
     try check(
         designSystemSource.contains("static let press = Animation.easeOut(duration: 0.05)")
@@ -2341,7 +2358,8 @@ func runUILayoutSourceChecks() throws {
             && rootViewSource.contains("isShowingSaveToLibrarySheet")
             && rootViewSource.contains(".ignoresSafeArea(.container, edges: .top)")
             && windowTabBarSource.contains("struct PaperCodexWindowTabBar")
-            && windowTabBarSource.contains("PaperCodexHomeChromeTab")
+            && windowTabBarSource.contains("NativeChromeHomeTabButton")
+            && windowTabBarSource.contains("NativeWindowChromeTabBarView(")
             && windowTabBarSource.contains("Home (Library, 探索, 搜索, Settings, Recent Conversations)")
             && windowTabBarSource.contains("navigation.route != .reader")
             && windowTabBarSource.contains("model.returnFromReader()")
@@ -2428,9 +2446,10 @@ func runUILayoutSourceChecks() throws {
             && appKitMenuSource.contains("case #selector(selectPreviousReaderTab), #selector(selectNextReaderTab):")
             && appModelSource.contains("func selectPreviousReaderTab()")
             && appModelSource.contains("func selectNextReaderTab()")
-            && windowTabBarSource.contains("ScrollViewReader")
-            && windowTabBarSource.contains("scrollProxy.scrollTo(activePaperID, anchor: .center)")
-            && windowTabBarSource.contains(".animation(PaperCodexMotion.accessible(PaperCodexMotion.selection, reduceMotion: reduceMotion), value: model.readerTabState.activePaperID)"),
+            && windowTabBarSource.contains("NSScrollView")
+            && windowTabBarSource.contains("scrollActiveTabToVisible")
+            && windowTabBarSource.contains("activeTabView.frame.midX")
+            && windowTabBarSource.contains("reflectScrolledClipView"),
         "Reader tabs should support keyboard switching and keep the active tab visibly centered"
     )
     if let panelPickerRange = readerSessionToolbarSource.range(of: "panelSegmentedControl"),
