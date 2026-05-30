@@ -505,7 +505,7 @@ struct LibraryView: View {
     private var paperList: some View {
         let listState = makePaperListState()
         return VStack(alignment: .leading, spacing: 16) {
-            LibraryInlineControlRow(
+            LibraryNativeToolbarView(
                 searchText: searchTextBinding,
                 sortRawValue: $librarySortRawValue,
                 sortAscending: $librarySortAscending,
@@ -515,6 +515,8 @@ struct LibraryView: View {
                 showsReadActions: selectedCategoryID != nil,
                 canRead: !listState.readablePaperIDs.isEmpty,
                 hasActiveFilters: listState.hasActiveFilters,
+                isLibraryActive: model.route == .library,
+                searchFocusRequestID: model.searchFocusRequestID,
                 onRead: {
                     model.openPapersForReading(listState.readablePaperIDs)
                 },
@@ -530,6 +532,7 @@ struct LibraryView: View {
                 },
                 onImportPDF: presentPDFImportPanel
             )
+            .frame(maxWidth: .infinity, minHeight: 36, idealHeight: 36, maxHeight: 36)
 
             if listState.papers.isEmpty {
                 ContentUnavailableView("No Papers", systemImage: "doc.text.magnifyingglass")
@@ -1588,167 +1591,6 @@ private struct LibraryRootFolderRow: View {
     }
 }
 
-private struct LibraryInlineControlRow: View {
-    @EnvironmentObject private var model: AppModel
-    @FocusState private var isLibrarySearchFocused: Bool
-
-    @Binding var searchText: String
-    @Binding var sortRawValue: String
-    @Binding var sortAscending: Bool
-    @Binding var includeSubfolders: Bool
-
-    var paperCount: Int
-    var showsFolderScope: Bool
-    var showsReadActions: Bool
-    var canRead: Bool
-    var hasActiveFilters: Bool
-    var onRead: () -> Void
-    var onChat: () -> Void
-    var onClearFilters: () -> Void
-    var onShowWatchedFolders: () -> Void
-    var onShowArxivImport: () -> Void
-    var onImportPDF: () -> Void
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Text("Library")
-                .font(.paperCodexSystem(size: 22, weight: .semibold))
-                .fixedSize()
-
-            searchField
-
-            Text("\(paperCount) papers")
-                .font(.paperCodexSystem(size: 12.5, weight: .medium))
-                .monospacedDigit()
-                .foregroundStyle(.secondary)
-                .fixedSize()
-                .contentTransition(.numericText())
-
-            if showsFolderScope {
-                scopeToggle
-            }
-
-            Spacer(minLength: 8)
-
-            if hasActiveFilters {
-                PaperCodexIconButton(title: "Clear Filters", systemImage: "line.3.horizontal.decrease.circle", tint: .secondary) {
-                    onClearFilters()
-                }
-            }
-
-            if showsReadActions {
-                readButton
-                chatButton
-            }
-
-            PaperCodexIconButton(title: "Folders", systemImage: "folder.badge.plus", tint: .secondary) {
-                onShowWatchedFolders()
-            }
-            PaperCodexIconButton(title: "arXiv", systemImage: "number", tint: .secondary) {
-                onShowArxivImport()
-            }
-            sortPicker
-            sortDirectionButton
-            PaperCodexToolbarButton(title: "Import PDF", systemImage: "plus", tint: .blue) {
-                onImportPDF()
-            }
-        }
-        .frame(maxWidth: .infinity, minHeight: 34)
-        .lineLimit(1)
-        .controlSize(.small)
-        .onChange(of: model.searchFocusRequestID) { _, _ in
-            guard model.route == .library else {
-                return
-            }
-            isLibrarySearchFocused = true
-        }
-    }
-
-    private var searchField: some View {
-        TextField("Search title, author, tag, category, year, or source", text: $searchText)
-            .textFieldStyle(.roundedBorder)
-            .font(.paperCodexSystem(size: 14))
-            .frame(minWidth: 180, maxWidth: .infinity)
-            .layoutPriority(1)
-            .focused($isLibrarySearchFocused)
-            .overlay(alignment: .trailing) {
-                if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Button {
-                        searchText = ""
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.borderless)
-                    .padding(.trailing, 6)
-                    .help("Clear Search")
-                }
-            }
-    }
-
-    private var scopeToggle: some View {
-        Button {
-            includeSubfolders.toggle()
-        } label: {
-            Label(includeSubfolders ? "All levels" : "This folder", systemImage: includeSubfolders ? "folder.badge.gearshape" : "folder")
-                .labelStyle(.titleAndIcon)
-        }
-        .buttonStyle(.bordered)
-        .fixedSize()
-        .help(includeSubfolders ? "Showing current folder and subfolders" : "Showing current folder only")
-        .accessibilityLabel(includeSubfolders ? "Show Current Folder Only" : "Show Current Folder And Subfolders")
-    }
-
-    private var readButton: some View {
-        Button(action: onRead) {
-            Label("Read", systemImage: "book")
-        }
-        .buttonStyle(.bordered)
-        .fixedSize()
-        .disabled(!canRead)
-        .help("Read visible papers")
-    }
-
-    private var chatButton: some View {
-        Button(action: onChat) {
-            Label("Chat", systemImage: "text.bubble")
-        }
-        .buttonStyle(.borderedProminent)
-        .fixedSize()
-        .disabled(!canRead)
-        .help("Chat with visible papers")
-    }
-
-    private var sortPicker: some View {
-        Picker("Sort", selection: $sortRawValue) {
-            ForEach(LibrarySortOption.allCases) { option in
-                Label {
-                    Text(LocalizedStringKey(option.title))
-                } icon: {
-                    Image(systemName: option.systemImage)
-                }
-                .tag(option.rawValue)
-            }
-        }
-        .pickerStyle(.menu)
-        .frame(width: 108)
-        .help("Sort Library")
-    }
-
-    private var sortDirectionButton: some View {
-        Button {
-            sortAscending.toggle()
-        } label: {
-            Image(systemName: sortAscending ? "arrow.up" : "arrow.down")
-                .frame(width: 22, height: 22)
-        }
-        .buttonStyle(.bordered)
-        .fixedSize()
-        .help(sortAscending ? "Ascending" : "Descending")
-        .accessibilityLabel(sortAscending ? "Sort Ascending" : "Sort Descending")
-    }
-}
-
 private struct LibraryPaperListState {
     var papers: [Paper]
     var paperIDs: [String]
@@ -2648,7 +2490,7 @@ private struct LibraryBulkTagSheet: View {
     }
 }
 
-private enum LibrarySortOption: String, CaseIterable, Identifiable {
+enum LibrarySortOption: String, CaseIterable, Identifiable {
     case addedNewest
     case title
     case arxivID

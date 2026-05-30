@@ -970,6 +970,7 @@ func runUILayoutSourceChecks() throws {
     let librarySource = try String(contentsOf: libraryViewURL)
     let libraryCategoryOutlineSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/LibraryCategoryOutlineView.swift"))
     let libraryPaperTableSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/LibraryPaperTableView.swift"))
+    let libraryToolbarSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/LibraryToolbarView.swift"))
     let appModelURL = root.appendingPathComponent("Sources/PaperCodexApp/AppModel.swift")
     let appModelSource = try String(contentsOf: appModelURL)
     let libraryFeatureStoreSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/LibraryFeatureStore.swift"))
@@ -1025,13 +1026,32 @@ func runUILayoutSourceChecks() throws {
     )
     try check(
         librarySource.contains("LibraryRootFolderRow")
-            && librarySource.contains("LibraryInlineControlRow")
+            && librarySource.contains("LibraryNativeToolbarView(")
             && librarySource.contains("LibraryPaperListState")
+            && !librarySource.contains("LibraryInlineControlRow(")
             && !librarySource.contains("FolderBreadcrumbBar")
             && !librarySource.contains("folderBreadcrumbPath(for:")
-            && librarySource.contains("This folder")
-            && librarySource.contains("All levels"),
-        "library folders should keep search, scope, count, and reading actions in one inline toolbar without a breadcrumb path"
+            && libraryToolbarSource.contains("This folder")
+            && libraryToolbarSource.contains("All levels"),
+        "library folders should keep search, scope, count, and reading actions in one native inline toolbar without a breadcrumb path"
+    )
+    try check(
+        librarySource.contains("LibraryNativeToolbarView(")
+            && !librarySource.contains("LibraryInlineControlRow(")
+            && !librarySource.contains("TextField(\"Search title, author, tag, category, year, or source\"")
+            && !librarySource.contains("Picker(\"Sort\"")
+            && libraryToolbarSource.contains("NSSearchField")
+            && libraryToolbarSource.contains("NSPopUpButton")
+            && libraryToolbarSource.contains("NSButton")
+            && libraryToolbarSource.contains("NSViewRepresentable")
+            && libraryToolbarSource.contains("searchFocusRequestID")
+            && libraryToolbarSource.contains("sortDirectionButton")
+            && libraryToolbarSource.contains("clearFiltersButton")
+            && libraryToolbarSource.contains("localized(\"Library\")")
+            && libraryToolbarSource.contains("localized(\"Clear Filters\")")
+            && libraryToolbarSource.contains("NSLocalizedString")
+            && libraryToolbarSource.contains("onImportPDF"),
+        "library top controls should use a native AppKit toolbar with search, sort, scope, filter, read/chat, and import actions"
     )
     try check(
         librarySource.contains("LibraryPaperTableView(")
@@ -1084,7 +1104,7 @@ func runUILayoutSourceChecks() throws {
         "library sorting should support ascending and descending directions"
     )
     try check(
-        librarySource.contains("sortDirectionButton"),
+        libraryToolbarSource.contains("sortDirectionButton"),
         "library toolbar should expose a one-click sort direction toggle"
     )
     try check(
@@ -1117,7 +1137,9 @@ func runUILayoutSourceChecks() throws {
         "library sorting should pin starred papers before applying the active sort option"
     )
     try check(
-        librarySource.contains("systemImage: \"number\""),
+        libraryToolbarSource.contains("makeIconButton(symbolName: \"number\"")
+            && libraryToolbarSource.contains("localized(\"arXiv\")")
+            && libraryToolbarSource.contains("NSImage(systemSymbolName:"),
         "library toolbar should show an arXiv import button next to PDF import"
     )
     try check(
@@ -1693,7 +1715,8 @@ func runUILayoutSourceChecks() throws {
         actionButtonSource.contains("struct PaperCodexToolbarButton")
             && actionButtonSource.contains("struct PaperCodexIconButton")
             && discoverSource.contains("PaperCodexToolbarButton")
-            && librarySource.contains("PaperCodexToolbarButton")
+            && (librarySource.contains("PaperCodexToolbarButton")
+                || (libraryToolbarSource.contains("LibraryNativeToolbarView") && libraryToolbarSource.contains("NSButton")))
             && (chatSource.contains("PaperCodexToolbarButton") || chatSource.contains("ReaderChatHeaderActionButton"))
             && !discoverSource.contains("private struct ToolbarActionButton"),
         "common toolbar and icon actions should use shared controls, with reader-specific compact header actions only where layout requires them"
@@ -2466,8 +2489,9 @@ func runUILayoutSourceChecks() throws {
         appKitMenuSource.contains("item(\"Focus Search\", action: #selector(focusSearch), key: \"f\")")
             && appModelSource.contains("@Published var searchFocusRequestID")
             && appModelSource.contains("func requestSearchFocus()")
-            && librarySource.contains("@FocusState private var isLibrarySearchFocused")
-            && librarySource.contains(".onChange(of: model.searchFocusRequestID)")
+            && librarySource.contains("searchFocusRequestID: model.searchFocusRequestID")
+            && libraryToolbarSource.contains("applyFocusIfNeeded")
+            && libraryToolbarSource.contains("makeFirstResponder(toolbarView.searchField)")
             && discoverSource.contains("@FocusState private var isDiscoverSearchFocused")
             && discoverSource.contains("@FocusState private var isArxivSearchFocused")
             && discoverSource.contains(".onChange(of: model.searchFocusRequestID)"),
@@ -2941,7 +2965,7 @@ func runUILayoutSourceChecks() throws {
         librarySource.contains("RecentConversationsContent")
             && librarySource.contains("openSelectedPapersForReading")
             && librarySource.contains("openSelectedPapersForChat")
-            && librarySource.contains("LibraryInlineControlRow")
+            && librarySource.contains("LibraryNativeToolbarView")
             && librarySource.contains("readablePaperIDs"),
         "library should expose recent conversations and open multi-paper sessions from selections or folders"
     )
