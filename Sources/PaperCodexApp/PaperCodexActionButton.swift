@@ -90,6 +90,30 @@ struct PaperCodexPanelButton: View {
     }
 }
 
+struct PaperCodexPathChipButton: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var title: String
+    var systemImage: String = "folder.fill"
+    var tint: Color = .accentColor
+    var disabled = false
+    var action: () -> Void
+
+    var body: some View {
+        NativePaperCodexPathChipButton(
+            title: title,
+            systemImage: systemImage,
+            tint: tint,
+            disabled: disabled,
+            reduceMotion: reduceMotion,
+            action: action
+        )
+        .fixedSize(horizontal: true, vertical: true)
+        .help("Remove \(title)")
+        .accessibilityLabel("Remove \(title)")
+    }
+}
+
 private enum NativePaperCodexActionMetrics {
     static let toolbarHeight: CGFloat = max(
         PaperCodexHitTarget.toolbarButtonHeight,
@@ -102,6 +126,13 @@ private enum NativePaperCodexActionMetrics {
     static let iconFontSize: CGFloat = PaperCodexHitTarget.toolbarIconSymbolSize
     static let iconSize: CGFloat = PaperCodexHitTarget.toolbarIconSize
     static let cornerRadius: CGFloat = PaperCodexCornerRadius.control
+    static let pathChipHeight: CGFloat = 24
+    static let pathChipHorizontalPadding: CGFloat = 8
+    static let pathChipIconSize: CGFloat = 11
+    static let pathChipRemoveIconSize: CGFloat = 9
+    static let pathChipIconTextSpacing: CGFloat = 5
+    static let pathChipTitleMaxWidth: CGFloat = 210
+    static let pathChipCornerRadius: CGFloat = 7
 }
 
 private struct NativePaperCodexToolbarButton: NSViewRepresentable {
@@ -195,6 +226,39 @@ private struct NativePaperCodexIconButton: NSViewRepresentable {
     }
 
     func updateNSView(_ view: NativePaperCodexIconButtonView, context: Context) {
+        view.apply(
+            title: title,
+            systemImage: systemImage,
+            tint: tint,
+            disabled: disabled,
+            reduceMotion: reduceMotion,
+            action: action
+        )
+    }
+}
+
+private struct NativePaperCodexPathChipButton: NSViewRepresentable {
+    var title: String
+    var systemImage: String
+    var tint: Color
+    var disabled: Bool
+    var reduceMotion: Bool
+    var action: () -> Void
+
+    func makeNSView(context: Context) -> NativePaperCodexPathChipButtonView {
+        let view = NativePaperCodexPathChipButtonView()
+        view.apply(
+            title: title,
+            systemImage: systemImage,
+            tint: tint,
+            disabled: disabled,
+            reduceMotion: reduceMotion,
+            action: action
+        )
+        return view
+    }
+
+    func updateNSView(_ view: NativePaperCodexPathChipButtonView, context: Context) {
         view.apply(
             title: title,
             systemImage: systemImage,
@@ -409,6 +473,218 @@ private final class NativePaperCodexPanelButtonView: NSButton {
             targetScale = 0.97
         } else {
             targetScale = isHovering ? 1.02 : 1
+        }
+        CATransaction.begin()
+        CATransaction.setDisableActions(reduceMotion)
+        CATransaction.setAnimationDuration(reduceMotion ? 0 : (isPressed ? 0.05 : 0.12))
+        layer?.transform = CATransform3DMakeScale(targetScale, targetScale, 1)
+        CATransaction.commit()
+    }
+}
+
+private final class NativePaperCodexPathChipButtonView: NSButton {
+    private let iconView = NSImageView()
+    private let titleLabel = NSTextField(labelWithString: "")
+    private let removeIconView = NSImageView()
+    private var trackingArea: NSTrackingArea?
+    private var pressHandler: () -> Void = {}
+    private var tintColor = NSColor.controlAccentColor
+    private var isHovering = false
+    private var isPressed = false
+    private var isDisabled = false
+    private var reduceMotion = false
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override var isFlipped: Bool {
+        true
+    }
+
+    override var intrinsicContentSize: NSSize {
+        let titleWidth = min(
+            titleLabel.intrinsicContentSize.width,
+            NativePaperCodexActionMetrics.pathChipTitleMaxWidth
+        )
+        let width = NativePaperCodexActionMetrics.pathChipHorizontalPadding * 2
+            + NativePaperCodexActionMetrics.pathChipIconSize
+            + NativePaperCodexActionMetrics.pathChipIconTextSpacing
+            + titleWidth
+            + NativePaperCodexActionMetrics.pathChipIconTextSpacing
+            + NativePaperCodexActionMetrics.pathChipRemoveIconSize
+        return NSSize(width: ceil(width), height: NativePaperCodexActionMetrics.pathChipHeight)
+    }
+
+    func apply(title: String, systemImage: String, tint: Color, disabled: Bool, reduceMotion: Bool, action: @escaping () -> Void) {
+        let accessibilityTitle = "Remove \(title)"
+        pressHandler = action
+        tintColor = NSColor(tint)
+        isDisabled = disabled
+        self.reduceMotion = reduceMotion
+        isEnabled = !disabled
+        titleLabel.stringValue = title
+        iconView.image = NSImage(systemSymbolName: systemImage, accessibilityDescription: title)
+        removeIconView.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: accessibilityTitle)
+        toolTip = accessibilityTitle
+        setAccessibilityLabel(accessibilityTitle)
+        invalidateIntrinsicContentSize()
+        updateAppearance()
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea {
+            removeTrackingArea(trackingArea)
+        }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.activeInKeyWindow, .mouseEnteredAndExited, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isHovering = true
+        updateAppearance()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHovering = false
+        updateAppearance()
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard !isDisabled else {
+            return
+        }
+        setPressed(true)
+        super.mouseDown(with: event)
+        setPressed(false)
+    }
+
+    private func setup() {
+        translatesAutoresizingMaskIntoConstraints = false
+        title = ""
+        isBordered = false
+        bezelStyle = .regularSquare
+        imagePosition = .noImage
+        focusRingType = .none
+        setButtonType(.momentaryChange)
+        target = self
+        action = #selector(performPress)
+        setAccessibilityElement(true)
+        setAccessibilityRole(.button)
+        wantsLayer = true
+        layer?.cornerRadius = NativePaperCodexActionMetrics.pathChipCornerRadius
+        layer?.masksToBounds = false
+
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+        iconView.symbolConfiguration = NSImage.SymbolConfiguration(
+            pointSize: NativePaperCodexActionMetrics.pathChipIconSize,
+            weight: .semibold
+        )
+        iconView.imageScaling = .scaleProportionallyDown
+
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        titleLabel.font = .systemFont(ofSize: 11, weight: .regular)
+        titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.maximumNumberOfLines = 1
+        titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        removeIconView.translatesAutoresizingMaskIntoConstraints = false
+        removeIconView.symbolConfiguration = NSImage.SymbolConfiguration(
+            pointSize: NativePaperCodexActionMetrics.pathChipRemoveIconSize,
+            weight: .bold
+        )
+        removeIconView.imageScaling = .scaleProportionallyDown
+
+        [iconView, titleLabel, removeIconView].forEach(addSubview(_:))
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: NativePaperCodexActionMetrics.pathChipHeight),
+            iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: NativePaperCodexActionMetrics.pathChipHorizontalPadding),
+            iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            iconView.widthAnchor.constraint(equalToConstant: NativePaperCodexActionMetrics.pathChipIconSize),
+            iconView.heightAnchor.constraint(equalToConstant: NativePaperCodexActionMetrics.pathChipIconSize),
+            titleLabel.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: NativePaperCodexActionMetrics.pathChipIconTextSpacing),
+            titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            titleLabel.widthAnchor.constraint(lessThanOrEqualToConstant: NativePaperCodexActionMetrics.pathChipTitleMaxWidth),
+            removeIconView.leadingAnchor.constraint(equalTo: titleLabel.trailingAnchor, constant: NativePaperCodexActionMetrics.pathChipIconTextSpacing),
+            removeIconView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -NativePaperCodexActionMetrics.pathChipHorizontalPadding),
+            removeIconView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            removeIconView.widthAnchor.constraint(equalToConstant: NativePaperCodexActionMetrics.pathChipRemoveIconSize),
+            removeIconView.heightAnchor.constraint(equalToConstant: NativePaperCodexActionMetrics.pathChipRemoveIconSize)
+        ])
+        updateAppearance()
+    }
+
+    @objc private func performPress() {
+        guard !isDisabled else {
+            return
+        }
+        pressHandler()
+    }
+
+    private func setPressed(_ pressed: Bool) {
+        isPressed = pressed
+        updateAppearance()
+    }
+
+    private func updateAppearance() {
+        let tint = tintColor
+        let foreground: NSColor
+        let background: NSColor
+        let border: NSColor
+        let shadowOpacity: Float
+
+        if isDisabled {
+            foreground = .secondaryLabelColor.withAlphaComponent(0.45)
+            background = .controlBackgroundColor.withAlphaComponent(0.50)
+            border = .black.withAlphaComponent(0.06)
+            shadowOpacity = 0
+        } else if isPressed {
+            foreground = tint
+            background = tint.withAlphaComponent(0.21)
+            border = tint.withAlphaComponent(0.54)
+            shadowOpacity = 0.10
+        } else if isHovering {
+            foreground = tint
+            background = tint.withAlphaComponent(0.16)
+            border = tint.withAlphaComponent(0.34)
+            shadowOpacity = 0.14
+        } else {
+            foreground = .labelColor
+            background = tint.withAlphaComponent(0.12)
+            border = tint.withAlphaComponent(0.18)
+            shadowOpacity = 0
+        }
+
+        iconView.contentTintColor = isDisabled ? foreground : tint.withAlphaComponent(isPressed || isHovering ? 0.92 : 0.72)
+        titleLabel.textColor = foreground
+        removeIconView.contentTintColor = foreground.withAlphaComponent(isPressed || isHovering ? 0.82 : 0.56)
+        layer?.backgroundColor = background.cgColor
+        layer?.borderWidth = 1
+        layer?.borderColor = border.cgColor
+        layer?.shadowColor = tint.cgColor
+        layer?.shadowOpacity = shadowOpacity
+        layer?.shadowRadius = isPressed ? 3 : 6
+        layer?.shadowOffset = CGSize(width: 0, height: isPressed ? -1 : -2)
+
+        let targetScale: CGFloat
+        if reduceMotion || isDisabled {
+            targetScale = 1
+        } else if isPressed {
+            targetScale = 0.965
+        } else {
+            targetScale = isHovering ? 1.025 : 1
         }
         CATransaction.begin()
         CATransaction.setDisableActions(reduceMotion)

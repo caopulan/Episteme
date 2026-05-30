@@ -15,6 +15,7 @@ struct SaveToLibraryCategorySelection: Equatable {
 private let saveToLibraryRootDraftParentID = "__papercodex-save-root__"
 
 private enum SaveToLibraryLayout {
+    static let destinationChipMaxHeight: CGFloat = 150
     static let treeConnectorHeight: CGFloat = 34
     static let treeIndentWidth: CGFloat = 22
     static let chevronWidth: CGFloat = 16
@@ -118,12 +119,9 @@ struct SaveToLibrarySheet: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
                 Spacer()
-                Button {
+                PaperCodexPanelButton(title: "New root folder", systemImage: "folder.badge.plus") {
                     beginNewCategory(parentID: nil)
-                } label: {
-                    Label("New root folder", systemImage: "folder.badge.plus")
                 }
-                .buttonStyle(.borderless)
             }
 
             ScrollView {
@@ -189,21 +187,17 @@ struct SaveToLibrarySheet: View {
                 .foregroundStyle(Color.accentColor)
             TextField("New folder", text: $newCategoryName)
                 .textFieldStyle(.roundedBorder)
-            Button {
+            PaperCodexIconButton(
+                title: "Add Folder",
+                systemImage: "checkmark",
+                tint: .accentColor,
+                disabled: trimmedNewCategoryName.isEmpty
+            ) {
                 commitNewCategory(parentID: parentID)
-            } label: {
-                Image(systemName: "checkmark")
             }
-            .buttonStyle(.borderless)
-            .disabled(trimmedNewCategoryName.isEmpty)
-            .help("Add Folder")
-            Button {
+            PaperCodexIconButton(title: "Cancel", systemImage: "xmark") {
                 cancelNewCategory()
-            } label: {
-                Image(systemName: "xmark")
             }
-            .buttonStyle(.borderless)
-            .help("Cancel")
         }
         .padding(.leading, CGFloat(depth) * SaveToLibraryLayout.treeIndentWidth)
         .padding(.horizontal, 8)
@@ -527,89 +521,30 @@ private struct SaveToLibraryDestinationHeader: View {
                 .background(Color(nsColor: .controlBackgroundColor))
                 .clipShape(RoundedRectangle(cornerRadius: 8))
             } else {
-                SaveToLibraryFlowLayout(spacing: 6) {
-                    ForEach(folders) { folder in
-                        SaveToLibraryFolderPathChip(folder: folder) {
-                            onRemove(folder.id)
+                ScrollView(.vertical) {
+                    SaveToLibraryFlowLayout(spacing: 6) {
+                        ForEach(folders) { folder in
+                            SaveToLibraryFolderPathChip(folder: folder) {
+                                onRemove(folder.id)
+                            }
                         }
                     }
+                    .padding(.trailing, 2)
                 }
+                .frame(maxHeight: SaveToLibraryLayout.destinationChipMaxHeight)
             }
         }
     }
 }
 
 private struct SaveToLibraryFolderPathChip: View {
-    @State private var isHovering = false
-
     var folder: SaveToLibrarySelectedFolderSummary
     var onRemove: () -> Void
 
     var body: some View {
-        Button(action: onRemove) {
-            HStack(spacing: 5) {
-                Image(systemName: "folder.fill")
-                    .font(.paperCodexSystem(size: 10.5, weight: .semibold))
-                Text(folder.path)
-                    .lineLimit(1)
-                Image(systemName: "xmark")
-                    .font(.paperCodexSystem(size: 8.5, weight: .bold))
-                    .foregroundStyle(.secondary)
-            }
-            .font(.caption)
+        PaperCodexPathChipButton(title: folder.path) {
+            onRemove()
         }
-        .buttonStyle(SaveToLibraryFolderPathChipStyle(isHovering: isHovering))
-        .help("Remove \(folder.path)")
-        .onHover { hovering in
-            withAnimation(PaperCodexMotion.hover) {
-                isHovering = hovering
-            }
-        }
-    }
-}
-
-private struct SaveToLibraryFolderPathChipStyle: ButtonStyle {
-    var isHovering: Bool
-
-    func makeBody(configuration: Configuration) -> some View {
-        let isPressed = configuration.isPressed
-        configuration.label
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
-            .foregroundStyle(Color.primary)
-            .background(
-                RoundedRectangle(cornerRadius: 7)
-                    .fill(backgroundColor(isPressed: isPressed))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 7)
-                    .stroke(borderColor(isPressed: isPressed), lineWidth: 1)
-            )
-            .shadow(color: shadowColor(isPressed: isPressed), radius: isPressed ? 3 : 6, y: isPressed ? 1 : 2)
-            .scaleEffect(isPressed ? 0.965 : (isHovering ? 1.025 : 1), anchor: .center)
-            .animation(PaperCodexMotion.press, value: configuration.isPressed)
-            .animation(PaperCodexMotion.hover, value: isHovering)
-    }
-
-    private func backgroundColor(isPressed: Bool) -> Color {
-        if isPressed {
-            return Color.accentColor.opacity(0.21)
-        }
-        return Color.accentColor.opacity(isHovering ? 0.16 : 0.12)
-    }
-
-    private func borderColor(isPressed: Bool) -> Color {
-        if isPressed {
-            return Color.accentColor.opacity(0.54)
-        }
-        return Color.accentColor.opacity(isHovering ? 0.34 : 0.18)
-    }
-
-    private func shadowColor(isPressed: Bool) -> Color {
-        guard isPressed || isHovering else {
-            return .clear
-        }
-        return Color.accentColor.opacity(isPressed ? 0.10 : 0.14)
     }
 }
 

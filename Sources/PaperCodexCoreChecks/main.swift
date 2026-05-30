@@ -2002,8 +2002,11 @@ func runUILayoutSourceChecks() throws {
         saveToLibrarySource.contains("SaveToLibraryDestinationHeader")
             && saveToLibrarySource.contains("SaveToLibraryFolderPathChip")
             && saveToLibrarySource.contains("Choose destination")
-            && saveToLibrarySource.contains("New root folder"),
-        "save-to-library should present folder destination selection as a clear tree picker with selected path chips"
+            && saveToLibrarySource.contains("New root folder")
+            && saveToLibrarySource.contains("destinationChipMaxHeight")
+            && saveToLibrarySource.contains("ScrollView(.vertical) {")
+            && saveToLibrarySource.contains(".frame(maxHeight: SaveToLibraryLayout.destinationChipMaxHeight)"),
+        "save-to-library should bound selected path chips so the folder tree remains usable with many suggested destinations"
     )
     if let actionRowRange = saveToLibrarySource.range(of: "private var actionRow: some View"),
        let actionRowEndRange = saveToLibrarySource.range(of: "private var visibleFolderItems", range: actionRowRange.upperBound..<saveToLibrarySource.endIndex) {
@@ -2030,17 +2033,29 @@ func runUILayoutSourceChecks() throws {
         let pathChipSource = String(saveToLibrarySource[pathChipRange.lowerBound..<pathChipEndRange.lowerBound])
         let folderRowSource = String(saveToLibrarySource[folderRowRange.lowerBound..<folderRowEndRange.lowerBound])
         try check(
-            saveToLibrarySource.contains("private struct SaveToLibraryFolderPathChipStyle: ButtonStyle")
+            actionButtonSource.contains("struct PaperCodexPathChipButton: View")
+                && actionButtonSource.contains("private struct NativePaperCodexPathChipButton: NSViewRepresentable")
+                && actionButtonSource.contains("private final class NativePaperCodexPathChipButtonView: NSButton")
+                && actionButtonSource.components(separatedBy: "override func mouseDown(with event: NSEvent)").count - 1 >= 3
+                && actionButtonSource.components(separatedBy: "setAccessibilityRole(.button)").count - 1 >= 3
+                && actionButtonSource.components(separatedBy: "CATransaction.setAnimationDuration").count - 1 >= 3
+                && pathChipSource.contains("PaperCodexPathChipButton(")
+                && !saveToLibrarySource.contains("private struct SaveToLibraryFolderPathChipStyle: ButtonStyle")
+                && saveToLibrarySource.contains("PaperCodexPanelButton(title: \"New root folder\"")
+                && saveToLibrarySource.contains("title: \"Add Folder\"")
+                && saveToLibrarySource.contains("systemImage: \"checkmark\"")
+                && saveToLibrarySource.contains("title: \"Cancel\"")
+                && saveToLibrarySource.contains("systemImage: \"xmark\"")
+                && !saveToLibrarySource.contains(".buttonStyle(.borderless)")
                 && saveToLibrarySource.contains("private struct SaveToLibraryFolderRowButtonStyle: ButtonStyle")
                 && saveToLibrarySource.contains("private struct SaveToLibraryFolderIconButtonStyle: ButtonStyle")
-                && pathChipSource.contains(".buttonStyle(SaveToLibraryFolderPathChipStyle(")
                 && folderRowSource.contains(".buttonStyle(SaveToLibraryFolderRowButtonStyle(")
                 && folderRowSource.contains(".buttonStyle(SaveToLibraryFolderIconButtonStyle(")
                 && saveToLibrarySource.contains("configuration.isPressed")
                 && saveToLibrarySource.contains("PaperCodexMotion.press")
-                && !pathChipSource.contains(".buttonStyle(.plain)")
+                && !pathChipSource.contains(".buttonStyle(")
                 && !folderRowSource.contains(".buttonStyle(.plain)"),
-            "save-to-library folder tree and selected path chips should provide immediate pressed feedback before selection or tree mutations"
+            "save-to-library selected path chips and small creation actions should use native AppKit buttons while folder rows keep immediate feedback"
         )
     } else {
         throw CheckFailure(description: "save-to-library folder tree button source should remain inspectable")
