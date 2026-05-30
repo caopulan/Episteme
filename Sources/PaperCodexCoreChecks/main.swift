@@ -2262,8 +2262,15 @@ func runUILayoutSourceChecks() throws {
         "single page sidebars should reserve top space for embedded traffic-light controls"
     )
     try check(
-        sidebarSplitSource.contains("WindowSafeSplitterHandle") && sidebarSplitSource.contains("mouseDownCanMoveWindow"),
-        "sidebar splitter should handle resize in an AppKit view that cannot initiate window dragging"
+        sidebarSplitSource.contains("NSSplitView")
+            && sidebarSplitSource.contains("NSHostingView(rootView:")
+            && sidebarSplitSource.contains("NSSplitViewDelegate")
+            && sidebarSplitSource.contains("splitViewDidResizeSubviews")
+            && sidebarSplitSource.contains("setLibrarySidebarWidth")
+            && !sidebarSplitSource.contains("GeometryReader")
+            && !sidebarSplitSource.contains("HStack(alignment: .top")
+            && !sidebarSplitSource.contains("WindowSafeSplitterHandle"),
+        "primary sidebar splitter should be a native NSSplitView that hosts SwiftUI panes and persists sidebar width"
     )
     try check(
         appKitWindowControllerSource.contains("installTitlebarDoubleClickZoomMonitor")

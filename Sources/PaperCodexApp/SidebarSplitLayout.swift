@@ -1,10 +1,13 @@
 import AppKit
 import SwiftUI
 
+private let sidebarMinimumWidth: CGFloat = 220
+private let sidebarMaximumWidth: CGFloat = 420
+
 struct SidebarSplitLayout<Sidebar: View, Content: View>: View {
     @EnvironmentObject private var model: AppModel
-    @State private var dragStartWidth: CGFloat?
-    @State private var liveSidebarWidth: CGFloat?
+    @EnvironmentObject private var navigation: AppNavigation
+    @Environment(\.locale) private var locale
 
     var minContentWidth: CGFloat
     @ViewBuilder var sidebar: () -> Sidebar
@@ -21,45 +24,30 @@ struct SidebarSplitLayout<Sidebar: View, Content: View>: View {
     }
 
     var body: some View {
-        GeometryReader { proxy in
-            let handleWidth: CGFloat = 10
-            let sidebarWidth = clampedSidebarWidth(
-                liveSidebarWidth ?? model.librarySidebarWidth,
-                totalWidth: proxy.size.width,
-                handleWidth: handleWidth
-            )
-            let contentMinWidth = max(0, min(minContentWidth, proxy.size.width - sidebarWidth - handleWidth))
-
-            HStack(alignment: .top, spacing: 0) {
+        AppKitSidebarSplitView(
+            sidebarWidth: model.librarySidebarWidth,
+            minContentWidth: minContentWidth,
+            onSidebarWidthChange: model.setLibrarySidebarWidth
+        ) {
+            AnyView(
                 sidebar()
-                    .frame(width: sidebarWidth)
-                    .frame(maxHeight: .infinity, alignment: .topLeading)
+                    .environmentObject(model)
+                    .environmentObject(navigation)
+                    .environment(\.locale, locale)
+                    .paperCodexTypographyScale()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .clipped()
-                WindowSafeSplitterHandle(
-                    onDragChanged: { translationX in
-                        if dragStartWidth == nil {
-                            dragStartWidth = sidebarWidth
-                        }
-                        liveSidebarWidth = clampedSidebarWidth(
-                            (dragStartWidth ?? sidebarWidth) + translationX,
-                            totalWidth: proxy.size.width,
-                            handleWidth: handleWidth
-                        )
-                    },
-                    onDragEnded: {
-                        if let liveSidebarWidth {
-                            model.setLibrarySidebarWidth(liveSidebarWidth)
-                        }
-                        dragStartWidth = nil
-                        liveSidebarWidth = nil
-                    }
-                )
-                    .frame(width: handleWidth)
-                    .frame(maxHeight: .infinity)
+            )
+        } content: {
+            AnyView(
                 content()
-                    .frame(minWidth: contentMinWidth, maxWidth: .infinity, maxHeight: .infinity)
+                    .environmentObject(model)
+                    .environmentObject(navigation)
+                    .environment(\.locale, locale)
+                    .paperCodexTypographyScale()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .clipped()
-            }
+            )
         }
         .transaction { transaction in
             transaction.animation = nil
@@ -67,122 +55,161 @@ struct SidebarSplitLayout<Sidebar: View, Content: View>: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .background(Color(nsColor: .windowBackgroundColor))
     }
-
-    private func clampedSidebarWidth(_ width: CGFloat, totalWidth: CGFloat, handleWidth: CGFloat) -> CGFloat {
-        let maxWidth = max(220, min(420, totalWidth - minContentWidth - handleWidth))
-        return min(max(width, 220), maxWidth)
-    }
 }
 
-struct WindowSafeSplitterHandle: NSViewRepresentable {
-    var onDragChanged: (CGFloat) -> Void
-    var onDragEnded: () -> Void
+private struct AppKitSidebarSplitView: NSViewRepresentable {
+    var sidebarWidth: CGFloat
+    var minContentWidth: CGFloat
+    var onSidebarWidthChange: (CGFloat) -> Void
+    var sidebar: () -> AnyView
+    var content: () -> AnyView
 
-    func makeNSView(context: Context) -> SplitterHandleView {
-        let view = SplitterHandleView()
-        view.onDragChanged = onDragChanged
-        view.onDragEnded = onDragEnded
+    func makeNSView(context: Context) -> SidebarSplitContainerView {
+        let view = SidebarSplitContainerView()
+        view.update(
+            sidebar: sidebar(),
+            content: content(),
+            sidebarWidth: sidebarWidth,
+            minContentWidth: minContentWidth,
+            onSidebarWidthChange: onSidebarWidthChange
+        )
         return view
     }
 
-    func updateNSView(_ view: SplitterHandleView, context: Context) {
-        view.onDragChanged = onDragChanged
-        view.onDragEnded = onDragEnded
+    func updateNSView(_ view: SidebarSplitContainerView, context: Context) {
+        view.update(
+            sidebar: sidebar(),
+            content: content(),
+            sidebarWidth: sidebarWidth,
+            minContentWidth: minContentWidth,
+            onSidebarWidthChange: onSidebarWidthChange
+        )
+    }
+}
+
+private final class SidebarSplitContainerView: NSView, NSSplitViewDelegate {
+    private let splitView = NSSplitView()
+    private let sidebarHost = NSHostingView(rootView: AnyView(EmptyView()))
+    private let contentHost = NSHostingView(rootView: AnyView(EmptyView()))
+    private var preferredSidebarWidth: CGFloat = 280
+    private var minContentWidth: CGFloat = 720
+    private var onSidebarWidthChange: (CGFloat) -> Void = { _ in }
+    private var lastReportedSidebarWidth: CGFloat?
+    private var isApplyingSidebarWidth = false
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setupSplitView()
     }
 
-    final class SplitterHandleView: NSView {
-        var onDragChanged: (CGFloat) -> Void = { _ in }
-        var onDragEnded: () -> Void = {}
-        private var dragStartWindowX: CGFloat?
-        private var isHovering = false
-        private var isDragging = false
-        private var trackingArea: NSTrackingArea?
+    required init?(coder: NSCoder) {
+        nil
+    }
 
-        override var mouseDownCanMoveWindow: Bool {
-            false
+    override var mouseDownCanMoveWindow: Bool {
+        false
+    }
+
+    override func layout() {
+        super.layout()
+        applySidebarWidthIfNeeded()
+    }
+
+    func update(
+        sidebar: AnyView,
+        content: AnyView,
+        sidebarWidth: CGFloat,
+        minContentWidth: CGFloat,
+        onSidebarWidthChange: @escaping (CGFloat) -> Void
+    ) {
+        sidebarHost.rootView = sidebar
+        contentHost.rootView = content
+        preferredSidebarWidth = sidebarWidth
+        self.minContentWidth = minContentWidth
+        self.onSidebarWidthChange = onSidebarWidthChange
+        applySidebarWidthIfNeeded()
+    }
+
+    private func setupSplitView() {
+        splitView.isVertical = true
+        splitView.dividerStyle = .thin
+        splitView.delegate = self
+        splitView.translatesAutoresizingMaskIntoConstraints = false
+        splitView.autosaveName = nil
+
+        sidebarHost.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+        sidebarHost.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+        contentHost.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        contentHost.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        addSubview(splitView)
+        splitView.addArrangedSubview(sidebarHost)
+        splitView.addArrangedSubview(contentHost)
+
+        NSLayoutConstraint.activate([
+            splitView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            splitView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            splitView.topAnchor.constraint(equalTo: topAnchor),
+            splitView.bottomAnchor.constraint(equalTo: bottomAnchor)
+        ])
+    }
+
+    private func applySidebarWidthIfNeeded() {
+        guard splitView.arrangedSubviews.count == 2, splitView.bounds.width > 0 else {
+            return
+        }
+        let targetWidth = clampedSidebarWidth(preferredSidebarWidth)
+        guard abs(sidebarHost.frame.width - targetWidth) > 0.5 || contentHost.frame.width <= 0 else {
+            return
         }
 
-        override var acceptsFirstResponder: Bool {
-            true
-        }
+        isApplyingSidebarWidth = true
+        splitView.setPosition(targetWidth, ofDividerAt: 0)
+        isApplyingSidebarWidth = false
+    }
 
-        override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
-            true
-        }
+    func splitView(_ splitView: NSSplitView, canCollapseSubview subview: NSView) -> Bool {
+        false
+    }
 
-        override func updateTrackingAreas() {
-            super.updateTrackingAreas()
-            if let trackingArea {
-                removeTrackingArea(trackingArea)
-            }
-            let area = NSTrackingArea(
-                rect: bounds,
-                options: [.activeInActiveApp, .mouseEnteredAndExited, .inVisibleRect],
-                owner: self,
-                userInfo: nil
-            )
-            addTrackingArea(area)
-            trackingArea = area
-        }
+    func splitView(
+        _ splitView: NSSplitView,
+        constrainMinCoordinate proposedMinimumPosition: CGFloat,
+        ofSubviewAt dividerIndex: Int
+    ) -> CGFloat {
+        sidebarMinimumWidth
+    }
 
-        override func resetCursorRects() {
-            addCursorRect(bounds, cursor: .resizeLeftRight)
-        }
+    func splitView(
+        _ splitView: NSSplitView,
+        constrainMaxCoordinate proposedMaximumPosition: CGFloat,
+        ofSubviewAt dividerIndex: Int
+    ) -> CGFloat {
+        maxSidebarWidth()
+    }
 
-        override func mouseEntered(with event: NSEvent) {
-            isHovering = true
-            needsDisplay = true
-            NSCursor.resizeLeftRight.set()
+    func splitViewDidResizeSubviews(_ notification: Notification) {
+        guard !isApplyingSidebarWidth, splitView.bounds.width > 0 else {
+            return
         }
-
-        override func mouseExited(with event: NSEvent) {
-            isHovering = false
-            needsDisplay = true
-            NSCursor.arrow.set()
+        let width = clampedSidebarWidth(sidebarHost.frame.width)
+        preferredSidebarWidth = width
+        guard abs((lastReportedSidebarWidth ?? -1) - width) > 0.5 else {
+            return
         }
+        lastReportedSidebarWidth = width
+        onSidebarWidthChange(width)
+    }
 
-        override func mouseDown(with event: NSEvent) {
-            dragStartWindowX = event.locationInWindow.x
-            isDragging = true
-            window?.makeFirstResponder(self)
-            NSCursor.resizeLeftRight.set()
-            needsDisplay = true
+    private func clampedSidebarWidth(_ width: CGFloat) -> CGFloat {
+        min(max(width, sidebarMinimumWidth), maxSidebarWidth())
+    }
+
+    private func maxSidebarWidth() -> CGFloat {
+        guard splitView.bounds.width > 0 else {
+            return sidebarMaximumWidth
         }
-
-        override func mouseDragged(with event: NSEvent) {
-            guard let dragStartWindowX else {
-                return
-            }
-            onDragChanged(event.locationInWindow.x - dragStartWindowX)
-        }
-
-        override func mouseUp(with event: NSEvent) {
-            dragStartWindowX = nil
-            isDragging = false
-            onDragEnded()
-            needsDisplay = true
-        }
-
-        override func draw(_ dirtyRect: NSRect) {
-            super.draw(dirtyRect)
-            let isActive = isHovering || isDragging
-            NSColor.separatorColor.withAlphaComponent(isActive ? 0.84 : 0.55).setFill()
-            let separator = NSRect(x: bounds.midX - 2.5, y: bounds.minY, width: 5, height: bounds.height)
-            separator.fill()
-
-            guard isActive else {
-                return
-            }
-            NSColor.controlAccentColor.withAlphaComponent(isDragging ? 0.92 : 0.72).setFill()
-            let accentWidth: CGFloat = isDragging ? 4 : 3
-            let accentHeight: CGFloat = isDragging ? 68 : 52
-            let accent = NSRect(
-                x: bounds.midX - accentWidth / 2,
-                y: bounds.midY - accentHeight / 2,
-                width: accentWidth,
-                height: accentHeight
-            )
-            NSBezierPath(roundedRect: accent, xRadius: accentWidth / 2, yRadius: accentWidth / 2).fill()
-        }
+        let contentAwareMaximum = splitView.bounds.width - minContentWidth - splitView.dividerThickness
+        return max(sidebarMinimumWidth, min(sidebarMaximumWidth, contentAwareMaximum))
     }
 }
