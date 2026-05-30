@@ -12,12 +12,16 @@ struct ReaderView: View {
     @State private var pdfSplitOpenGeneration = 0
 
     var body: some View {
-        HSplitView {
-            pdfPane
-                .frame(minWidth: ReaderPDFLayout.minimumPaneWidth, maxWidth: .infinity)
-            ChatView()
-                .frame(minWidth: 330, idealWidth: 420, maxWidth: .infinity)
-        }
+        ReaderSplitView(
+            {
+                pdfPane
+                    .frame(minWidth: ReaderPDFLayout.minimumPaneWidth, maxWidth: .infinity)
+            },
+            secondary: {
+                ChatView()
+                    .frame(minWidth: ReaderPDFLayout.minimumChatPaneWidth, idealWidth: 420, maxWidth: .infinity)
+            }
+        )
         .background(Color(nsColor: .windowBackgroundColor))
         .onChange(of: model.selectedPaper?.id) { _, _ in
             resetPDFSplit()
@@ -78,16 +82,17 @@ struct ReaderView: View {
     private func pdfContent(for paper: Paper) -> some View {
         Group {
             if isPDFSplitVisible {
-                VSplitView {
-                    primaryPDFView(for: paper)
-                        .frame(minHeight: ReaderPDFLayout.minimumSplitPaneHeight, maxHeight: .infinity)
-                    secondaryPDFView(for: paper)
-                        .frame(minHeight: ReaderPDFLayout.minimumSplitPaneHeight, maxHeight: .infinity)
-                }
-                .transition(.asymmetric(
-                    insertion: .move(edge: .bottom).combined(with: .opacity),
-                    removal: .opacity
-                ))
+                ReaderPDFSplitView(
+                    {
+                        primaryPDFView(for: paper)
+                            .frame(minHeight: ReaderPDFLayout.minimumSplitPaneHeight, maxHeight: .infinity)
+                    },
+                    secondary: {
+                        secondaryPDFView(for: paper)
+                            .frame(minHeight: ReaderPDFLayout.minimumSplitPaneHeight, maxHeight: .infinity)
+                    }
+                )
+                .transition(.opacity)
             } else {
                 primaryPDFView(for: paper)
                     .transition(.opacity)
@@ -239,6 +244,7 @@ struct ReaderView: View {
 
 private enum ReaderPDFLayout {
     static let minimumPaneWidth: CGFloat = 360
+    static let minimumChatPaneWidth: CGFloat = 330
     static let minimumSplitPaneHeight: CGFloat = 220
     static let splitContentMountDelay: TimeInterval = 0.20
 }

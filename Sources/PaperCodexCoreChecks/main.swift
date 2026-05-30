@@ -1386,6 +1386,7 @@ func runUILayoutSourceChecks() throws {
     let saveToLibrarySource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/SaveToLibrarySheet.swift"))
     let readerViewSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/ReaderView.swift"))
     let readerToolbarSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/ReaderToolbarView.swift"))
+    let readerSplitSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/ReaderSplitView.swift"))
     let readerSessionToolbarSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/ReaderSessionToolbarView.swift"))
     let chatComposerNativeSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/ChatComposerNativePanelView.swift"))
     let sessionNotesNativeSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/SessionNotesNativePanelView.swift"))
@@ -2753,15 +2754,23 @@ func runUILayoutSourceChecks() throws {
         "reader should provide explicit native PDF toolbar controls"
     )
     try check(
-        readerViewSource.contains("VSplitView") && readerViewSource.contains("isPDFSplitVisible") && readerViewSource.contains("pdfSplitTarget"),
-        "reader should support a top-bottom PDF split view for simultaneous source and link-target reading"
+        readerViewSource.contains("ReaderSplitView(")
+            && readerViewSource.contains("ReaderPDFSplitView(")
+            && readerSplitSource.contains("NSSplitView")
+            && readerSplitSource.contains("ReaderSplitContainerView")
+            && readerSplitSource.contains("ReaderPDFSplitContainerView")
+            && !readerViewSource.contains("HSplitView")
+            && !readerViewSource.contains("VSplitView")
+            && readerViewSource.contains("isPDFSplitVisible")
+            && readerViewSource.contains("pdfSplitTarget"),
+        "reader should use native AppKit split views for main reading/chat and top-bottom PDF link preview"
     )
     try check(
         readerToolbarSource.contains("keyEquivalent = \"\\\\\"")
             && readerToolbarSource.contains("keyEquivalentModifierMask = [.command, .shift]")
             && readerViewSource.contains("PaperCodexMotion.perform(PaperCodexMotion.pdfSplitOpen")
             && readerViewSource.contains(".animation(PaperCodexMotion.accessible(PaperCodexMotion.pdfSplitOpen")
-            && readerViewSource.contains("insertion: .move(edge: .bottom).combined(with: .opacity)"),
+            && readerViewSource.contains("ReaderPDFSplitView("),
         "reader PDF split should have a direct keyboard shortcut and animated toggle feedback"
     )
     try check(
