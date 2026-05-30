@@ -35,6 +35,12 @@ enum PaperCodexHitTarget {
     static let toolbarIconSize: CGFloat = 30
     static let toolbarButtonVerticalPadding: CGFloat = PaperCodexSpacing.controlVertical
     static let toolbarButtonHorizontalPadding: CGFloat = PaperCodexSpacing.controlHorizontal
+    static let toolbarButtonHeight: CGFloat = 30
+    static let toolbarButtonSymbolSize: CGFloat = 15
+    static let toolbarButtonSymbolWidth: CGFloat = 16
+    static let toolbarButtonSymbolTextSpacing: CGFloat = 6
+    static let toolbarButtonFontSize: CGFloat = 12.5
+    static let toolbarIconSymbolSize: CGFloat = 12
     static let chromeHomeTabWidth: CGFloat = 44
     static let chromeTabHeight: CGFloat = 34
     static let chromeCloseButtonSize: CGFloat = 22
