@@ -1,3 +1,4 @@
+import AppKit
 import PaperCodexCore
 import SwiftUI
 
@@ -153,21 +154,26 @@ struct SettingsView: View {
             TextField("Categories, comma separated", text: $draftArxivCategories)
                 .textFieldStyle(.roundedBorder)
             HStack {
-                SettingsActionButton(kind: .primary, disabled: !isArxivFeedDirty) {
+                SettingsActionButton(
+                    title: isArxivFeedDirty ? "Save Categories" : "Saved",
+                    systemImage: isArxivFeedDirty ? "checkmark" : "checkmark.circle",
+                    kind: .primary,
+                    disabled: !isArxivFeedDirty
+                ) {
                     model.setLocalArxivCategories(splitDraftList(draftArxivCategories))
                     Task {
                         await model.refreshArxivDatesAndFeed()
                     }
-                } label: {
-                    Label(isArxivFeedDirty ? "Save Categories" : "Saved", systemImage: isArxivFeedDirty ? "checkmark" : "checkmark.circle")
                 }
 
-                SettingsActionButton(disabled: model.isRefreshingArxivDates) {
+                SettingsActionButton(
+                    title: model.isRefreshingArxivDates ? "Refreshing" : "Refresh arXiv",
+                    systemImage: "arrow.clockwise",
+                    disabled: model.isRefreshingArxivDates
+                ) {
                     Task {
                         await model.refreshArxivDatesAndFeed()
                     }
-                } label: {
-                    Label(model.isRefreshingArxivDates ? "Refreshing" : "Refresh arXiv", systemImage: "arrow.clockwise")
                 }
 
                 Spacer()
@@ -227,22 +233,23 @@ struct SettingsView: View {
             )
 
             HStack {
-                SettingsActionButton(kind: .primary, disabled: !isChatAppearanceDirty) {
+                SettingsActionButton(
+                    title: isChatAppearanceDirty ? "Save Chat Appearance" : "Saved",
+                    systemImage: isChatAppearanceDirty ? "checkmark" : "checkmark.circle",
+                    kind: .primary,
+                    disabled: !isChatAppearanceDirty
+                ) {
                     model.setChatAppearance(
                         messageFontSize: draftChatMessageFontSize,
                         composerFontSize: draftChatComposerFontSize,
                         fontFamily: draftChatFontFamily
                     )
                     syncLocalDrafts()
-                } label: {
-                    Label(isChatAppearanceDirty ? "Save Chat Appearance" : "Saved", systemImage: isChatAppearanceDirty ? "checkmark" : "checkmark.circle")
                 }
 
-                SettingsActionButton {
+                SettingsActionButton(title: "Default", systemImage: "arrow.counterclockwise") {
                     model.resetChatAppearance()
                     syncLocalDrafts()
-                } label: {
-                    Label("Default", systemImage: "arrow.counterclockwise")
                 }
 
                 Spacer()
@@ -282,14 +289,17 @@ struct SettingsView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 8))
             }
             HStack {
-                SettingsActionButton(kind: .primary, disabled: !isRankingDirty) {
+                SettingsActionButton(
+                    title: isRankingDirty ? "Save Ranking" : "Saved",
+                    systemImage: isRankingDirty ? "line.3.horizontal.decrease.circle" : "checkmark.circle",
+                    kind: .primary,
+                    disabled: !isRankingDirty
+                ) {
                     model.setLocalTagFilters(
                         whitelist: splitDraftList(draftWhitelistTags),
                         blacklist: splitDraftList(draftBlacklistTags)
                     )
                     model.setLocalSimilarityCategoryIDs(selectedSimilarityCategoryIDsInOrder)
-                } label: {
-                    Label(isRankingDirty ? "Save Ranking" : "Saved", systemImage: isRankingDirty ? "line.3.horizontal.decrease.circle" : "checkmark.circle")
                 }
 
                 Spacer()
@@ -320,13 +330,16 @@ struct SettingsView: View {
                 .toggleStyle(.checkbox)
             Toggle("Auto-enrich when saving to Library", isOn: $draftAutoEnrichOnSave)
                 .toggleStyle(.checkbox)
-            SettingsActionButton(kind: .primary, disabled: !isEnrichmentDirty) {
+            SettingsActionButton(
+                title: isEnrichmentDirty ? "Save Enrichment" : "Saved",
+                systemImage: isEnrichmentDirty ? "checkmark" : "checkmark.circle",
+                kind: .primary,
+                disabled: !isEnrichmentDirty
+            ) {
                 model.setLocalEnrichmentPreferences(
                     autoOpen: draftAutoEnrichOnOpen,
                     autoSave: draftAutoEnrichOnSave
                 )
-            } label: {
-                Label(isEnrichmentDirty ? "Save Enrichment" : "Saved", systemImage: isEnrichmentDirty ? "checkmark" : "checkmark.circle")
             }
         }
     }
@@ -362,22 +375,27 @@ struct SettingsView: View {
             )
 
             HStack {
-                SettingsActionButton(kind: .primary, disabled: !isProcessingDirty) {
+                SettingsActionButton(
+                    title: isProcessingDirty ? "Save Processing" : "Saved",
+                    systemImage: isProcessingDirty ? "checkmark" : "checkmark.circle",
+                    kind: .primary,
+                    disabled: !isProcessingDirty
+                ) {
                     model.setDiscoverCodexSettings(
                         modelOverride: draftDiscoverCodexModel,
                         concurrency: draftDiscoverCodexConcurrency,
                         reasoningEffort: draftDiscoverCodexReasoningEffort
                     )
-                } label: {
-                    Label(isProcessingDirty ? "Save Processing" : "Saved", systemImage: isProcessingDirty ? "checkmark" : "checkmark.circle")
                 }
 
-                SettingsActionButton(disabled: model.isRefreshingCodexModels) {
+                SettingsActionButton(
+                    title: model.isRefreshingCodexModels ? "Refreshing" : "Refresh Models",
+                    systemImage: "arrow.clockwise",
+                    disabled: model.isRefreshingCodexModels
+                ) {
                     Task {
                         await model.refreshAvailableCodexModels()
                     }
-                } label: {
-                    Label(model.isRefreshingCodexModels ? "Refreshing" : "Refresh Models", systemImage: "arrow.clockwise")
                 }
 
                 Spacer()
@@ -407,19 +425,15 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
                 HStack {
-                    SettingsActionButton(kind: .primary) {
+                    SettingsActionButton(title: "Edit Prompt", systemImage: "pencil", kind: .primary) {
                         draftCodexSystemPrompt = model.codexSystemPrompt
                         isEditingCodexSystemPrompt = true
-                    } label: {
-                        Label("Edit Prompt", systemImage: "pencil")
                     }
                     .help("Edit System Prompt")
 
-                    SettingsActionButton {
+                    SettingsActionButton(title: "Default", systemImage: "arrow.counterclockwise") {
                         model.resetCodexSystemPrompt()
                         draftCodexSystemPrompt = model.codexSystemPrompt
-                    } label: {
-                        Label("Default", systemImage: "arrow.counterclockwise")
                     }
                     .help("Restore Default System Prompt")
 
@@ -464,12 +478,14 @@ struct SettingsView: View {
 
                 Spacer()
 
-                SettingsActionButton(disabled: model.isInstallingCodexPlugin || !model.paperCodexMCPServerReady) {
+                SettingsActionButton(
+                    title: model.isInstallingCodexPlugin ? "Installing" : "Install / Update",
+                    systemImage: "puzzlepiece.extension",
+                    disabled: model.isInstallingCodexPlugin || !model.paperCodexMCPServerReady
+                ) {
                     Task {
                         await model.installOrUpdateCodexPlugin()
                     }
-                } label: {
-                    Label(model.isInstallingCodexPlugin ? "Installing" : "Install / Update", systemImage: "puzzlepiece.extension")
                 }
                 .help("Install or update the Episteme plugin in local Codex")
             }
@@ -501,12 +517,14 @@ struct SettingsView: View {
 
                 Spacer()
 
-                SettingsActionButton(disabled: model.isRefreshingAgentRuntimeDiagnostics) {
+                SettingsActionButton(
+                    title: model.isRefreshingAgentRuntimeDiagnostics ? "Checking" : "Check Runtimes",
+                    systemImage: "arrow.clockwise",
+                    disabled: model.isRefreshingAgentRuntimeDiagnostics
+                ) {
                     Task {
                         await model.refreshAgentRuntimeDiagnostics()
                     }
-                } label: {
-                    Label(model.isRefreshingAgentRuntimeDiagnostics ? "Checking" : "Check Runtimes", systemImage: "arrow.clockwise")
                 }
             }
 
@@ -616,18 +634,25 @@ struct SettingsView: View {
             TextField("Model", text: $draftEmbeddingModel)
                 .textFieldStyle(.roundedBorder)
             HStack {
-                SettingsActionButton(kind: .primary, disabled: !isEmbeddingDirty) {
+                SettingsActionButton(
+                    title: isEmbeddingDirty ? "Save Embedding" : "Saved",
+                    systemImage: isEmbeddingDirty ? "key" : "checkmark.circle",
+                    kind: .primary,
+                    disabled: !isEmbeddingDirty
+                ) {
                     model.setEmbeddingProviderSettings(
                         enabled: draftEmbeddingEnabled,
                         baseURL: draftEmbeddingBaseURL,
                         apiKey: draftEmbeddingAPIKey,
                         model: draftEmbeddingModel
                     )
-                } label: {
-                    Label(isEmbeddingDirty ? "Save Embedding" : "Saved", systemImage: isEmbeddingDirty ? "key" : "checkmark.circle")
                 }
 
-                SettingsActionButton(disabled: model.isTestingEmbeddingProvider) {
+                SettingsActionButton(
+                    title: model.isTestingEmbeddingProvider ? "Testing" : "Test",
+                    systemImage: "bolt.horizontal.circle",
+                    disabled: model.isTestingEmbeddingProvider
+                ) {
                     Task {
                         await model.testEmbeddingProvider(
                             baseURL: draftEmbeddingBaseURL,
@@ -635,8 +660,6 @@ struct SettingsView: View {
                             model: draftEmbeddingModel
                         )
                     }
-                } label: {
-                    Label(model.isTestingEmbeddingProvider ? "Testing" : "Test", systemImage: "bolt.horizontal.circle")
                 }
 
                 Spacer()
@@ -692,14 +715,16 @@ struct SettingsView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                     .accessibilityLabel("New quick prompt editor")
                     .accessibilityValue("\(newPromptContent.count) characters")
-                SettingsActionButton(disabled: newPromptTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || newPromptContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) {
+                SettingsActionButton(
+                    title: "Add Prompt",
+                    systemImage: "plus",
+                    disabled: newPromptTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || newPromptContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ) {
                     model.addQuickPrompt(title: newPromptTitle, content: newPromptContent)
                     if model.errorMessage == nil {
                         newPromptTitle = ""
                         newPromptContent = ""
                     }
-                } label: {
-                    Label("Add Prompt", systemImage: "plus")
                 }
             }
         }
@@ -733,16 +758,12 @@ struct SettingsView: View {
                     .foregroundStyle(.tertiary)
             }
             HStack {
-                SettingsActionButton(kind: .destructive, role: .destructive) {
+                SettingsActionButton(title: "Clear arXiv Cache", systemImage: "trash", kind: .destructive, role: .destructive) {
                     isConfirmingClearCache = true
-                } label: {
-                    Label("Clear arXiv Cache", systemImage: "trash")
                 }
 
-                SettingsActionButton {
+                SettingsActionButton(title: "Refresh Size", systemImage: "arrow.clockwise") {
                     model.refreshCacheStorageSummary()
-                } label: {
-                    Label("Refresh Size", systemImage: "arrow.clockwise")
                 }
 
                 Text("Clears feed JSON, temporary PDFs, and unsaved opened papers.")
@@ -795,24 +816,23 @@ struct SettingsView: View {
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
                 Spacer()
-                SettingsActionButton {
+                SettingsActionButton(title: "Cancel") {
                     draftCodexSystemPrompt = model.codexSystemPrompt
                     isEditingCodexSystemPrompt = false
-                } label: {
-                    Text("Cancel")
                 }
-                SettingsActionButton {
+                SettingsActionButton(title: "Default", systemImage: "arrow.counterclockwise") {
                     model.resetCodexSystemPrompt()
                     draftCodexSystemPrompt = model.codexSystemPrompt
                     isEditingCodexSystemPrompt = false
-                } label: {
-                    Label("Default", systemImage: "arrow.counterclockwise")
                 }
-                SettingsActionButton(kind: .primary, disabled: draftCodexSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) {
+                SettingsActionButton(
+                    title: "Save",
+                    systemImage: "checkmark",
+                    kind: .primary,
+                    disabled: draftCodexSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ) {
                     model.setCodexSystemPrompt(draftCodexSystemPrompt)
                     isEditingCodexSystemPrompt = false
-                } label: {
-                    Label("Save", systemImage: "checkmark")
                 }
             }
         }
@@ -836,16 +856,16 @@ struct SettingsView: View {
                 .accessibilityValue("\(editingPromptContent.count) characters")
             HStack {
                 Spacer()
-                SettingsActionButton {
+                SettingsActionButton(title: "Cancel") {
                     editingPrompt = nil
-                } label: {
-                    Text("Cancel")
                 }
-                SettingsActionButton(kind: .primary, disabled: editingPromptTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || editingPromptContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) {
+                SettingsActionButton(
+                    title: "Save",
+                    kind: .primary,
+                    disabled: editingPromptTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || editingPromptContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ) {
                     model.updateQuickPrompt(prompt, title: editingPromptTitle, content: editingPromptContent)
                     editingPrompt = nil
-                } label: {
-                    Text("Save")
                 }
             }
         }
@@ -1062,111 +1082,280 @@ private struct SettingsSelectableRowButtonStyle: ButtonStyle {
     }
 }
 
-private struct SettingsActionButton<Label: View>: View {
-    @State private var isHovering = false
+private struct SettingsActionButton: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    var title: String
+    var systemImage: String?
     var kind: SettingsActionButtonKind = .secondary
     var disabled = false
     var role: ButtonRole?
     var action: () -> Void
-    @ViewBuilder var label: () -> Label
 
     var body: some View {
-        Button(role: role, action: action) {
-            label()
-        }
-        .buttonStyle(SettingsActionButtonStyle(kind: kind, disabled: disabled, isHovering: isHovering))
-        .disabled(disabled)
-        .onHover { hovering in
-            withAnimation(PaperCodexMotion.hover) {
-                isHovering = hovering
-            }
-        }
+        NativeSettingsActionButton(
+            title: title,
+            systemImage: systemImage,
+            kind: kind,
+            disabled: disabled,
+            role: role,
+            reduceMotion: reduceMotion,
+            action: action
+        )
+        .fixedSize(horizontal: true, vertical: true)
+        .help(title)
     }
 }
 
-private struct SettingsActionButtonStyle: ButtonStyle {
+private struct NativeSettingsActionButton: NSViewRepresentable {
+    var title: String
+    var systemImage: String?
     var kind: SettingsActionButtonKind
     var disabled: Bool
-    var isHovering: Bool
+    var role: ButtonRole?
+    var reduceMotion: Bool
+    var action: () -> Void
 
-    func makeBody(configuration: Configuration) -> some View {
-        let isPressed = configuration.isPressed && !disabled
-        configuration.label
-            .font(.paperCodexSystem(size: 12.5, weight: .semibold))
-            .lineLimit(1)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .foregroundStyle(foregroundColor(isPressed: isPressed))
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(backgroundColor(isPressed: isPressed))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(borderColor(isPressed: isPressed), lineWidth: 1)
-            )
-            .shadow(color: shadowColor(isPressed: isPressed), radius: isPressed ? 3 : 7, y: isPressed ? 1 : 3)
-            .scaleEffect(buttonScale(isPressed: isPressed), anchor: .center)
-            .animation(PaperCodexMotion.press, value: configuration.isPressed)
-            .animation(PaperCodexMotion.hover, value: isHovering)
-            .animation(PaperCodexMotion.hover, value: disabled)
+    func makeNSView(context: Context) -> NativeSettingsActionButtonView {
+        let view = NativeSettingsActionButtonView()
+        view.apply(
+            title: title,
+            systemImage: systemImage,
+            kind: kind,
+            disabled: disabled,
+            role: role,
+            reduceMotion: reduceMotion,
+            action: action
+        )
+        return view
     }
 
-    private func foregroundColor(isPressed: Bool) -> Color {
-        if disabled {
-            return Color.secondary.opacity(0.48)
-        }
-        switch kind {
-        case .primary:
-            return .white
-        case .secondary, .destructive:
-            return isPressed || isHovering ? kind.tint : Color.primary.opacity(0.82)
-        }
+    func updateNSView(_ view: NativeSettingsActionButtonView, context: Context) {
+        view.apply(
+            title: title,
+            systemImage: systemImage,
+            kind: kind,
+            disabled: disabled,
+            role: role,
+            reduceMotion: reduceMotion,
+            action: action
+        )
+    }
+}
+
+private final class NativeSettingsActionButtonView: NSButton {
+    private enum Metrics {
+        static let height: CGFloat = max(
+            PaperCodexHitTarget.toolbarButtonHeight,
+            PaperCodexHitTarget.toolbarButtonFontSize + PaperCodexHitTarget.toolbarButtonVerticalPadding * 2
+        )
+        static let iconSize: CGFloat = PaperCodexHitTarget.toolbarButtonSymbolSize
+        static let iconWidth: CGFloat = PaperCodexHitTarget.toolbarButtonSymbolWidth
+        static let iconTextSpacing: CGFloat = PaperCodexHitTarget.toolbarButtonSymbolTextSpacing
+        static let horizontalPadding: CGFloat = PaperCodexHitTarget.toolbarButtonHorizontalPadding
+        static let fontSize: CGFloat = PaperCodexHitTarget.toolbarButtonFontSize
+        static let cornerRadius: CGFloat = PaperCodexCornerRadius.control
     }
 
-    private func backgroundColor(isPressed: Bool) -> Color {
-        if disabled {
-            return Color(nsColor: .controlBackgroundColor).opacity(0.56)
+    private let iconView = NSImageView()
+    private let titleLabel = NSTextField(labelWithString: "")
+    private var titleLeadingIconConstraint: NSLayoutConstraint?
+    private var titleLeadingButtonConstraint: NSLayoutConstraint?
+    private var trackingArea: NSTrackingArea?
+    private var pressHandler: () -> Void = {}
+    private var kind = SettingsActionButtonKind.secondary
+    private var hasIcon = false
+    private var isHovering = false
+    private var isPressed = false
+    private var isDisabled = false
+    private var reduceMotion = false
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override var isFlipped: Bool {
+        true
+    }
+
+    override var intrinsicContentSize: NSSize {
+        let iconWidth = hasIcon ? Metrics.iconWidth + Metrics.iconTextSpacing : 0
+        let width = Metrics.horizontalPadding * 2 + iconWidth + titleLabel.intrinsicContentSize.width
+        return NSSize(width: ceil(width), height: Metrics.height)
+    }
+
+    func apply(
+        title: String,
+        systemImage: String?,
+        kind: SettingsActionButtonKind,
+        disabled: Bool,
+        role: ButtonRole?,
+        reduceMotion: Bool,
+        action: @escaping () -> Void
+    ) {
+        let localizedTitle = NSLocalizedString(title, comment: "")
+        pressHandler = action
+        self.kind = role == .destructive ? .destructive : kind
+        isDisabled = disabled
+        self.reduceMotion = reduceMotion
+        isEnabled = !disabled
+        hasIcon = systemImage != nil
+        titleLabel.stringValue = localizedTitle
+        iconView.image = systemImage.flatMap { NSImage(systemSymbolName: $0, accessibilityDescription: localizedTitle) }
+        iconView.isHidden = systemImage == nil
+        titleLeadingIconConstraint?.isActive = systemImage != nil
+        titleLeadingButtonConstraint?.isActive = systemImage == nil
+        toolTip = localizedTitle
+        setAccessibilityLabel(localizedTitle)
+        invalidateIntrinsicContentSize()
+        updateAppearance()
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea {
+            removeTrackingArea(trackingArea)
         }
-        switch kind {
-        case .primary:
-            return Color.accentColor.opacity(isPressed ? 0.82 : (isHovering ? 0.96 : 0.90))
-        case .secondary, .destructive:
-            if isPressed {
-                return kind.tint.opacity(0.18)
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.activeInKeyWindow, .mouseEnteredAndExited, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isHovering = true
+        updateAppearance()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHovering = false
+        updateAppearance()
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard !isDisabled else {
+            return
+        }
+        setPressed(true)
+        super.mouseDown(with: event)
+        setPressed(false)
+    }
+
+    private func setup() {
+        translatesAutoresizingMaskIntoConstraints = false
+        title = ""
+        isBordered = false
+        bezelStyle = .regularSquare
+        imagePosition = .noImage
+        focusRingType = .none
+        setButtonType(.momentaryChange)
+        target = self
+        action = #selector(performPress)
+        setAccessibilityElement(true)
+        setAccessibilityRole(.button)
+        wantsLayer = true
+        layer?.cornerRadius = Metrics.cornerRadius
+        layer?.masksToBounds = false
+
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+        iconView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: Metrics.iconSize, weight: .semibold)
+        iconView.imageScaling = .scaleProportionallyDown
+
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        titleLabel.font = .systemFont(ofSize: Metrics.fontSize, weight: .semibold)
+        titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.maximumNumberOfLines = 1
+        titleLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        [iconView, titleLabel].forEach(addSubview(_:))
+        let leadingIconConstraint = titleLabel.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: Metrics.iconTextSpacing)
+        let leadingButtonConstraint = titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Metrics.horizontalPadding)
+        titleLeadingIconConstraint = leadingIconConstraint
+        titleLeadingButtonConstraint = leadingButtonConstraint
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: Metrics.height),
+            iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Metrics.horizontalPadding),
+            iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            iconView.widthAnchor.constraint(equalToConstant: Metrics.iconWidth),
+            iconView.heightAnchor.constraint(equalToConstant: Metrics.iconWidth),
+            leadingIconConstraint,
+            titleLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Metrics.horizontalPadding),
+            titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor)
+        ])
+        updateAppearance()
+    }
+
+    @objc private func performPress() {
+        guard !isDisabled else {
+            return
+        }
+        pressHandler()
+    }
+
+    private func setPressed(_ pressed: Bool) {
+        isPressed = pressed
+        updateAppearance()
+    }
+
+    private func updateAppearance() {
+        let tint = NSColor(kind.tint)
+        let foreground: NSColor
+        let background: NSColor
+        let border: NSColor
+        let shadowOpacity: Float
+
+        if isDisabled {
+            foreground = .secondaryLabelColor.withAlphaComponent(0.48)
+            background = .controlBackgroundColor.withAlphaComponent(0.56)
+            border = .black.withAlphaComponent(0.06)
+            shadowOpacity = 0
+        } else {
+            switch kind {
+            case .primary:
+                foreground = .white
+                background = tint.withAlphaComponent(isPressed ? 0.82 : (isHovering ? 0.96 : 0.90))
+                border = tint.withAlphaComponent(isPressed ? 0.62 : (isHovering ? 0.48 : 0.34))
+                shadowOpacity = isPressed ? 0.10 : (isHovering ? 0.16 : 0)
+            case .secondary, .destructive:
+                foreground = isPressed || isHovering ? tint : .labelColor.withAlphaComponent(0.82)
+                background = isPressed ? tint.withAlphaComponent(0.18) : (isHovering ? tint.withAlphaComponent(0.12) : .controlBackgroundColor)
+                border = isPressed ? tint.withAlphaComponent(0.54) : (isHovering ? tint.withAlphaComponent(0.38) : .black.withAlphaComponent(0.10))
+                shadowOpacity = isPressed ? 0.10 : (isHovering ? 0.16 : 0)
             }
-            return isHovering ? kind.tint.opacity(0.12) : Color(nsColor: .controlBackgroundColor)
         }
-    }
 
-    private func borderColor(isPressed: Bool) -> Color {
-        if disabled {
-            return Color.black.opacity(0.06)
-        }
-        switch kind {
-        case .primary:
-            return Color.accentColor.opacity(isPressed ? 0.62 : (isHovering ? 0.48 : 0.34))
-        case .secondary, .destructive:
-            if isPressed {
-                return kind.tint.opacity(0.54)
-            }
-            return isHovering ? kind.tint.opacity(0.38) : Color.black.opacity(0.10)
-        }
-    }
+        iconView.contentTintColor = foreground
+        titleLabel.textColor = foreground
+        layer?.backgroundColor = background.cgColor
+        layer?.borderWidth = 1
+        layer?.borderColor = border.cgColor
+        layer?.shadowColor = tint.cgColor
+        layer?.shadowOpacity = shadowOpacity
+        layer?.shadowRadius = isPressed ? 3 : 7
+        layer?.shadowOffset = CGSize(width: 0, height: isPressed ? -1 : -3)
 
-    private func shadowColor(isPressed: Bool) -> Color {
-        if disabled {
-            return .clear
+        let targetScale: CGFloat
+        if reduceMotion || isDisabled {
+            targetScale = 1
+        } else if isPressed {
+            targetScale = 0.97
+        } else {
+            targetScale = isHovering ? 1.02 : 1
         }
-        return kind.tint.opacity(isPressed ? 0.10 : (isHovering ? 0.16 : 0))
-    }
-
-    private func buttonScale(isPressed: Bool) -> CGFloat {
-        if disabled {
-            return 1
-        }
-        return isPressed ? 0.97 : (isHovering ? 1.02 : 1)
+        CATransaction.begin()
+        CATransaction.setDisableActions(reduceMotion)
+        CATransaction.setAnimationDuration(reduceMotion ? 0 : (isPressed ? 0.05 : 0.12))
+        layer?.transform = CATransform3DMakeScale(targetScale, targetScale, 1)
+        CATransaction.commit()
     }
 }
 

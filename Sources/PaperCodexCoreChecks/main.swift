@@ -2154,11 +2154,16 @@ func runUILayoutSourceChecks() throws {
         throw CheckFailure(description: "library inspector source should remain inspectable")
     }
     try check(
-        settingsViewSource.contains("private struct SettingsActionButton<Label: View>: View")
-            && settingsViewSource.contains("private struct SettingsActionButtonStyle: ButtonStyle")
+        settingsViewSource.contains("private struct SettingsActionButton: View")
+            && settingsViewSource.contains("private struct NativeSettingsActionButton: NSViewRepresentable")
+            && settingsViewSource.contains("private final class NativeSettingsActionButtonView: NSButton")
             && settingsViewSource.contains("private enum SettingsActionButtonKind")
-            && settingsViewSource.contains(".buttonStyle(SettingsActionButtonStyle(")
+            && settingsViewSource.contains("override func mouseDown(with event: NSEvent)")
+            && settingsViewSource.contains("setAccessibilityRole(.button)")
+            && settingsViewSource.contains("CATransaction.setAnimationDuration")
             && settingsViewSource.components(separatedBy: "SettingsActionButton(").count - 1 >= 15
+            && !settingsViewSource.contains("private struct SettingsActionButtonStyle: ButtonStyle")
+            && !settingsViewSource.contains(".buttonStyle(SettingsActionButtonStyle(")
             && settingsViewSource.contains("private struct SettingsCategoryToggleRow: View")
             && settingsViewSource.contains("private struct SettingsSelectableRowButtonStyle: ButtonStyle")
             && settingsViewSource.contains(".buttonStyle(SettingsSelectableRowButtonStyle(")
@@ -2170,7 +2175,7 @@ func runUILayoutSourceChecks() throws {
             && !settingsViewSource.contains(".buttonStyle(.bordered)")
             && !settingsViewSource.contains(".buttonStyle(.borderless)")
             && !settingsViewSource.contains(".buttonStyle(.plain)"),
-        "Settings action buttons should provide immediate pressed feedback instead of system default delayed button chrome"
+        "Settings action buttons should use native AppKit buttons with immediate pressed feedback instead of system default delayed button chrome"
     )
     try check(
         homeChromeSource.contains("static let sidebarTopPadding: CGFloat = 28")
@@ -2306,7 +2311,7 @@ func runUILayoutSourceChecks() throws {
         settingsViewSource.contains("isEditingCodexSystemPrompt")
             && settingsViewSource.contains("codexSystemPromptEditSheet")
             && settingsViewSource.contains("TextEditor(text: $draftCodexSystemPrompt)")
-            && settingsViewSource.contains("Label(\"Edit Prompt\", systemImage: \"pencil\")"),
+            && settingsViewSource.contains("SettingsActionButton(title: \"Edit Prompt\", systemImage: \"pencil\", kind: .primary)"),
         "settings should edit the Codex system prompt in an on-demand sheet instead of loading the editor on route entry"
     )
     try check(
