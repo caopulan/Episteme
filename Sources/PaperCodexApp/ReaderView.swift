@@ -42,7 +42,7 @@ struct ReaderView: View {
         ZStack {
             if let paper = model.selectedPaper {
                 VStack(spacing: 0) {
-                    ReaderPDFToolbar(
+                    ReaderNativeToolbarView(
                         status: model.pdfDocumentStatus,
                         papers: model.currentSessionPapers,
                         activePaperID: model.selectedPaper?.id,
@@ -63,6 +63,7 @@ struct ReaderView: View {
                         onReturn: { model.returnFromCitationJump() },
                         onToggleSplit: { togglePDFSplit() }
                     )
+                    .frame(maxWidth: .infinity, minHeight: 36, idealHeight: 36, maxHeight: 36)
                     Divider()
                     pdfContent(for: paper)
                 }
@@ -325,156 +326,5 @@ private struct AddPaperToSessionSheet: View {
         }
         .padding(22)
         .frame(width: 560)
-    }
-}
-
-private struct ReaderPDFToolbar: View {
-    var status: PDFDocumentStatus?
-    var papers: [Paper]
-    var activePaperID: String?
-    var returnPoint: CitationReturnPoint?
-    var isSplitVisible: Bool
-    var onSelectPaper: (Paper) -> Void
-    var onAddPaper: () -> Void
-    var onRemoveActivePaper: () -> Void
-    var onCommand: (PDFKitCommandKind) -> Void
-    var onReturn: () -> Void
-    var onToggleSplit: () -> Void
-
-    var body: some View {
-        HStack(spacing: 6) {
-            PaperCodexIconButton(title: "Previous Page", systemImage: "chevron.up", tint: .secondary) {
-                onCommand(.previousPage)
-            }
-
-            PaperCodexIconButton(title: "Next Page", systemImage: "chevron.down", tint: .secondary) {
-                onCommand(.nextPage)
-            }
-
-            Text(pageText)
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
-                .frame(width: 82, alignment: .leading)
-                .contentTransition(.numericText())
-
-            Divider()
-                .frame(height: 18)
-
-            PaperCodexIconButton(title: "Zoom Out", systemImage: "minus.magnifyingglass", tint: .secondary) {
-                onCommand(.zoomOut)
-            }
-
-            PaperCodexIconButton(title: "Zoom In", systemImage: "plus.magnifyingglass", tint: .secondary) {
-                onCommand(.zoomIn)
-            }
-
-            PaperCodexIconButton(title: "Fit Width", systemImage: "arrow.left.and.right", tint: .secondary) {
-                onCommand(.fitWidth)
-            }
-
-            Text(zoomText)
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
-                .frame(width: 48, alignment: .leading)
-                .contentTransition(.numericText())
-
-            Divider()
-                .frame(height: 18)
-
-            paperSelector
-
-            PaperCodexIconButton(
-                title: isSplitVisible ? "Close PDF Split" : "Open PDF Split",
-                systemImage: isSplitVisible ? "rectangle.split.2x1.fill" : "rectangle.split.2x1",
-                tint: isSplitVisible ? .accentColor : .secondary,
-                action: onToggleSplit
-            )
-            .keyboardShortcut("\\", modifiers: [.command, .shift])
-
-            Spacer()
-
-            if let returnPoint {
-                Button(action: onReturn) {
-                    Label("Back to source", systemImage: "arrow.uturn.backward")
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .help(returnPoint.paperTitle)
-            }
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(Color(nsColor: .windowBackgroundColor))
-    }
-
-    private var paperSelector: some View {
-        HStack(spacing: 5) {
-            Image(systemName: papers.count > 1 ? "square.stack.3d.up.fill" : "doc.text")
-                .font(.paperCodexSystem(size: 11.5, weight: .semibold))
-                .foregroundStyle(.secondary)
-            Text("\(papers.count)")
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
-                .frame(minWidth: 14, alignment: .leading)
-                .contentTransition(.numericText())
-
-            Picker("Paper", selection: selectedPaperBinding) {
-                ForEach(papers) { paper in
-                    Text(paper.title)
-                        .tag(paper.id)
-                }
-            }
-            .labelsHidden()
-            .controlSize(.small)
-            .frame(minWidth: 130, idealWidth: 220, maxWidth: 260)
-            .help(activePaperTitle)
-
-            PaperCodexIconButton(title: "Add Paper", systemImage: "plus", tint: .secondary, action: onAddPaper)
-
-            PaperCodexIconButton(
-                title: "Remove Current Paper",
-                systemImage: "xmark",
-                tint: .secondary,
-                disabled: papers.count <= 1,
-                action: onRemoveActivePaper
-            )
-        }
-        .layoutPriority(1)
-    }
-
-    private var selectedPaperBinding: Binding<String> {
-        Binding(
-            get: {
-                activePaperID ?? ""
-            },
-            set: { paperID in
-                guard let paper = papers.first(where: { $0.id == paperID }) else {
-                    return
-                }
-                onSelectPaper(paper)
-            }
-        )
-    }
-
-    private var activePaperTitle: String {
-        guard let activePaperID,
-              let paper = papers.first(where: { $0.id == activePaperID }) else {
-            return "Select Paper"
-        }
-        return paper.title
-    }
-
-    private var pageText: String {
-        guard let status, status.pageCount > 0 else {
-            return "Page --"
-        }
-        return "Page \(status.pageIndex + 1)/\(status.pageCount)"
-    }
-
-    private var zoomText: String {
-        guard let status else {
-            return "--%"
-        }
-        return "\(Int((status.scaleFactor * 100).rounded()))%"
     }
 }

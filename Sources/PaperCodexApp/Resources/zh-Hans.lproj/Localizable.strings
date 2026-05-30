@@ -190,12 +190,16 @@
 "Zoom Out" = "缩小";
 "Zoom In" = "放大";
 "Fit Width" = "适合宽度";
+"Page" = "页";
+"Paper" = "论文";
 "Back to source" = "返回原位置";
 "Link Preview" = "链接预览";
 "Open Split" = "分屏打开";
 "Open PDF Split" = "打开 PDF 分屏";
 "Close PDF Split" = "关闭 PDF 分屏";
 "Close Split" = "关闭分屏";
+"Add Paper" = "添加论文";
+"Remove Current Paper" = "移除当前论文";
 "Preparing split view" = "正在准备分屏";
 "Preparing link preview" = "正在准备链接预览";
 "Back to Library" = "返回文库";

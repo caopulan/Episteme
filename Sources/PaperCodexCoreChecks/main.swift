@@ -1383,6 +1383,7 @@ func runUILayoutSourceChecks() throws {
     let chatMarkdownRendererSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexCore/ChatMarkdownRenderer.swift"))
     let saveToLibrarySource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/SaveToLibrarySheet.swift"))
     let readerViewSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/ReaderView.swift"))
+    let readerToolbarSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/ReaderToolbarView.swift"))
     let windowTabBarSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/WindowChromeTabBar.swift"))
     let homeChromeSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/WindowChrome.swift"))
     let localThumbnailSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/LocalThumbnailImage.swift"))
@@ -2106,12 +2107,14 @@ func runUILayoutSourceChecks() throws {
         "home library chrome should keep the Paper Codex and library titles close to the tab row without returning to the old oversized top gap"
     )
     try check(
-        readerViewSource.contains("Picker(\"Paper\"")
-            && readerViewSource.contains("selectedPaperBinding")
-            && readerViewSource.contains("paperSelector")
-            && readerViewSource.contains("onAddPaper")
-            && readerViewSource.contains("onRemoveActivePaper"),
-        "reader paper switching should live in the PDF toolbar as a compact dropdown with add/remove actions"
+        readerViewSource.contains("ReaderNativeToolbarView(")
+            && !readerViewSource.contains("ReaderPDFToolbar(")
+            && !readerViewSource.contains("Picker(\"Paper\"")
+            && readerToolbarSource.contains("NSPopUpButton")
+            && readerToolbarSource.contains("paperPopup")
+            && readerToolbarSource.contains("onAddPaper")
+            && readerToolbarSource.contains("onRemoveActivePaper"),
+        "reader paper switching should live in a native PDF toolbar as a compact dropdown with add/remove actions"
     )
     try check(
         chatSource.contains("ReaderChatHeaderActionButton")
@@ -2703,32 +2706,45 @@ func runUILayoutSourceChecks() throws {
         "Discover should restore the last visible paper when returning from the reader"
     )
 
-    let readerSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/ReaderView.swift"))
     try check(
-        readerSource.contains("ReaderPDFToolbar"),
-        "reader should provide explicit PDF toolbar controls"
+        readerViewSource.contains("ReaderNativeToolbarView(")
+            && readerToolbarSource.contains("NSSegmentedControl")
+            && readerToolbarSource.contains("NSPopUpButton")
+            && readerToolbarSource.contains("NSButton")
+            && readerToolbarSource.contains("pageStatusLabel")
+            && readerToolbarSource.contains("zoomStatusLabel")
+            && readerToolbarSource.contains("onCommand(.previousPage)")
+            && readerToolbarSource.contains("onCommand(.nextPage)")
+            && readerToolbarSource.contains("onCommand(.zoomOut)")
+            && readerToolbarSource.contains("onCommand(.zoomIn)")
+            && readerToolbarSource.contains("onCommand(.fitWidth)")
+            && readerToolbarSource.contains("onToggleSplit")
+            && !readerViewSource.contains("private struct ReaderPDFToolbar: View")
+            && !readerViewSource.contains("PaperCodexIconButton(title: \"Previous Page\""),
+        "reader should provide explicit native PDF toolbar controls"
     )
     try check(
-        readerSource.contains("VSplitView") && readerSource.contains("isPDFSplitVisible") && readerSource.contains("pdfSplitTarget"),
+        readerViewSource.contains("VSplitView") && readerViewSource.contains("isPDFSplitVisible") && readerViewSource.contains("pdfSplitTarget"),
         "reader should support a top-bottom PDF split view for simultaneous source and link-target reading"
     )
     try check(
-        readerSource.contains(".keyboardShortcut(\"\\\\\", modifiers: [.command, .shift])")
-            && readerSource.contains("PaperCodexMotion.perform(PaperCodexMotion.pdfSplitOpen")
-            && readerSource.contains(".animation(PaperCodexMotion.accessible(PaperCodexMotion.pdfSplitOpen")
-            && readerSource.contains("insertion: .move(edge: .bottom).combined(with: .opacity)"),
+        readerToolbarSource.contains("keyEquivalent = \"\\\\\"")
+            && readerToolbarSource.contains("keyEquivalentModifierMask = [.command, .shift]")
+            && readerViewSource.contains("PaperCodexMotion.perform(PaperCodexMotion.pdfSplitOpen")
+            && readerViewSource.contains(".animation(PaperCodexMotion.accessible(PaperCodexMotion.pdfSplitOpen")
+            && readerViewSource.contains("insertion: .move(edge: .bottom).combined(with: .opacity)"),
         "reader PDF split should have a direct keyboard shortcut and animated toggle feedback"
     )
     try check(
-        readerSource.contains("isPDFSplitContentReady")
-            && readerSource.contains("pendingPDFSplitTarget")
-            && readerSource.contains("splitContentMountDelay")
-            && readerSource.contains("PDFSplitPreparingView")
-            && readerSource.contains("schedulePDFSplitContentMount"),
+        readerViewSource.contains("isPDFSplitContentReady")
+            && readerViewSource.contains("pendingPDFSplitTarget")
+            && readerViewSource.contains("splitContentMountDelay")
+            && readerViewSource.contains("PDFSplitPreparingView")
+            && readerViewSource.contains("schedulePDFSplitContentMount"),
         "reader PDF split should stage PDFKit mounting until after the split shell opens so Open Split feels smooth"
     )
     try check(
-        !readerSource.contains(".frame(minWidth: 560)") && readerSource.contains(".frame(minWidth: ReaderPDFLayout.minimumPaneWidth"),
+        !readerViewSource.contains(".frame(minWidth: 560)") && readerViewSource.contains(".frame(minWidth: ReaderPDFLayout.minimumPaneWidth"),
         "reader PDF pane should be allowed to resize with the split divider instead of holding a wide fixed minimum"
     )
     try check(
@@ -2825,12 +2841,12 @@ func runUILayoutSourceChecks() throws {
         "reader navigation should preserve PDF and chat context so route switches can keep reading position"
     )
     try check(
-        readerSource.contains("ReaderPDFToolbar")
-            && readerSource.contains("Picker(\"Paper\"")
-            && readerSource.contains("paperSelector")
-            && readerSource.contains("AddPaperToSessionSheet")
-            && readerSource.contains("model.addPaperToCurrentSession")
-            && readerSource.contains("model.removePaperFromCurrentSession"),
+        readerViewSource.contains("ReaderNativeToolbarView")
+            && readerToolbarSource.contains("paperPopup")
+            && readerToolbarSource.contains("NSSegmentedControl")
+            && readerViewSource.contains("AddPaperToSessionSheet")
+            && readerViewSource.contains("model.addPaperToCurrentSession")
+            && readerViewSource.contains("model.removePaperFromCurrentSession"),
         "reader should expose the current session paper set through the PDF toolbar and allow papers to be added or removed while reading"
     )
 
