@@ -1837,11 +1837,18 @@ func runUILayoutSourceChecks() throws {
        let messageBubbleEndRange = chatSource.range(of: "private struct GeneratedImageGallery", range: messageBubbleRange.upperBound..<chatSource.endIndex) {
         let messageBubbleSource = String(chatSource[messageBubbleRange.lowerBound..<messageBubbleEndRange.lowerBound])
         try check(
-            messageBubbleSource.contains("ChatPanelActionButton(disabled: isBusy)")
-                && chatSource.contains("private struct ChatPanelActionButtonStyle: ButtonStyle")
-                && chatSource.contains("PaperCodexMotion.press")
+            messageBubbleSource.components(separatedBy: "PaperCodexPanelButton(").count - 1 >= 2
+                && messageBubbleSource.contains("title: \"Retry\"")
+                && messageBubbleSource.contains("title: \"New Session\"")
+                && actionButtonSource.contains("struct PaperCodexPanelButton: View")
+                && actionButtonSource.contains("private struct NativePaperCodexPanelButton: NSViewRepresentable")
+                && actionButtonSource.contains("private final class NativePaperCodexPanelButtonView: NSButton")
+                && actionButtonSource.contains("override func mouseDown(with event: NSEvent)")
+                && actionButtonSource.contains("setAccessibilityRole(.button)")
+                && actionButtonSource.contains("CATransaction.setAnimationDuration")
+                && !chatSource.contains("private struct ChatPanelActionButtonStyle: ButtonStyle")
                 && !messageBubbleSource.contains(".buttonStyle(.bordered)"),
-            "chat failure recovery actions should give immediate pressed feedback before retrying or opening a new session"
+            "chat failure recovery actions should use the shared native panel button before retrying or opening a new session"
         )
         try check(
             messageBubbleSource.contains("ChatRoleBadge(")
@@ -2002,13 +2009,16 @@ func runUILayoutSourceChecks() throws {
        let actionRowEndRange = saveToLibrarySource.range(of: "private var visibleFolderItems", range: actionRowRange.upperBound..<saveToLibrarySource.endIndex) {
         let actionRowSource = String(saveToLibrarySource[actionRowRange.lowerBound..<actionRowEndRange.lowerBound])
         try check(
-            saveToLibrarySource.contains("@State private var isSaveButtonHovering = false")
-                && saveToLibrarySource.contains("private struct SaveToLibraryFooterButtonStyle: ButtonStyle")
-                && actionRowSource.contains(".buttonStyle(SaveToLibraryFooterButtonStyle(")
-                && saveToLibrarySource.contains("configuration.isPressed")
-                && saveToLibrarySource.contains("PaperCodexMotion.press")
+            actionRowSource.components(separatedBy: "PaperCodexPanelButton(").count - 1 == 2
+                && actionRowSource.contains("title: \"Cancel\"")
+                && actionRowSource.contains("title: \"Save\"")
+                && actionButtonSource.contains("struct PaperCodexPanelButton: View")
+                && actionButtonSource.contains("private final class NativePaperCodexPanelButtonView: NSButton")
+                && !saveToLibrarySource.contains("@State private var isSaveButtonHovering = false")
+                && !saveToLibrarySource.contains("private struct SaveToLibraryFooterButtonStyle: ButtonStyle")
+                && !actionRowSource.contains(".buttonStyle(SaveToLibraryFooterButtonStyle(")
                 && !actionRowSource.contains(".buttonStyle(.borderedProminent)"),
-            "save-to-library footer actions should provide immediate pressed feedback before saving destinations"
+            "save-to-library footer actions should use the shared native panel button before saving destinations"
         )
     } else {
         throw CheckFailure(description: "save-to-library action row source should remain inspectable")
@@ -2155,13 +2165,16 @@ func runUILayoutSourceChecks() throws {
     }
     try check(
         settingsViewSource.contains("private struct SettingsActionButton: View")
-            && settingsViewSource.contains("private struct NativeSettingsActionButton: NSViewRepresentable")
-            && settingsViewSource.contains("private final class NativeSettingsActionButtonView: NSButton")
+            && actionButtonSource.contains("struct PaperCodexPanelButton: View")
+            && actionButtonSource.contains("private struct NativePaperCodexPanelButton: NSViewRepresentable")
+            && actionButtonSource.contains("private final class NativePaperCodexPanelButtonView: NSButton")
             && settingsViewSource.contains("private enum SettingsActionButtonKind")
-            && settingsViewSource.contains("override func mouseDown(with event: NSEvent)")
-            && settingsViewSource.contains("setAccessibilityRole(.button)")
-            && settingsViewSource.contains("CATransaction.setAnimationDuration")
+            && actionButtonSource.contains("override func mouseDown(with event: NSEvent)")
+            && actionButtonSource.contains("setAccessibilityRole(.button)")
+            && actionButtonSource.contains("CATransaction.setAnimationDuration")
             && settingsViewSource.components(separatedBy: "SettingsActionButton(").count - 1 >= 15
+            && !settingsViewSource.contains("private struct NativeSettingsActionButton: NSViewRepresentable")
+            && !settingsViewSource.contains("private final class NativeSettingsActionButtonView: NSButton")
             && !settingsViewSource.contains("private struct SettingsActionButtonStyle: ButtonStyle")
             && !settingsViewSource.contains(".buttonStyle(SettingsActionButtonStyle(")
             && settingsViewSource.contains("private struct SettingsCategoryToggleRow: View")

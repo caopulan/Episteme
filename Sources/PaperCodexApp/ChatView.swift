@@ -227,16 +227,16 @@ struct ChatView: View {
                 .textFieldStyle(.roundedBorder)
             HStack {
                 Spacer()
-                ChatPanelActionButton {
+                PaperCodexPanelButton(title: "Cancel") {
                     sessionPendingRename = nil
-                } label: {
-                    Text("Cancel")
                 }
-                ChatPanelActionButton(kind: .primary, disabled: renameSessionTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) {
+                PaperCodexPanelButton(
+                    title: "Save",
+                    kind: .primary,
+                    disabled: renameSessionTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ) {
                     model.renameSession(session, title: renameSessionTitle)
                     sessionPendingRename = nil
-                } label: {
-                    Text("Save")
                 }
             }
         }
@@ -395,131 +395,6 @@ private struct SessionNotesPanel: View {
         editingNoteID = nil
         noteTitle = ""
         noteBody = ""
-    }
-}
-
-private enum ChatPanelActionButtonKind {
-    case primary
-    case secondary
-    case destructive
-
-    var tint: Color {
-        switch self {
-        case .primary:
-            Color.accentColor
-        case .secondary:
-            Color.secondary
-        case .destructive:
-            Color.red
-        }
-    }
-}
-
-private struct ChatPanelActionButton<Label: View>: View {
-    @State private var isHovering = false
-
-    var kind: ChatPanelActionButtonKind = .secondary
-    var disabled = false
-    var role: ButtonRole?
-    var action: () -> Void
-    @ViewBuilder var label: () -> Label
-
-    var body: some View {
-        Button(role: role, action: action) {
-            label()
-        }
-        .buttonStyle(ChatPanelActionButtonStyle(kind: kind, disabled: disabled, isHovering: isHovering))
-        .disabled(disabled)
-        .onHover { hovering in
-            withAnimation(PaperCodexMotion.hover) {
-                isHovering = hovering
-            }
-        }
-    }
-}
-
-private struct ChatPanelActionButtonStyle: ButtonStyle {
-    var kind: ChatPanelActionButtonKind
-    var disabled: Bool
-    var isHovering: Bool
-
-    func makeBody(configuration: Configuration) -> some View {
-        let isPressed = configuration.isPressed && !disabled
-        configuration.label
-            .font(.paperCodexSystem(size: 12.5, weight: .semibold))
-            .lineLimit(1)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .foregroundStyle(foregroundColor(isPressed: isPressed))
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(backgroundColor(isPressed: isPressed))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(borderColor(isPressed: isPressed), lineWidth: 1)
-            )
-            .shadow(color: shadowColor(isPressed: isPressed), radius: isPressed ? 3 : 7, y: isPressed ? 1 : 3)
-            .scaleEffect(buttonScale(isPressed: isPressed), anchor: .center)
-            .animation(PaperCodexMotion.press, value: configuration.isPressed)
-            .animation(PaperCodexMotion.hover, value: isHovering)
-            .animation(PaperCodexMotion.hover, value: disabled)
-    }
-
-    private func foregroundColor(isPressed: Bool) -> Color {
-        if disabled {
-            return Color.secondary.opacity(0.48)
-        }
-        switch kind {
-        case .primary:
-            return .white
-        case .secondary, .destructive:
-            return isPressed || isHovering ? kind.tint : Color.primary.opacity(0.82)
-        }
-    }
-
-    private func backgroundColor(isPressed: Bool) -> Color {
-        if disabled {
-            return Color(nsColor: .controlBackgroundColor).opacity(0.55)
-        }
-        switch kind {
-        case .primary:
-            return Color.accentColor.opacity(isPressed ? 0.82 : (isHovering ? 0.96 : 0.90))
-        case .secondary, .destructive:
-            if isPressed {
-                return kind.tint.opacity(0.18)
-            }
-            return isHovering ? kind.tint.opacity(0.12) : Color(nsColor: .controlBackgroundColor)
-        }
-    }
-
-    private func borderColor(isPressed: Bool) -> Color {
-        if disabled {
-            return Color.black.opacity(0.06)
-        }
-        switch kind {
-        case .primary:
-            return Color.accentColor.opacity(isPressed ? 0.62 : (isHovering ? 0.48 : 0.34))
-        case .secondary, .destructive:
-            if isPressed {
-                return kind.tint.opacity(0.54)
-            }
-            return isHovering ? kind.tint.opacity(0.38) : Color.black.opacity(0.10)
-        }
-    }
-
-    private func shadowColor(isPressed: Bool) -> Color {
-        if disabled {
-            return .clear
-        }
-        return kind.tint.opacity(isPressed ? 0.10 : (isHovering ? 0.16 : 0))
-    }
-
-    private func buttonScale(isPressed: Bool) -> CGFloat {
-        if disabled {
-            return 1
-        }
-        return isPressed ? 0.97 : (isHovering ? 1.02 : 1)
     }
 }
 
@@ -960,16 +835,20 @@ private struct MessageBubble: View {
             }
             if failureNotice != nil {
                 HStack(spacing: 8) {
-                    ChatPanelActionButton(disabled: isBusy) {
+                    PaperCodexPanelButton(
+                        title: "Retry",
+                        systemImage: "arrow.clockwise",
+                        disabled: isBusy
+                    ) {
                         onRetryFailure(message.id)
-                    } label: {
-                        Label("Retry", systemImage: "arrow.clockwise")
                     }
 
-                    ChatPanelActionButton(disabled: isBusy) {
+                    PaperCodexPanelButton(
+                        title: "New Session",
+                        systemImage: "plus.bubble",
+                        disabled: isBusy
+                    ) {
                         onNewSession()
-                    } label: {
-                        Label("New Session", systemImage: "plus.bubble")
                     }
                 }
                 .padding(.top, 2)

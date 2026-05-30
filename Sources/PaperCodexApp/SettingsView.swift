@@ -1,4 +1,3 @@
-import AppKit
 import PaperCodexCore
 import SwiftUI
 
@@ -952,6 +951,17 @@ private enum SettingsActionButtonKind {
             Color.red
         }
     }
+
+    var panelKind: PaperCodexPanelButtonKind {
+        switch self {
+        case .primary:
+            .primary
+        case .secondary:
+            .secondary
+        case .destructive:
+            .destructive
+        }
+    }
 }
 
 private struct ChatAppearancePreview: View {
@@ -1083,8 +1093,6 @@ private struct SettingsSelectableRowButtonStyle: ButtonStyle {
 }
 
 private struct SettingsActionButton: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
     var title: String
     var systemImage: String?
     var kind: SettingsActionButtonKind = .secondary
@@ -1093,269 +1101,14 @@ private struct SettingsActionButton: View {
     var action: () -> Void
 
     var body: some View {
-        NativeSettingsActionButton(
+        PaperCodexPanelButton(
             title: title,
             systemImage: systemImage,
-            kind: kind,
+            kind: kind.panelKind,
             disabled: disabled,
             role: role,
-            reduceMotion: reduceMotion,
             action: action
         )
-        .fixedSize(horizontal: true, vertical: true)
-        .help(title)
-    }
-}
-
-private struct NativeSettingsActionButton: NSViewRepresentable {
-    var title: String
-    var systemImage: String?
-    var kind: SettingsActionButtonKind
-    var disabled: Bool
-    var role: ButtonRole?
-    var reduceMotion: Bool
-    var action: () -> Void
-
-    func makeNSView(context: Context) -> NativeSettingsActionButtonView {
-        let view = NativeSettingsActionButtonView()
-        view.apply(
-            title: title,
-            systemImage: systemImage,
-            kind: kind,
-            disabled: disabled,
-            role: role,
-            reduceMotion: reduceMotion,
-            action: action
-        )
-        return view
-    }
-
-    func updateNSView(_ view: NativeSettingsActionButtonView, context: Context) {
-        view.apply(
-            title: title,
-            systemImage: systemImage,
-            kind: kind,
-            disabled: disabled,
-            role: role,
-            reduceMotion: reduceMotion,
-            action: action
-        )
-    }
-}
-
-private final class NativeSettingsActionButtonView: NSButton {
-    private enum Metrics {
-        static let height: CGFloat = max(
-            PaperCodexHitTarget.toolbarButtonHeight,
-            PaperCodexHitTarget.toolbarButtonFontSize + PaperCodexHitTarget.toolbarButtonVerticalPadding * 2
-        )
-        static let iconSize: CGFloat = PaperCodexHitTarget.toolbarButtonSymbolSize
-        static let iconWidth: CGFloat = PaperCodexHitTarget.toolbarButtonSymbolWidth
-        static let iconTextSpacing: CGFloat = PaperCodexHitTarget.toolbarButtonSymbolTextSpacing
-        static let horizontalPadding: CGFloat = PaperCodexHitTarget.toolbarButtonHorizontalPadding
-        static let fontSize: CGFloat = PaperCodexHitTarget.toolbarButtonFontSize
-        static let cornerRadius: CGFloat = PaperCodexCornerRadius.control
-    }
-
-    private let iconView = NSImageView()
-    private let titleLabel = NSTextField(labelWithString: "")
-    private var titleLeadingIconConstraint: NSLayoutConstraint?
-    private var titleLeadingButtonConstraint: NSLayoutConstraint?
-    private var trackingArea: NSTrackingArea?
-    private var pressHandler: () -> Void = {}
-    private var kind = SettingsActionButtonKind.secondary
-    private var hasIcon = false
-    private var isHovering = false
-    private var isPressed = false
-    private var isDisabled = false
-    private var reduceMotion = false
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        setup()
-    }
-
-    required init?(coder: NSCoder) {
-        nil
-    }
-
-    override var isFlipped: Bool {
-        true
-    }
-
-    override var intrinsicContentSize: NSSize {
-        let iconWidth = hasIcon ? Metrics.iconWidth + Metrics.iconTextSpacing : 0
-        let width = Metrics.horizontalPadding * 2 + iconWidth + titleLabel.intrinsicContentSize.width
-        return NSSize(width: ceil(width), height: Metrics.height)
-    }
-
-    func apply(
-        title: String,
-        systemImage: String?,
-        kind: SettingsActionButtonKind,
-        disabled: Bool,
-        role: ButtonRole?,
-        reduceMotion: Bool,
-        action: @escaping () -> Void
-    ) {
-        let localizedTitle = NSLocalizedString(title, comment: "")
-        pressHandler = action
-        self.kind = role == .destructive ? .destructive : kind
-        isDisabled = disabled
-        self.reduceMotion = reduceMotion
-        isEnabled = !disabled
-        hasIcon = systemImage != nil
-        titleLabel.stringValue = localizedTitle
-        iconView.image = systemImage.flatMap { NSImage(systemSymbolName: $0, accessibilityDescription: localizedTitle) }
-        iconView.isHidden = systemImage == nil
-        titleLeadingIconConstraint?.isActive = systemImage != nil
-        titleLeadingButtonConstraint?.isActive = systemImage == nil
-        toolTip = localizedTitle
-        setAccessibilityLabel(localizedTitle)
-        invalidateIntrinsicContentSize()
-        updateAppearance()
-    }
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let trackingArea {
-            removeTrackingArea(trackingArea)
-        }
-        let area = NSTrackingArea(
-            rect: bounds,
-            options: [.activeInKeyWindow, .mouseEnteredAndExited, .inVisibleRect],
-            owner: self,
-            userInfo: nil
-        )
-        addTrackingArea(area)
-        trackingArea = area
-    }
-
-    override func mouseEntered(with event: NSEvent) {
-        isHovering = true
-        updateAppearance()
-    }
-
-    override func mouseExited(with event: NSEvent) {
-        isHovering = false
-        updateAppearance()
-    }
-
-    override func mouseDown(with event: NSEvent) {
-        guard !isDisabled else {
-            return
-        }
-        setPressed(true)
-        super.mouseDown(with: event)
-        setPressed(false)
-    }
-
-    private func setup() {
-        translatesAutoresizingMaskIntoConstraints = false
-        title = ""
-        isBordered = false
-        bezelStyle = .regularSquare
-        imagePosition = .noImage
-        focusRingType = .none
-        setButtonType(.momentaryChange)
-        target = self
-        action = #selector(performPress)
-        setAccessibilityElement(true)
-        setAccessibilityRole(.button)
-        wantsLayer = true
-        layer?.cornerRadius = Metrics.cornerRadius
-        layer?.masksToBounds = false
-
-        iconView.translatesAutoresizingMaskIntoConstraints = false
-        iconView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: Metrics.iconSize, weight: .semibold)
-        iconView.imageScaling = .scaleProportionallyDown
-
-        titleLabel.translatesAutoresizingMaskIntoConstraints = false
-        titleLabel.font = .systemFont(ofSize: Metrics.fontSize, weight: .semibold)
-        titleLabel.lineBreakMode = .byTruncatingTail
-        titleLabel.maximumNumberOfLines = 1
-        titleLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
-
-        [iconView, titleLabel].forEach(addSubview(_:))
-        let leadingIconConstraint = titleLabel.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: Metrics.iconTextSpacing)
-        let leadingButtonConstraint = titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Metrics.horizontalPadding)
-        titleLeadingIconConstraint = leadingIconConstraint
-        titleLeadingButtonConstraint = leadingButtonConstraint
-        NSLayoutConstraint.activate([
-            heightAnchor.constraint(equalToConstant: Metrics.height),
-            iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Metrics.horizontalPadding),
-            iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
-            iconView.widthAnchor.constraint(equalToConstant: Metrics.iconWidth),
-            iconView.heightAnchor.constraint(equalToConstant: Metrics.iconWidth),
-            leadingIconConstraint,
-            titleLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Metrics.horizontalPadding),
-            titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor)
-        ])
-        updateAppearance()
-    }
-
-    @objc private func performPress() {
-        guard !isDisabled else {
-            return
-        }
-        pressHandler()
-    }
-
-    private func setPressed(_ pressed: Bool) {
-        isPressed = pressed
-        updateAppearance()
-    }
-
-    private func updateAppearance() {
-        let tint = NSColor(kind.tint)
-        let foreground: NSColor
-        let background: NSColor
-        let border: NSColor
-        let shadowOpacity: Float
-
-        if isDisabled {
-            foreground = .secondaryLabelColor.withAlphaComponent(0.48)
-            background = .controlBackgroundColor.withAlphaComponent(0.56)
-            border = .black.withAlphaComponent(0.06)
-            shadowOpacity = 0
-        } else {
-            switch kind {
-            case .primary:
-                foreground = .white
-                background = tint.withAlphaComponent(isPressed ? 0.82 : (isHovering ? 0.96 : 0.90))
-                border = tint.withAlphaComponent(isPressed ? 0.62 : (isHovering ? 0.48 : 0.34))
-                shadowOpacity = isPressed ? 0.10 : (isHovering ? 0.16 : 0)
-            case .secondary, .destructive:
-                foreground = isPressed || isHovering ? tint : .labelColor.withAlphaComponent(0.82)
-                background = isPressed ? tint.withAlphaComponent(0.18) : (isHovering ? tint.withAlphaComponent(0.12) : .controlBackgroundColor)
-                border = isPressed ? tint.withAlphaComponent(0.54) : (isHovering ? tint.withAlphaComponent(0.38) : .black.withAlphaComponent(0.10))
-                shadowOpacity = isPressed ? 0.10 : (isHovering ? 0.16 : 0)
-            }
-        }
-
-        iconView.contentTintColor = foreground
-        titleLabel.textColor = foreground
-        layer?.backgroundColor = background.cgColor
-        layer?.borderWidth = 1
-        layer?.borderColor = border.cgColor
-        layer?.shadowColor = tint.cgColor
-        layer?.shadowOpacity = shadowOpacity
-        layer?.shadowRadius = isPressed ? 3 : 7
-        layer?.shadowOffset = CGSize(width: 0, height: isPressed ? -1 : -3)
-
-        let targetScale: CGFloat
-        if reduceMotion || isDisabled {
-            targetScale = 1
-        } else if isPressed {
-            targetScale = 0.97
-        } else {
-            targetScale = isHovering ? 1.02 : 1
-        }
-        CATransaction.begin()
-        CATransaction.setDisableActions(reduceMotion)
-        CATransaction.setAnimationDuration(reduceMotion ? 0 : (isPressed ? 0.05 : 0.12))
-        layer?.transform = CATransform3DMakeScale(targetScale, targetScale, 1)
-        CATransaction.commit()
     }
 }
 
