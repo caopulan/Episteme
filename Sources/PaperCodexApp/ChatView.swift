@@ -20,6 +20,8 @@ struct ChatView: View {
     @State private var renameSessionTitle = ""
     @State private var selectedGeneratedImageURL: URL?
     @State private var composerFocusRequestID: UUID?
+    @State private var chatScrollRequestToken = 0
+    @State private var chatScrollRequestAnimated = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -74,61 +76,54 @@ struct ChatView: View {
 
     private var chatPanel: some View {
         VStack(spacing: 0) {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 12) {
-                        if model.messages.isEmpty && visibleActiveCodexRun == nil {
-                            PaperCodexNativeEmptyState(
-                                title: "No Messages",
-                                systemImage: "text.bubble",
-                                message: "Select text in the PDF, then ask \(model.selectedChatRuntimeDisplayName) in this session. The selected source appears as a quoted reply."
-                            )
-                            .padding(.top, 80)
-                        } else {
-                            ForEach(model.messages) { message in
-                                MessageBubble(
-                                    message: message,
-                                    isBusy: isCurrentSessionSending,
-                                    messageFontSize: model.chatMessageFontSize,
-                                    fontFamily: model.chatFontFamily,
-                                    onCitation: { citationID in
-                                        model.jumpToCitation(citationID)
-                                    },
-                                    onRetryFailure: { messageID in
-                                        Task {
-                                            await model.retryCodexFailure(messageID: messageID)
-                                        }
-                                    },
-                                    onNewSession: {
-                                        model.startFreshSessionFromCurrentPaperSet()
-                                    },
-                                    onGeneratedImagePreview: { url in
-                                        selectedGeneratedImageURL = url
+            PaperCodexNativeScrollView(scrollRequest: chatScrollRequest) {
+                VStack(alignment: .leading, spacing: 12) {
+                    if model.messages.isEmpty && visibleActiveCodexRun == nil {
+                        PaperCodexNativeEmptyState(
+                            title: "No Messages",
+                            systemImage: "text.bubble",
+                            message: "Select text in the PDF, then ask \(model.selectedChatRuntimeDisplayName) in this session. The selected source appears as a quoted reply."
+                        )
+                        .padding(.top, 80)
+                    } else {
+                        ForEach(model.messages) { message in
+                            MessageBubble(
+                                message: message,
+                                isBusy: isCurrentSessionSending,
+                                messageFontSize: model.chatMessageFontSize,
+                                fontFamily: model.chatFontFamily,
+                                onCitation: { citationID in
+                                    model.jumpToCitation(citationID)
+                                },
+                                onRetryFailure: { messageID in
+                                    Task {
+                                        await model.retryCodexFailure(messageID: messageID)
                                     }
-                                )
-                                .id(message.id)
-                            }
-                            if let activeCodexRun = visibleActiveCodexRun {
-                                CodexRunBubble(run: activeCodexRun)
-                                    .id("active-run")
-                            }
-                            Color.clear
-                                .frame(height: 1)
-                                .id("chat-bottom")
+                                },
+                                onNewSession: {
+                                    model.startFreshSessionFromCurrentPaperSet()
+                                },
+                                onGeneratedImagePreview: { url in
+                                    selectedGeneratedImageURL = url
+                                }
+                            )
+                        }
+                        if let activeCodexRun = visibleActiveCodexRun {
+                            CodexRunBubble(run: activeCodexRun)
                         }
                     }
-                    .padding(16)
-                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .onChange(of: model.messages.count) { _, _ in
-                    scrollToBottom(proxy)
-                }
-                .onChange(of: visibleActiveCodexRun?.events.count ?? 0) { _, _ in
-                    scrollToBottom(proxy)
-                }
-                .onAppear {
-                    scrollToBottom(proxy)
-                }
+                .padding(16)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .onChange(of: model.messages.count) { _, _ in
+                requestChatScrollToBottom()
+            }
+            .onChange(of: visibleActiveCodexRun?.events.count ?? 0) { _, _ in
+                requestChatScrollToBottom()
+            }
+            .onAppear {
+                requestChatScrollToBottom(animated: false)
             }
             composer
         }
@@ -148,6 +143,17 @@ struct ChatView: View {
 
     private var isCurrentSessionSending: Bool {
         model.isSessionSending(model.selectedSession?.id)
+    }
+
+    private var chatScrollRequest: PaperCodexNativeScrollRequest? {
+        guard chatScrollRequestToken > 0 else {
+            return nil
+        }
+        return PaperCodexNativeScrollRequest(
+            token: chatScrollRequestToken,
+            target: .bottom,
+            animated: chatScrollRequestAnimated
+        )
     }
 
     private var canEditComposer: Bool {
@@ -211,12 +217,9 @@ struct ChatView: View {
         .frame(maxWidth: .infinity, minHeight: 34, idealHeight: 34, maxHeight: 34)
     }
 
-    private func scrollToBottom(_ proxy: ScrollViewProxy) {
-        DispatchQueue.main.async {
-            withAnimation(.easeOut(duration: 0.18)) {
-                proxy.scrollTo("chat-bottom", anchor: .bottom)
-            }
-        }
+    private func requestChatScrollToBottom(animated: Bool = true) {
+        chatScrollRequestAnimated = animated
+        chatScrollRequestToken += 1
     }
 
     private func renameSessionSheet(_ session: PaperSession) -> some View {

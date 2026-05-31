@@ -1469,6 +1469,13 @@ func runUILayoutSourceChecks() throws {
     }
     let swiftUIFormControlRegex = try NSRegularExpression(pattern: #"\b(TextField|SecureField|TextEditor|Picker|Toggle|Stepper|DatePicker)\("#)
     let swiftUIScrollViewRegex = try NSRegularExpression(pattern: #"\bScrollView\s*(?:\(|\{)"#)
+    let appSourcesWithSwiftUIScrollViews = try appSwiftSourceFiles.compactMap { fileURL -> String? in
+        let source = try String(contentsOf: fileURL)
+        let range = NSRange(source.startIndex..<source.endIndex, in: source)
+        return swiftUIScrollViewRegex.firstMatch(in: source, range: range) != nil || source.contains("ScrollViewReader")
+            ? fileURL.lastPathComponent
+            : nil
+    }
     func hasSwiftUIFormControlUse(_ source: String) -> Bool {
         let range = NSRange(source.startIndex..<source.endIndex, in: source)
         return swiftUIFormControlRegex.firstMatch(in: source, range: range) != nil
@@ -1877,24 +1884,38 @@ func runUILayoutSourceChecks() throws {
     )
     try check(
         nativeScrollViewSource.contains("struct PaperCodexNativeScrollView")
+            && nativeScrollViewSource.contains("struct PaperCodexNativeScrollRequest")
+            && nativeScrollViewSource.contains("struct PaperCodexNativeVisibleRange")
             && nativeScrollViewSource.contains("final class NativePaperCodexHostingScrollView: NSScrollView")
             && nativeScrollViewSource.contains("NSHostingView(rootView:")
             && nativeScrollViewSource.contains("documentView = documentContainer")
+            && nativeScrollViewSource.contains("scrollRequest:")
+            && nativeScrollViewSource.contains("onVisibleRangeChange:")
             && settingsViewSource.contains("PaperCodexNativeScrollView")
             && librarySource.contains("PaperCodexNativeScrollView")
             && saveToLibrarySource.contains("PaperCodexNativeScrollView")
             && interactionFeedbackSource.contains("PaperCodexNativeScrollView")
             && chatSource.contains("PaperCodexNativeScrollView(.horizontal")
+            && chatSource.contains("PaperCodexNativeScrollView(scrollRequest: chatScrollRequest")
+            && chatSource.contains("requestChatScrollToBottom")
             && discoverSource.contains("PaperCodexNativeScrollView")
+            && discoverSource.contains("onVisibleRangeChange:")
+            && discoverSource.contains("requestDiscoverScrollRestore")
+            && discoverSource.contains("@State private var discoverVisibleRowRange")
+            && discoverSource.contains("bufferedDiscoverRowRange")
+            && discoverSource.contains("discoverTopVirtualSpacerHeight")
             && readerViewSource.contains("PaperCodexNativeScrollView")
             && !hasSwiftUIScrollViewUse(settingsViewSource)
             && !hasSwiftUIScrollViewUse(librarySource)
             && !hasSwiftUIScrollViewUse(saveToLibrarySource)
             && !hasSwiftUIScrollViewUse(interactionFeedbackSource)
-            && swiftUIScrollViewUseCount(chatSource) == 1
-            && swiftUIScrollViewUseCount(discoverSource) == 1
-            && !hasSwiftUIScrollViewUse(readerViewSource),
-        "non-programmatic scroll regions should use shared AppKit NSScrollView hosting, leaving only programmatic Chat and Discover scroll readers on SwiftUI ScrollView"
+            && !hasSwiftUIScrollViewUse(chatSource)
+            && !hasSwiftUIScrollViewUse(discoverSource)
+            && !hasSwiftUIScrollViewUse(readerViewSource)
+            && !chatSource.contains("ScrollViewReader")
+            && !discoverSource.contains("ScrollViewReader")
+            && appSourcesWithSwiftUIScrollViews.isEmpty,
+        "all app scroll regions should use shared AppKit NSScrollView hosting, including programmable Chat and Discover regions; remaining files: \(appSourcesWithSwiftUIScrollViews.joined(separator: ", "))"
     )
     try check(
         actionButtonSource.contains("struct PaperCodexToolbarButton")
@@ -2902,11 +2923,14 @@ func runUILayoutSourceChecks() throws {
         "local thumbnail decoding should be delayed, concurrency-limited, and clear reused cells so scrolling stays responsive"
     )
     try check(
-        discoverSource.contains("ScrollViewReader")
+        discoverSource.contains("PaperCodexNativeScrollView(")
+            && discoverSource.contains("requestDiscoverScrollRestore(in:")
             && discoverSource.contains("isRestoringDiscoverScrollPosition")
             && discoverSource.contains("DiscoverImagePreloadPolicy")
-            && !discoverSource.contains(".scrollPosition(id: $discoverScrollAnchorID"),
-        "discover scrolling should restore via ScrollViewReader and avoid high-frequency scrollPosition state binding"
+            && discoverSource.contains("onVisibleRangeChange:")
+            && !discoverSource.contains(".scrollPosition(id: $discoverScrollAnchorID")
+            && !discoverSource.contains("ScrollViewReader"),
+        "discover scrolling should restore through programmable AppKit scroll requests and avoid high-frequency SwiftUI scrollPosition state binding"
     )
     try check(
         settingsViewSource.contains("Similarity categories")
@@ -3486,7 +3510,7 @@ func runUILayoutSourceChecks() throws {
         "AppModel should remember whether the reader was opened from Library or Discover"
     )
     try check(
-        discoverSource.contains("restoreDiscoverScrollPosition"),
+        discoverSource.contains("requestDiscoverScrollRestore"),
         "Discover should restore the last visible paper when returning from the reader"
     )
 
@@ -3658,8 +3682,11 @@ func runUILayoutSourceChecks() throws {
     )
 
     try check(
-        chatSource.contains("ScrollViewReader"),
-        "chat should auto-scroll to the newest message and active run"
+        chatSource.contains("PaperCodexNativeScrollView(scrollRequest: chatScrollRequest")
+            && chatSource.contains("requestChatScrollToBottom")
+            && chatSource.contains("target: .bottom")
+            && !chatSource.contains("ScrollViewReader"),
+        "chat should auto-scroll to the newest message and active run through programmable AppKit scroll requests"
     )
     try check(
         chatSource.contains("isCurrentSessionSending"),
@@ -3828,9 +3855,10 @@ func runUILayoutSourceChecks() throws {
             && appModelSource.contains("recordDiscoverScrollPosition")
             && discoverSource.contains("visibleDiscoverPaperID")
             && discoverSource.contains("markDiscoverVisibleRow")
-            && discoverSource.contains("ScrollViewReader")
-            && discoverSource.contains("restoreDiscoverScrollPosition(scrollProxy")
+            && discoverSource.contains("requestDiscoverScrollRestore(in:")
+            && discoverSource.contains("onVisibleRangeChange:")
             && discoverSource.contains("commitDiscoverScrollPosition")
+            && !discoverSource.contains("ScrollViewReader")
             && !discoverSource.contains("discoverReturnPaperID"),
         "Discover should record the current visible paper and restore that scroll position when returning from Reader or other app sections"
     )
@@ -3941,12 +3969,14 @@ func runUILayoutSourceChecks() throws {
     try check(
         discoverSource.contains("@State private var visibleDiscoverPaperID: String?")
             && discoverSource.contains("@State private var discoverScrollPositionCommitTask: Task<Void, Never>?")
-            && discoverSource.contains(".scrollTargetLayout()")
+            && discoverSource.contains("PaperCodexNativeScrollView(")
+            && discoverSource.contains("onVisibleRangeChange:")
             && discoverSource.contains("isRestoringDiscoverScrollPosition")
             && !discoverSource.contains(".scrollPosition(id:")
+            && !discoverSource.contains(".scrollTargetLayout()")
             && !discoverSource.contains("DiscoverVisiblePaperReporter")
             && !discoverSource.contains("DiscoverVisiblePaperPreferenceKey"),
-        "Discover scroll restoration should avoid per-pixel scroll binding and per-card geometry tracking"
+        "Discover scroll restoration should avoid per-pixel scroll binding, SwiftUI scroll targets, and per-card geometry tracking"
     )
     try check(
         discoverSource.contains("let visiblePapers = papers")
@@ -4201,7 +4231,8 @@ func runUIDesignSourceChecks() throws {
         throw CheckFailure(description: "message bubble source should remain inspectable")
     }
     try check(
-        chatSource.contains(".padding(16)\n                    .frame(maxWidth: .infinity, alignment: .leading)")
+        chatSource.contains(".padding(16)")
+            && chatSource.contains(".frame(maxWidth: .infinity, alignment: .leading)")
             && chatSource.contains("expandsHorizontally")
             && chatSource.contains("setContentHuggingPriority(.defaultLow, for: .horizontal)")
             && chatSource.contains("setContentCompressionResistancePriority(.defaultLow, for: .horizontal)"),
