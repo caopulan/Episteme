@@ -1928,6 +1928,27 @@ func runUILayoutSourceChecks() throws {
     } else {
         throw CheckFailure(description: "settings chat appearance section source should remain inspectable")
     }
+    if let codexEnrichmentRange = settingsViewSource.range(of: "private var codexEnrichmentSettings: some View"),
+       let codexEnrichmentEndRange = settingsViewSource.range(of: "private var discoverCodexProcessingSettings: some View", range: codexEnrichmentRange.upperBound..<settingsViewSource.endIndex) {
+        let codexEnrichmentSettingsSource = String(settingsViewSource[codexEnrichmentRange.lowerBound..<codexEnrichmentEndRange.lowerBound])
+        try check(
+            codexEnrichmentSettingsSource.components(separatedBy: "SettingsCheckboxToggle(").count - 1 == 2
+                && settingsViewSource.contains("private struct SettingsCheckboxToggle: View")
+                && settingsViewSource.contains("private struct NativeSettingsCheckboxToggle: NSViewRepresentable")
+                && settingsViewSource.contains("private final class NativeSettingsCheckboxToggleButtonView: NSButton")
+                && settingsViewSource.contains("setButtonType(.switch)")
+                && settingsViewSource.contains("setAccessibilityRole(.checkBox)")
+                && settingsViewSource.contains("override func mouseDown(with event: NSEvent)")
+                && settingsViewSource.contains("override func accessibilityValue() -> Any?")
+                && settingsViewSource.contains("override func accessibilityPerformPress() -> Bool")
+                && settingsViewSource.contains("CATransaction.setAnimationDuration")
+                && !codexEnrichmentSettingsSource.contains("\n            Toggle(")
+                && !codexEnrichmentSettingsSource.contains(".toggleStyle(.checkbox)"),
+            "Settings Codex enrichment toggles should use native AppKit checkbox controls"
+        )
+    } else {
+        throw CheckFailure(description: "settings Codex enrichment section source should remain inspectable")
+    }
     try check(
         chatSource.contains("Bundle.main.resourceURL")
             && chatSource.contains("loadHTMLString(html, baseURL: htmlBaseURL)"),

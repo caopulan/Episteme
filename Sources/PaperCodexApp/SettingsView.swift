@@ -324,10 +324,18 @@ struct SettingsView: View {
 
     private var codexEnrichmentSettings: some View {
         settingsSection(title: "Codex Enrichment", systemImage: "sparkles") {
-            Toggle("Auto-enrich when opening arXiv papers", isOn: $draftAutoEnrichOnOpen)
-                .toggleStyle(.checkbox)
-            Toggle("Auto-enrich when saving to Library", isOn: $draftAutoEnrichOnSave)
-                .toggleStyle(.checkbox)
+            SettingsCheckboxToggle(
+                title: "Auto-enrich when opening arXiv papers",
+                isOn: draftAutoEnrichOnOpen
+            ) { isOn in
+                draftAutoEnrichOnOpen = isOn
+            }
+            SettingsCheckboxToggle(
+                title: "Auto-enrich when saving to Library",
+                isOn: draftAutoEnrichOnSave
+            ) { isOn in
+                draftAutoEnrichOnSave = isOn
+            }
             SettingsActionButton(
                 title: isEnrichmentDirty ? "Save Enrichment" : "Saved",
                 systemImage: isEnrichmentDirty ? "checkmark" : "checkmark.circle",
@@ -1366,6 +1374,135 @@ private final class NativeSettingsFontSizeStepperView: NSView {
             self.layer?.transform = CATransform3DIdentity
             CATransaction.commit()
         }
+    }
+}
+
+private struct SettingsCheckboxToggle: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var title: String
+    var isOn: Bool
+    var action: (Bool) -> Void
+
+    var body: some View {
+        NativeSettingsCheckboxToggle(
+            title: title,
+            isOn: isOn,
+            reduceMotion: reduceMotion,
+            action: action
+        )
+        .frame(maxWidth: .infinity, minHeight: 26, maxHeight: 26, alignment: .leading)
+        .help(title)
+    }
+}
+
+private struct NativeSettingsCheckboxToggle: NSViewRepresentable {
+    var title: String
+    var isOn: Bool
+    var reduceMotion: Bool
+    var action: (Bool) -> Void
+
+    func makeNSView(context: Context) -> NativeSettingsCheckboxToggleButtonView {
+        let view = NativeSettingsCheckboxToggleButtonView()
+        view.apply(title: title, isOn: isOn, reduceMotion: reduceMotion, action: action)
+        return view
+    }
+
+    func updateNSView(_ view: NativeSettingsCheckboxToggleButtonView, context: Context) {
+        view.apply(title: title, isOn: isOn, reduceMotion: reduceMotion, action: action)
+    }
+}
+
+private final class NativeSettingsCheckboxToggleButtonView: NSButton {
+    private var isChecked = false
+    private var reduceMotion = false
+    private var pressHandler: (Bool) -> Void = { _ in }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: 26)
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+
+    override func accessibilityValue() -> Any? {
+        isChecked ? NSLocalizedString("Selected", comment: "") : NSLocalizedString("Not selected", comment: "")
+    }
+
+    override func accessibilityPerformPress() -> Bool {
+        performToggle()
+        return true
+    }
+
+    func apply(title: String, isOn: Bool, reduceMotion: Bool, action: @escaping (Bool) -> Void) {
+        self.title = title
+        self.isChecked = isOn
+        self.reduceMotion = reduceMotion
+        pressHandler = action
+        state = isOn ? .on : .off
+        toolTip = title
+        setAccessibilityLabel(title)
+        setAccessibilityValue(isOn ? NSLocalizedString("Selected", comment: "") : NSLocalizedString("Not selected", comment: ""))
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        pulse(pressed: true)
+        performToggle()
+        DispatchQueue.main.async { [weak self] in
+            self?.pulse(pressed: false)
+        }
+    }
+
+    override func keyDown(with event: NSEvent) {
+        if event.keyCode == 36 || event.keyCode == 49 {
+            pulse(pressed: true)
+            performToggle()
+            DispatchQueue.main.async { [weak self] in
+                self?.pulse(pressed: false)
+            }
+            return
+        }
+        super.keyDown(with: event)
+    }
+
+    private func setup() {
+        translatesAutoresizingMaskIntoConstraints = false
+        setButtonType(.switch)
+        isBordered = false
+        controlSize = .regular
+        font = .systemFont(ofSize: 13, weight: .regular)
+        imagePosition = .imageLeading
+        alignment = .left
+        focusRingType = .none
+        setAccessibilityElement(true)
+        setAccessibilityRole(.checkBox)
+        wantsLayer = true
+    }
+
+    private func performToggle() {
+        let nextValue = !isChecked
+        isChecked = nextValue
+        state = nextValue ? .on : .off
+        pressHandler(nextValue)
+    }
+
+    private func pulse(pressed: Bool) {
+        let scale: CGFloat = reduceMotion || !pressed ? 1 : 0.992
+        CATransaction.begin()
+        CATransaction.setDisableActions(reduceMotion)
+        CATransaction.setAnimationDuration(reduceMotion ? 0 : (pressed ? 0.05 : 0.10))
+        layer?.transform = CATransform3DMakeScale(scale, scale, 1)
+        CATransaction.commit()
     }
 }
 
