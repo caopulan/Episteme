@@ -295,20 +295,7 @@ private struct AddPaperToSessionSheet: View {
                 PaperCodexNativeEmptyState(title: "No Papers", systemImage: "doc.text.magnifyingglass")
                     .frame(width: 520, height: 220)
             } else {
-                PaperCodexNativeScrollView {
-                    LazyVStack(spacing: 6) {
-                        ForEach(filteredPapers) { paper in
-                            AddPaperToSessionRowButton(
-                                title: paper.title,
-                                detail: paper.authors.isEmpty ? "Authors not set" : paper.authors.joined(separator: ", ")
-                            ) {
-                                onAdd(paper)
-                            }
-                            .frame(maxWidth: .infinity, minHeight: 54, maxHeight: 54)
-                        }
-                    }
-                    .frame(maxWidth: .infinity)
-                }
+                NativeAddPaperToSessionList(papers: filteredPapers, onAdd: onAdd)
                 .frame(width: 520, height: 280)
             }
             HStack {
@@ -323,49 +310,24 @@ private struct AddPaperToSessionSheet: View {
     }
 }
 
-private struct AddPaperToSessionRowButton: NSViewRepresentable {
-    var title: String
-    var detail: String
-    var action: () -> Void
+private struct NativeAddPaperToSessionList: NSViewRepresentable {
+    var papers: [Paper]
+    var onAdd: (Paper) -> Void
 
-    func makeCoordinator() -> Coordinator {
-        Coordinator(action: action)
+    func makeNSView(context: Context) -> NativeAddPaperToSessionListView {
+        let view = NativeAddPaperToSessionListView()
+        view.apply(papers: papers, onAdd: onAdd)
+        return view
     }
 
-    func makeNSView(context: Context) -> NativeAddPaperToSessionRowButtonView {
-        let button = NativeAddPaperToSessionRowButtonView()
-        button.target = context.coordinator
-        button.action = #selector(Coordinator.performAction(_:))
-        button.apply(title: title, detail: detail)
-        return button
-    }
-
-    func updateNSView(_ button: NativeAddPaperToSessionRowButtonView, context: Context) {
-        context.coordinator.action = action
-        button.apply(title: title, detail: detail)
-    }
-
-    @MainActor final class Coordinator: NSObject {
-        var action: () -> Void
-
-        init(action: @escaping () -> Void) {
-            self.action = action
-            super.init()
-        }
-
-        @objc func performAction(_ sender: NSButton) {
-            action()
-        }
+    func updateNSView(_ view: NativeAddPaperToSessionListView, context: Context) {
+        view.apply(papers: papers, onAdd: onAdd)
     }
 }
 
-private final class NativeAddPaperToSessionRowButtonView: NSButton {
-    private let iconView = NSImageView()
-    private let titleLabel = NSTextField(labelWithString: "")
-    private let detailLabel = NSTextField(labelWithString: "")
-    private var trackingAreaToken: NSTrackingArea?
-    private var isHovering = false
-    private var isPressed = false
+private final class NativeAddPaperToSessionListView: NSScrollView {
+    private let tableView = NativeAddPaperToSessionTableView()
+    private let controller = NativeAddPaperToSessionTableController()
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -377,7 +339,211 @@ private final class NativeAddPaperToSessionRowButtonView: NSButton {
     }
 
     override var intrinsicContentSize: NSSize {
-        NSSize(width: NSView.noIntrinsicMetric, height: 54)
+        NSSize(width: NSView.noIntrinsicMetric, height: NSView.noIntrinsicMetric)
+    }
+
+    func apply(papers: [Paper], onAdd: @escaping (Paper) -> Void) {
+        controller.apply(papers: papers, onAdd: onAdd)
+        tableView.reloadData()
+        fitColumnToVisibleWidth()
+        if !papers.isEmpty {
+            tableView.scrollRowToVisible(0)
+        }
+    }
+
+    override func layout() {
+        super.layout()
+        fitColumnToVisibleWidth()
+    }
+
+    private func setup() {
+        translatesAutoresizingMaskIntoConstraints = false
+        drawsBackground = false
+        hasVerticalScroller = true
+        hasHorizontalScroller = false
+        autohidesScrollers = true
+        borderType = .noBorder
+        scrollerStyle = .overlay
+
+        let column = NSTableColumn(identifier: NativeAddPaperToSessionTableController.columnIdentifier)
+        column.resizingMask = .autoresizingMask
+        tableView.addTableColumn(column)
+        tableView.headerView = nil
+        tableView.backgroundColor = .clear
+        tableView.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
+        tableView.autoresizingMask = [.width]
+        tableView.usesAlternatingRowBackgroundColors = false
+        tableView.selectionHighlightStyle = .none
+        tableView.allowsEmptySelection = true
+        tableView.allowsMultipleSelection = false
+        tableView.rowHeight = NativeAddPaperToSessionTableController.rowHeight
+        tableView.intercellSpacing = NSSize(width: 0, height: 6)
+        tableView.style = .plain
+        tableView.dataSource = controller
+        tableView.delegate = controller
+        controller.attach(tableView: tableView)
+        tableView.onActivateRow = { [weak controller] rowIndex in
+            controller?.activateRow(at: rowIndex)
+        }
+        tableView.onPressRow = { [weak controller] rowIndex, isPressing in
+            controller?.setPressedRow(rowIndex, isPressing: isPressing)
+        }
+
+        documentView = tableView
+    }
+
+    private func fitColumnToVisibleWidth() {
+        guard let column = tableView.tableColumns.first else {
+            return
+        }
+        let visibleWidth = contentView.bounds.width
+        guard visibleWidth > 0 else {
+            return
+        }
+        if abs(tableView.frame.width - visibleWidth) > 0.5 {
+            tableView.frame.size.width = visibleWidth
+        }
+        if abs(column.width - visibleWidth) > 0.5 {
+            column.width = visibleWidth
+        }
+    }
+}
+
+private final class NativeAddPaperToSessionTableView: NSTableView {
+    var onActivateRow: (Int) -> Void = { _ in }
+    var onPressRow: (Int?, Bool) -> Void = { _, _ in }
+
+    override var acceptsFirstResponder: Bool {
+        true
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(self)
+        let localPoint = convert(event.locationInWindow, from: nil)
+        let rowIndex = row(at: localPoint)
+        if rowIndex >= 0 {
+            onPressRow(rowIndex, true)
+        }
+        super.mouseDown(with: event)
+        if rowIndex >= 0 {
+            onPressRow(rowIndex, false)
+            onActivateRow(rowIndex)
+        }
+    }
+}
+
+@MainActor private final class NativeAddPaperToSessionTableController: NSObject, NSTableViewDataSource, NSTableViewDelegate {
+    static let columnIdentifier = NSUserInterfaceItemIdentifier("add-paper")
+    static let rowHeight: CGFloat = 58
+
+    private static let cellIdentifier = NSUserInterfaceItemIdentifier("AddPaperToSessionCell")
+
+    private var papers: [Paper] = []
+    private var pressedRow: Int?
+    private var onAdd: (Paper) -> Void = { _ in }
+    private weak var tableView: NSTableView?
+
+    func attach(tableView: NSTableView) {
+        self.tableView = tableView
+    }
+
+    func apply(papers: [Paper], onAdd: @escaping (Paper) -> Void) {
+        self.papers = papers
+        self.onAdd = onAdd
+    }
+
+    func numberOfRows(in tableView: NSTableView) -> Int {
+        papers.count
+    }
+
+    func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
+        Self.rowHeight
+    }
+
+    func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool {
+        false
+    }
+
+    func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
+        let rowView = NativeAddPaperToSessionTableRowView()
+        rowView.isEmphasized = false
+        return rowView
+    }
+
+    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        guard papers.indices.contains(row) else {
+            return nil
+        }
+        let cell = (tableView.makeView(withIdentifier: Self.cellIdentifier, owner: self) as? NativeAddPaperToSessionRowCellView)
+            ?? NativeAddPaperToSessionRowCellView(identifier: Self.cellIdentifier)
+        let paper = papers[row]
+        cell.configure(
+            title: paper.title,
+            detail: paper.authors.isEmpty ? "Authors not set" : paper.authors.joined(separator: ", "),
+            isPressing: pressedRow == row
+        )
+        return cell
+    }
+
+    func activateRow(at row: Int) {
+        guard papers.indices.contains(row) else {
+            return
+        }
+        onAdd(papers[row])
+    }
+
+    func setPressedRow(_ row: Int?, isPressing: Bool) {
+        let nextPressedRow = isPressing ? row : nil
+        guard pressedRow != nextPressedRow else {
+            return
+        }
+        let previousPressedRow = pressedRow
+        pressedRow = nextPressedRow
+        reloadRows([previousPressedRow, pressedRow].compactMap { $0 })
+    }
+
+    private func reloadRows(_ rowIndexes: [Int]) {
+        guard let tableView = tableView else {
+            return
+        }
+        let validIndexes = IndexSet(rowIndexes.filter { $0 >= 0 && $0 < tableView.numberOfRows })
+        guard !validIndexes.isEmpty else {
+            return
+        }
+        tableView.reloadData(forRowIndexes: validIndexes, columnIndexes: IndexSet(integer: 0))
+    }
+
+    func tableView(_ tableView: NSTableView, didAdd rowView: NSTableRowView, forRow row: Int) {
+        self.tableView = tableView
+    }
+}
+
+private final class NativeAddPaperToSessionTableRowView: NSTableRowView {
+    override func drawSelection(in dirtyRect: NSRect) {}
+
+    override var isEmphasized: Bool {
+        get { false }
+        set {}
+    }
+}
+
+private final class NativeAddPaperToSessionRowCellView: NSTableCellView {
+    private let cardView = NSView()
+    private let iconView = NSImageView()
+    private let titleLabel = NSTextField(labelWithString: "")
+    private let detailLabel = NSTextField(labelWithString: "")
+    private var trackingAreaToken: NSTrackingArea?
+    private var isHovering = false
+    private var isPressing = false
+
+    init(identifier: NSUserInterfaceItemIdentifier) {
+        super.init(frame: .zero)
+        self.identifier = identifier
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        nil
     }
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
@@ -401,15 +567,6 @@ private final class NativeAddPaperToSessionRowButtonView: NSButton {
 
     override func mouseExited(with event: NSEvent) {
         isHovering = false
-        isPressed = false
-        updateAppearance()
-    }
-
-    override func mouseDown(with event: NSEvent) {
-        isPressed = true
-        updateAppearance()
-        super.mouseDown(with: event)
-        isPressed = false
         updateAppearance()
     }
 
@@ -418,7 +575,8 @@ private final class NativeAddPaperToSessionRowButtonView: NSButton {
         updateAppearance()
     }
 
-    func apply(title: String, detail: String) {
+    func configure(title: String, detail: String, isPressing: Bool) {
+        self.isPressing = isPressing
         titleLabel.stringValue = title
         detailLabel.stringValue = detail
         toolTip = "\(title)\n\(detail)"
@@ -428,44 +586,51 @@ private final class NativeAddPaperToSessionRowButtonView: NSButton {
     }
 
     private func setup() {
-        translatesAutoresizingMaskIntoConstraints = false
         wantsLayer = true
-        isBordered = false
-        title = ""
-        bezelStyle = .regularSquare
-        setButtonType(.momentaryChange)
-        focusRingType = .none
+        layer?.backgroundColor = NSColor.clear.cgColor
+        setAccessibilityRole(.button)
+
+        cardView.translatesAutoresizingMaskIntoConstraints = false
+        cardView.wantsLayer = true
+        cardView.layer?.cornerRadius = 7
+        cardView.layer?.masksToBounds = false
+        addSubview(cardView)
 
         iconView.translatesAutoresizingMaskIntoConstraints = false
         iconView.image = NSImage(systemSymbolName: "doc.text", accessibilityDescription: nil)
         iconView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 16, weight: .semibold)
         iconView.contentTintColor = .controlAccentColor
         iconView.imageScaling = .scaleProportionallyDown
+        cardView.addSubview(iconView)
 
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         titleLabel.font = .systemFont(ofSize: 13.5, weight: .semibold)
+        titleLabel.textColor = .labelColor
         titleLabel.lineBreakMode = .byTruncatingTail
         titleLabel.maximumNumberOfLines = 1
+        cardView.addSubview(titleLabel)
 
         detailLabel.translatesAutoresizingMaskIntoConstraints = false
         detailLabel.font = .systemFont(ofSize: 11.5, weight: .regular)
         detailLabel.textColor = .secondaryLabelColor
         detailLabel.lineBreakMode = .byTruncatingTail
         detailLabel.maximumNumberOfLines = 1
-
-        addSubview(iconView)
-        addSubview(titleLabel)
-        addSubview(detailLabel)
+        cardView.addSubview(detailLabel)
 
         NSLayoutConstraint.activate([
-            iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
-            iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            cardView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            cardView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            cardView.topAnchor.constraint(equalTo: topAnchor),
+            cardView.bottomAnchor.constraint(equalTo: bottomAnchor),
+
+            iconView.leadingAnchor.constraint(equalTo: cardView.leadingAnchor, constant: 10),
+            iconView.centerYAnchor.constraint(equalTo: cardView.centerYAnchor),
             iconView.widthAnchor.constraint(equalToConstant: 18),
             iconView.heightAnchor.constraint(equalToConstant: 18),
 
             titleLabel.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 10),
-            titleLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
-            titleLabel.topAnchor.constraint(equalTo: topAnchor, constant: 9),
+            titleLabel.trailingAnchor.constraint(equalTo: cardView.trailingAnchor, constant: -10),
+            titleLabel.topAnchor.constraint(equalTo: cardView.topAnchor, constant: 10),
 
             detailLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
             detailLabel.trailingAnchor.constraint(equalTo: titleLabel.trailingAnchor),
@@ -478,26 +643,26 @@ private final class NativeAddPaperToSessionRowButtonView: NSButton {
     }
 
     private func updateAppearance() {
-        layer?.cornerRadius = 7
-        layer?.masksToBounds = false
+        cardView.layer?.cornerRadius = 7
+        cardView.layer?.masksToBounds = false
         let accent = NSColor.controlAccentColor
-        if isPressed {
-            layer?.backgroundColor = accent.withAlphaComponent(0.16).cgColor
-            layer?.borderColor = accent.withAlphaComponent(0.42).cgColor
-            layer?.borderWidth = 1
+        if isPressing {
+            cardView.layer?.backgroundColor = accent.withAlphaComponent(0.16).cgColor
+            cardView.layer?.borderColor = accent.withAlphaComponent(0.42).cgColor
+            cardView.layer?.borderWidth = 1
         } else if isHovering {
-            layer?.backgroundColor = accent.withAlphaComponent(0.10).cgColor
-            layer?.borderColor = accent.withAlphaComponent(0.26).cgColor
-            layer?.borderWidth = 1
+            cardView.layer?.backgroundColor = accent.withAlphaComponent(0.10).cgColor
+            cardView.layer?.borderColor = accent.withAlphaComponent(0.26).cgColor
+            cardView.layer?.borderWidth = 1
         } else {
-            layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
-            layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.35).cgColor
-            layer?.borderWidth = 1
+            cardView.layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
+            cardView.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.35).cgColor
+            cardView.layer?.borderWidth = 1
         }
-        layer?.shadowColor = NSColor.black.cgColor
-        layer?.shadowOpacity = isHovering && !isPressed ? 0.08 : 0
-        layer?.shadowRadius = isHovering ? 5 : 0
-        layer?.shadowOffset = CGSize(width: 0, height: -2)
-        alphaValue = isPressed ? 0.78 : 1
+        cardView.layer?.shadowColor = NSColor.black.cgColor
+        cardView.layer?.shadowOpacity = isHovering && !isPressing ? 0.08 : 0
+        cardView.layer?.shadowRadius = isHovering ? 5 : 0
+        cardView.layer?.shadowOffset = CGSize(width: 0, height: -2)
+        alphaValue = isPressing ? 0.78 : 1
     }
 }
