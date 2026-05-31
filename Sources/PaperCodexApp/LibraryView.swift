@@ -17,14 +17,10 @@ struct LibraryView: View {
     @State private var lastPaperRowClick: LibraryPaperRowClick?
     @State private var isShowingBulkCopy = false
     @State private var isShowingBulkTag = false
-    @State private var isConfirmingBulkDelete = false
     @State private var collapsedCategoryIDs: Set<String> = []
     @State private var categoryPendingManagement: PaperCodexCore.Category?
-    @State private var categoryPendingDelete: PaperCodexCore.Category?
     @State private var tagPendingManagement: PaperTag?
-    @State private var tagPendingDelete: PaperTag?
     @State private var outlineDraggedCategoryID: String?
-    @State private var watchedFolderPendingRemoval: WatchedFolder?
     @State private var noteTitle = ""
     @State private var noteBody = ""
     @State private var editingNoteID: String?
@@ -165,64 +161,6 @@ struct LibraryView: View {
                 scheduleInspectorDetailsAfterSelectionSettles(for: paper)
             }
         }
-        .alert("Delete selected papers?", isPresented: $isConfirmingBulkDelete) {
-            Button("Delete", role: .destructive) {
-                deleteSelectedPapers()
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This removes \(selectedPaperIDs.count) papers from the local library and deletes app-managed PDF/cache files. This cannot be undone.")
-        }
-        .alert("Delete category?", isPresented: Binding(
-            get: { categoryPendingDelete != nil },
-            set: { if !$0 { categoryPendingDelete = nil } }
-        )) {
-            Button("Delete", role: .destructive) {
-                if let categoryPendingDelete {
-                    model.deleteCategory(categoryPendingDelete.id)
-                    selectedCategoryID = nil
-                }
-                categoryPendingDelete = nil
-            }
-            Button("Cancel", role: .cancel) {
-                categoryPendingDelete = nil
-            }
-        } message: {
-            Text("This removes the category, its subcategories, and their assignments. Papers stay in the library.")
-        }
-        .alert("Delete tag?", isPresented: Binding(
-            get: { tagPendingDelete != nil },
-            set: { if !$0 { tagPendingDelete = nil } }
-        )) {
-            Button("Delete", role: .destructive) {
-                if let tagPendingDelete {
-                    model.deleteTag(tagPendingDelete.id)
-                    selectedTagID = nil
-                }
-                tagPendingDelete = nil
-            }
-            Button("Cancel", role: .cancel) {
-                tagPendingDelete = nil
-            }
-        } message: {
-            Text("This removes the tag from every paper. Papers stay in the library.")
-        }
-        .alert("Remove watched folder?", isPresented: Binding(
-            get: { watchedFolderPendingRemoval != nil },
-            set: { if !$0 { watchedFolderPendingRemoval = nil } }
-        )) {
-            Button("Remove", role: .destructive) {
-                if let watchedFolderPendingRemoval {
-                    model.removeWatchedFolder(watchedFolderPendingRemoval)
-                }
-                watchedFolderPendingRemoval = nil
-            }
-            Button("Cancel", role: .cancel) {
-                watchedFolderPendingRemoval = nil
-            }
-        } message: {
-            Text("The folder will stop being scanned. Imported papers remain in the library.")
-        }
         .sheet(isPresented: $isCreatingCategory) {
             CategoryEditorSheet(
                 categoryItems: flattenedCategoryItems(),
@@ -261,7 +199,7 @@ struct LibraryView: View {
             } onClose: {
                 isShowingWatchedFolders = false
             } onRemove: { folder in
-                watchedFolderPendingRemoval = folder
+                confirmRemoveWatchedFolder(folder)
             }
             .environmentObject(model)
         }
@@ -617,7 +555,7 @@ struct LibraryView: View {
                         isShowingBulkTag = true
                     },
                     onDelete: {
-                        isConfirmingBulkDelete = true
+                        confirmDeleteSelectedPapers()
                     },
                     onClear: {
                         selectedPaperIDs.removeAll()
@@ -1045,6 +983,56 @@ struct LibraryView: View {
         lastSelectedPaperID = nil
     }
 
+    private func confirmDeleteSelectedPapers() {
+        let count = selectedPaperIDs.count
+        guard count > 0 else {
+            return
+        }
+        PaperCodexNativeConfirmation.present(
+            title: "Delete selected papers?",
+            message: "This removes \(count) papers from the local library and deletes app-managed PDF/cache files. This cannot be undone.",
+            confirmTitle: "Delete",
+            style: .critical
+        ) {
+            deleteSelectedPapers()
+        }
+    }
+
+    private func confirmDeleteCategory(_ category: PaperCodexCore.Category) {
+        PaperCodexNativeConfirmation.present(
+            title: "Delete category?",
+            message: "This removes the category, its subcategories, and their assignments. Papers stay in the library.",
+            confirmTitle: "Delete",
+            style: .critical
+        ) {
+            model.deleteCategory(category.id)
+            selectedCategoryID = nil
+        }
+    }
+
+    private func confirmDeleteTag(_ tag: PaperTag) {
+        PaperCodexNativeConfirmation.present(
+            title: "Delete tag?",
+            message: "This removes the tag from every paper. Papers stay in the library.",
+            confirmTitle: "Delete",
+            style: .critical
+        ) {
+            model.deleteTag(tag.id)
+            selectedTagID = nil
+        }
+    }
+
+    private func confirmRemoveWatchedFolder(_ folder: WatchedFolder) {
+        PaperCodexNativeConfirmation.present(
+            title: "Remove watched folder?",
+            message: "The folder will stop being scanned. Imported papers remain in the library.",
+            confirmTitle: "Remove",
+            style: .warning
+        ) {
+            model.removeWatchedFolder(folder)
+        }
+    }
+
     private func openSelectedPapersForReading() {
         let paperIDs = selectedReadablePaperIDsInOrder
         guard !paperIDs.isEmpty else {
@@ -1329,7 +1317,7 @@ struct LibraryView: View {
             },
             onDelete: {
                 categoryPendingManagement = nil
-                categoryPendingDelete = category
+                confirmDeleteCategory(category)
             },
             onCancel: {
                 categoryPendingManagement = nil
@@ -1346,7 +1334,7 @@ struct LibraryView: View {
             },
             onDelete: {
                 tagPendingManagement = nil
-                tagPendingDelete = tag
+                confirmDeleteTag(tag)
             },
             onCancel: {
                 tagPendingManagement = nil

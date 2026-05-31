@@ -23,7 +23,6 @@ struct SettingsView: View {
     @State private var draftEmbeddingModel = ""
     @State private var newPromptTitle = ""
     @State private var newPromptContent = ""
-    @State private var isConfirmingClearCache = false
     @State private var isEditingCodexSystemPrompt = false
     @State private var editingPrompt: QuickPrompt?
     @State private var editingPromptTitle = ""
@@ -96,14 +95,6 @@ struct SettingsView: View {
                 .frame(maxWidth: 820, alignment: .leading)
             }
             .frame(minWidth: 0)
-        }
-        .alert("Clear arXiv cache?", isPresented: $isConfirmingClearCache) {
-            Button("Clear", role: .destructive) {
-                model.clearArxivCaches()
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This removes cached feed JSON, temporary PDFs, and unsaved opened arXiv papers.")
         }
         .sheet(item: $editingPrompt) { prompt in
             quickPromptEditSheet(prompt)
@@ -776,7 +767,7 @@ struct SettingsView: View {
             }
             HStack {
                 SettingsActionButton(title: "Clear arXiv Cache", systemImage: "trash", kind: .destructive, role: .destructive) {
-                    isConfirmingClearCache = true
+                    confirmClearArxivCache()
                 }
 
                 SettingsActionButton(title: "Refresh Size", systemImage: "arrow.clockwise") {
@@ -787,6 +778,17 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+        }
+    }
+
+    private func confirmClearArxivCache() {
+        PaperCodexNativeConfirmation.present(
+            title: "Clear arXiv cache?",
+            message: "This removes cached feed JSON, temporary PDFs, and unsaved opened arXiv papers.",
+            confirmTitle: "Clear",
+            style: .critical
+        ) {
+            model.clearArxivCaches()
         }
     }
 

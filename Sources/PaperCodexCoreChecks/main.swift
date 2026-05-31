@@ -1443,6 +1443,8 @@ func runUILayoutSourceChecks() throws {
     let localArxivClientSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexCore/LocalArxivClient.swift"))
     let nativeFormControlsURL = root.appendingPathComponent("Sources/PaperCodexApp/PaperCodexNativeFormControls.swift")
     let nativeFormControlsSource = FileManager.default.fileExists(atPath: nativeFormControlsURL.path) ? try String(contentsOf: nativeFormControlsURL) : ""
+    let nativeConfirmationURL = root.appendingPathComponent("Sources/PaperCodexApp/PaperCodexNativeConfirmation.swift")
+    let nativeConfirmationSource = FileManager.default.fileExists(atPath: nativeConfirmationURL.path) ? try String(contentsOf: nativeConfirmationURL) : ""
     let swiftUIFormControlRegex = try NSRegularExpression(pattern: #"\b(TextField|SecureField|TextEditor|Picker|Toggle|Stepper|DatePicker)\("#)
     func hasSwiftUIFormControlUse(_ source: String) -> Bool {
         let range = NSRange(source.startIndex..<source.endIndex, in: source)
@@ -1803,6 +1805,21 @@ func runUILayoutSourceChecks() throws {
             && !hasSwiftUIFormControlUse(readerViewSource)
             && !hasSwiftUIFormControlUse(librarySource),
         "remaining app form inputs should use shared native AppKit text, popup, editor, and checkbox controls"
+    )
+    try check(
+        nativeConfirmationSource.contains("enum PaperCodexNativeConfirmation")
+            && nativeConfirmationSource.contains("let alert = NSAlert()")
+            && nativeConfirmationSource.contains("alert.beginSheetModal(for: window)")
+            && nativeConfirmationSource.contains("alert.runModal()")
+            && librarySource.contains("PaperCodexNativeConfirmation.present")
+            && settingsViewSource.contains("PaperCodexNativeConfirmation.present")
+            && !librarySource.contains(".alert(")
+            && !settingsViewSource.contains(".alert(")
+            && !librarySource.contains("isConfirmingBulkDelete")
+            && !settingsViewSource.contains("isConfirmingClearCache")
+            && !librarySource.contains("Button(\"Delete\", role: .destructive)")
+            && !settingsViewSource.contains("Button(\"Clear\", role: .destructive)"),
+        "destructive confirmation dialogs should be explicit native AppKit NSAlert sheets instead of SwiftUI alert buttons"
     )
     try check(
         actionButtonSource.contains("struct PaperCodexToolbarButton")
@@ -2868,8 +2885,9 @@ func runUILayoutSourceChecks() throws {
         "library should provide a bulk tag sheet"
     )
     try check(
-        librarySource.contains("isConfirmingBulkDelete"),
-        "library should confirm destructive bulk deletes"
+        librarySource.contains("confirmDeleteSelectedPapers()")
+            && librarySource.contains("PaperCodexNativeConfirmation.present("),
+        "library should confirm destructive bulk deletes with the shared native confirmation dialog"
     )
     try check(
         appModelSource.contains("codexSystemPromptDefaultsKey"),
