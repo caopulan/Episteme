@@ -2168,13 +2168,17 @@ func runUILayoutSourceChecks() throws {
     try check(
         designSystemSource.contains("static let press = Animation.easeOut(duration: 0.05)")
             && !designSystemSource.contains("static let route")
-            && sidebarRowSource.contains("SidebarRowButtonStyle")
-            && sidebarRowSource.contains("configuration.isPressed")
-            && sidebarRowSource.contains("PaperCodexMotion.press")
-            && sidebarRowSource.contains("selected || configuration.isPressed")
-            && sidebarRowSource.contains(".buttonStyle(SidebarRowButtonStyle(")
+            && sidebarRowSource.contains("import AppKit")
+            && sidebarRowSource.contains("NativeSidebarRowButton(")
+            && sidebarRowSource.contains("private struct NativeSidebarRowButton: NSViewRepresentable")
+            && sidebarRowSource.contains("private final class NativeSidebarRowButtonView: NSButton")
+            && sidebarRowSource.contains("override func mouseDown(with event: NSEvent)")
+            && sidebarRowSource.contains("setAccessibilityRole(.button)")
+            && sidebarRowSource.contains("CATransaction.setAnimationDuration")
+            && !sidebarRowSource.contains("SidebarRowButtonStyle")
+            && !sidebarRowSource.contains(".buttonStyle(SidebarRowButtonStyle(")
             && !sidebarRowSource.contains(".buttonStyle(.plain)"),
-        "navigation rows should provide immediate press feedback while route content switches without delayed fade motion"
+        "secondary sidebar rows should use native AppKit buttons with immediate pressed feedback"
     )
     if let recentRowRange = librarySource.range(of: "private struct RecentConversationRow: View"),
        let recentRowEndRange = librarySource.range(of: "private struct RecentConversationDetailPanel", range: recentRowRange.upperBound..<librarySource.endIndex) {
@@ -2521,7 +2525,7 @@ func runUILayoutSourceChecks() throws {
         "root view should drive SwiftUI localization from the app language setting"
     )
     try check(
-        sidebarRowSource.contains("LocalizedStringKey(title)"),
+        sidebarRowSource.contains("NSLocalizedString(title, comment: \"\")"),
         "shared sidebar rows should localize dynamic navigation titles"
     )
     try check(
@@ -3476,7 +3480,9 @@ func runUIDesignSourceChecks() throws {
     try check(
         actionButtonSource.contains("PaperCodexHitTarget.toolbarIconSize")
             && actionButtonSource.contains("PaperCodexHitTarget.toolbarButtonVerticalPadding")
-            && sidebarRowSource.contains("PaperCodexSpacing.sidebarRowVertical")
+            && sidebarRowSource.contains("PaperCodexHitTarget.sidebarRowHeight")
+            && sidebarRowSource.contains("PaperCodexHitTarget.sidebarSelectionIndicatorHeight")
+            && sidebarRowSource.contains("PaperCodexSpacing.sidebarRowLeading")
             && tabBarSource.contains("PaperCodexCornerRadius.control"),
         "shared controls should use Paper Codex design tokens instead of scattering local measurements"
     )
