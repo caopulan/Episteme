@@ -656,6 +656,29 @@ final class AppModel: ObservableObject {
         discoverStore.discoverSidebarFacets
     }
 
+    func discoverPaperListState(
+        source: DiscoverPaperListSource,
+        selectedCategory: String?,
+        selectedTag: String?,
+        processingFilter: DiscoverProcessingFilter,
+        libraryFilter: DiscoverLibraryFilter,
+        requiresProjectLink: Bool,
+        similarityBucket: DiscoverSimilarityBucket
+    ) -> DiscoverPaperListState {
+        discoverStore.paperListState(
+            request: DiscoverPaperListRequest(
+                source: source,
+                selectedCategory: selectedCategory,
+                selectedTag: selectedTag,
+                processingFilter: processingFilter,
+                libraryFilter: libraryFilter,
+                requiresProjectLink: requiresProjectLink,
+                similarityBucket: similarityBucket,
+                libraryArxivPaperIDs: libraryArxivPaperIDs()
+            )
+        )
+    }
+
     var isSearchingDiscover: Bool {
         get { discoverStore.isSearchingDiscover }
         set { discoverStore.isSearchingDiscover = newValue }

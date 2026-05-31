@@ -245,41 +245,20 @@ struct DiscoverView: View {
     @State private var discoverScrollRestoreTask: Task<Void, Never>?
     @State private var discoverScrollRequestToken = 0
 
+    private var currentPaperListState: DiscoverPaperListState {
+        model.discoverPaperListState(
+            source: .discover,
+            selectedCategory: selectedCategory,
+            selectedTag: selectedTag,
+            processingFilter: selectedProcessingFilter,
+            libraryFilter: selectedLibraryFilter,
+            requiresProjectLink: requiresProjectLink,
+            similarityBucket: selectedSimilarityBucket
+        )
+    }
+
     private var papers: [ArxivFeedPaper] {
-        var result = model.arxivFeed?.papers ?? []
-        if let selectedCategory {
-            result = result.filter {
-                $0.categories.contains(selectedCategory) || $0.listCategories.contains(selectedCategory)
-            }
-        }
-        if let selectedTag {
-            result = result.filter { tags(for: $0).contains(selectedTag) }
-        }
-        switch selectedProcessingFilter {
-        case .all:
-            break
-        case .processed:
-            result = result.filter { model.discoverEnrichment(for: $0)?.error == nil && model.discoverEnrichment(for: $0)?.isCurrent == true }
-        case .unprocessed:
-            result = result.filter { model.discoverEnrichment(for: $0) == nil }
-        case .failed:
-            result = result.filter { model.discoverEnrichment(for: $0)?.error != nil }
-        }
-        switch selectedLibraryFilter {
-        case .all:
-            break
-        case .newOnly:
-            result = result.filter { model.libraryPaper(for: $0) == nil }
-        case .inLibrary:
-            result = result.filter { model.libraryPaper(for: $0) != nil }
-        }
-        if requiresProjectLink {
-            result = result.filter { $0.links.github != nil || $0.links.project != nil || $0.links.huggingFace != nil || !(model.discoverEnrichment(for: $0)?.links.isEmpty ?? true) }
-        }
-        if selectedSimilarityBucket != .all {
-            result = result.filter { selectedSimilarityBucket.contains($0.similarity) }
-        }
-        return result
+        currentPaperListState.papers
     }
 
     private var categories: [String] {
@@ -320,10 +299,6 @@ struct DiscoverView: View {
             hasher.combine(tagCounts[tag, default: 0])
         }
         return AnyHashable(hasher.finalize())
-    }
-
-    private func tags(for paper: ArxivFeedPaper) -> [String] {
-        DiscoverSidebarFacets.tags(for: paper, enrichment: model.discoverEnrichment(for: paper))
     }
 
     var body: some View {
@@ -831,20 +806,20 @@ struct ArxivSearchView: View {
     @State private var previewPaper: ArxivFeedPaper?
     @State private var isShowingProcessSelection = false
 
+    private var currentPaperListState: DiscoverPaperListState {
+        model.discoverPaperListState(
+            source: .search,
+            selectedCategory: selectedCategory,
+            selectedTag: nil,
+            processingFilter: .all,
+            libraryFilter: selectedLibraryFilter,
+            requiresProjectLink: false,
+            similarityBucket: .all
+        )
+    }
+
     private var papers: [ArxivFeedPaper] {
-        var result = model.arxivSearchFeed?.papers ?? []
-        if let selectedCategory {
-            result = result.filter { $0.categories.contains(selectedCategory) || $0.listCategories.contains(selectedCategory) }
-        }
-        switch selectedLibraryFilter {
-        case .all:
-            break
-        case .newOnly:
-            result = result.filter { model.libraryPaper(for: $0) == nil }
-        case .inLibrary:
-            result = result.filter { model.libraryPaper(for: $0) != nil }
-        }
-        return result
+        currentPaperListState.papers
     }
 
     private var resultCategories: [String] {
@@ -1225,87 +1200,6 @@ struct ArxivSearchView: View {
         }
         nativeSearchCardInputID = inputID
         nativeSearchCardModels = cardModelCache.models(scope: "search", for: papers, model: model)
-    }
-}
-
-private enum DiscoverProcessingFilter: String, CaseIterable, Identifiable {
-    case all
-    case processed
-    case unprocessed
-    case failed
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .all:
-            "All"
-        case .processed:
-            "Processed"
-        case .unprocessed:
-            "Unprocessed"
-        case .failed:
-            "Failed"
-        }
-    }
-}
-
-private enum DiscoverLibraryFilter: String, CaseIterable, Identifiable {
-    case all
-    case newOnly
-    case inLibrary
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .all:
-            "All Papers"
-        case .newOnly:
-            "New Only"
-        case .inLibrary:
-            "In Library"
-        }
-    }
-}
-
-private enum DiscoverSimilarityBucket: String, CaseIterable, Identifiable {
-    case all
-    case high
-    case medium
-    case low
-    case none
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .all:
-            "All Scores"
-        case .high:
-            "High"
-        case .medium:
-            "Medium"
-        case .low:
-            "Low"
-        case .none:
-            "No Similarity"
-        }
-    }
-
-    func contains(_ value: Double?) -> Bool {
-        switch self {
-        case .all:
-            true
-        case .high:
-            (value ?? 0) >= 0.78
-        case .medium:
-            (value ?? 0) >= 0.62 && (value ?? 0) < 0.78
-        case .low:
-            value != nil && (value ?? 0) < 0.62
-        case .none:
-            value == nil
-        }
     }
 }
 

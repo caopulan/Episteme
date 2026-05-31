@@ -3186,6 +3186,17 @@ func runUILayoutSourceChecks() throws {
         "Discover sidebar categories and tags should be precomputed outside the SwiftUI body/layout hot path"
     )
     try check(
+        discoverFeatureStoreSource.contains("struct DiscoverPaperListRequest")
+            && discoverFeatureStoreSource.contains("func paperListState(")
+            && discoverFeatureStoreSource.contains("cachedPaperListRequest")
+            && appModelSource.contains("func discoverPaperListState(")
+            && discoverSource.contains("model.discoverPaperListState(")
+            && !discoverSource.contains("var result = model.arxivFeed?.papers ?? []")
+            && !discoverSource.contains("var result = model.arxivSearchFeed?.papers ?? []")
+            && !discoverSource.contains("result = result.filter { model.libraryPaper(for: $0)"),
+        "Discover and arXiv search paper filtering should be cached in DiscoverFeatureStore instead of recomputed in SwiftUI view hot paths"
+    )
+    try check(
         discoverSource.contains("paper.displayTitle(language: model.globalLanguageMode.discoverLanguageCode)"),
         "Discover save sheet should use the configured global language"
     )
