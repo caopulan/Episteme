@@ -9,7 +9,6 @@ private let discoverPaperGridHorizontalPadding: CGFloat = 10
 private let discoverPaperGridVerticalPadding: CGFloat = 8
 private let discoverPaperGridColumnSpacing: CGFloat = 16
 private let discoverPaperGridRowSpacing: CGFloat = 14
-private let discoverPaperGridRenderBufferRows = 3
 
 private enum DiscoverImagePreloadPolicy {
     static let visiblePaperLimit = 36
@@ -36,16 +35,6 @@ private func discoverPaperGridColumnWidth(for containerWidth: CGFloat, columnCou
     return floor(availableWidth / CGFloat(safeColumnCount))
 }
 
-private func discoverPaperGridRowHeight(for columnWidth: CGFloat) -> CGFloat {
-    if columnWidth < 320 {
-        return 650
-    }
-    if columnWidth < 440 {
-        return 590
-    }
-    return 540
-}
-
 struct DiscoverView: View {
     @EnvironmentObject private var model: AppModel
     @State private var selectedCategory: String?
@@ -62,8 +51,6 @@ struct DiscoverView: View {
     @State private var discoverScrollPositionCommitTask: Task<Void, Never>?
     @State private var discoverScrollRestoreTask: Task<Void, Never>?
     @State private var discoverScrollRequestToken = 0
-    @State private var discoverScrollRequest: PaperCodexNativeScrollRequest?
-    @State private var discoverVisibleRowRange: Range<Int> = 0..<8
 
     private var papers: [ArxivFeedPaper] {
         var result = model.arxivFeed?.papers ?? []
@@ -337,65 +324,53 @@ struct DiscoverView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 GeometryReader { proxy in
-                    let columnCount = gridColumnCount(for: proxy.size.width)
-                    let columnWidth = discoverPaperGridColumnWidth(for: proxy.size.width, columnCount: columnCount)
-                    let rowHeight = discoverPaperGridRowHeight(for: columnWidth)
-                    let rows = paperRows(visiblePapers, columnCount: columnCount)
-                    let visibleRowRange = clampedDiscoverVisibleRowRange(rowCount: rows.count)
-                    let layoutSignature = rowLayoutSignature(papers: visiblePapers, columnCount: columnCount)
+                    let layoutSignature = rowLayoutSignature(
+                        papers: visiblePapers,
+                        columnCount: gridColumnCount(for: proxy.size.width)
+                    )
                     let imagePreloadURLs = discoverImagePreloadURLs(for: visiblePapers)
                     let warmupSignature = DiscoverImageWarmupSignature(
                         layout: layoutSignature,
                         imageCount: imagePreloadURLs.count
                     )
 
-                    PaperCodexNativeScrollView(
-                        scrollRequest: discoverScrollRequest,
-                        onVisibleRangeChange: { range in
-                            updateDiscoverVisibleRow(
-                                range,
-                                rows: rows,
-                                in: visiblePapers,
-                                rowHeight: rowHeight
-                            )
-                        }
-                    ) {
-                        VStack(alignment: .leading, spacing: 0) {
-                            Color.clear
-                                .frame(height: discoverTopVirtualSpacerHeight(for: visibleRowRange, rowHeight: rowHeight))
-                            ForEach(Array(visibleRowRange), id: \.self) { rowIndex in
-                                let rowPapers = rows[rowIndex]
-                                HStack(alignment: .top, spacing: discoverPaperGridColumnSpacing) {
-                                    ForEach(rowPapers) { paper in
-                                        discoverCard(for: paper, rowIndex: rowIndex)
-                                            .frame(width: columnWidth, alignment: .topLeading)
-                                    }
-                                    ForEach(0..<max(0, columnCount - rowPapers.count), id: \.self) { _ in
-                                        Color.clear
-                                            .frame(width: columnWidth)
-                                    }
-                                }
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .frame(height: rowHeight, alignment: .top)
-                                if rowIndex < rows.count - 1 {
-                                    Color.clear
-                                        .frame(height: discoverPaperGridRowSpacing)
-                                }
+                    NativeDiscoverCollectionView(
+                        cards: nativeDiscoverCardModels(for: visiblePapers),
+                        restorePaperID: model.discoverScrollPositionPaperID,
+                        restoreToken: discoverScrollRequestToken,
+                        onVisiblePaperChange: { paperID in
+                            markDiscoverVisibleRow(paperID, in: visiblePapers)
+                        },
+                        onPreview: { paperID in
+                            guard let paper = visiblePapers.first(where: { $0.id == paperID }) else {
+                                return
                             }
-                            Color.clear
-                                .frame(height: discoverBottomVirtualSpacerHeight(for: visibleRowRange, rowCount: rows.count, rowHeight: rowHeight))
+                            previewPaper = paper
+                        },
+                        onSave: { paperID in
+                            guard let paper = visiblePapers.first(where: { $0.id == paperID }) else {
+                                return
+                            }
+                            paperPendingSave = paper
+                        },
+                        onOpen: { paperID in
+                            guard let paper = visiblePapers.first(where: { $0.id == paperID }) else {
+                                return
+                            }
+                            commitDiscoverScrollPosition(fallbackPaperID: paper.id, in: visiblePapers)
+                            Task {
+                                await model.openArxivPaper(paper)
+                            }
                         }
-                        .padding(.horizontal, discoverPaperGridHorizontalPadding)
-                        .padding(.vertical, discoverPaperGridVerticalPadding)
-                        .task(id: warmupSignature) {
-                            await warmDiscoverLocalImages(imagePreloadURLs)
-                        }
+                    )
+                    .task(id: warmupSignature) {
+                        await warmDiscoverLocalImages(imagePreloadURLs)
                     }
                     .onAppear {
-                        requestDiscoverScrollRestore(in: visiblePapers, columnCount: columnCount)
+                        requestNativeDiscoverScrollRestore()
                     }
                     .onChange(of: layoutSignature) { _, _ in
-                        requestDiscoverScrollRestore(in: visiblePapers, columnCount: columnCount)
+                        requestNativeDiscoverScrollRestore()
                     }
                     .onDisappear {
                         commitDiscoverScrollPosition(fallbackPaperID: visibleDiscoverPaperID, in: visiblePapers)
@@ -447,53 +422,112 @@ struct DiscoverView: View {
         }
     }
 
-    private func discoverCard(for paper: ArxivFeedPaper, rowIndex: Int) -> some View {
-        ArxivPaperCard(
-            paper: paper,
-            enrichment: model.discoverEnrichment(for: paper),
-            imageURL: model.cachedArxivAssetURL(for: paper.assets.small),
-            thumbnailURLs: model.cachedArxivPDFThumbnailURLs(for: paper),
-            inLibrary: model.libraryPaper(for: paper) != nil,
-            isBusy: model.isDownloadingArxivPaper(paper),
-            downloadProgress: model.arxivDownloadProgress(for: paper),
-            interactionState: model.discoverPaperInteractionStateByID[paper.id],
-            languageMode: model.globalLanguageMode,
-            onPreview: {
-                previewPaper = paper
-            },
-            onSave: {
-                paperPendingSave = paper
-            },
-            onOpen: {
-                commitDiscoverScrollPosition(fallbackPaperID: paper.id)
-                Task {
-                    await model.openArxivPaper(paper)
-                }
+    private func nativeDiscoverCardModels(for papers: [ArxivFeedPaper]) -> [NativeDiscoverCardModel] {
+        papers.map { paper in
+            let enrichment = model.discoverEnrichment(for: paper)
+            let languageCode = model.globalLanguageMode.discoverLanguageCode
+            let primaryTitle: String
+            let secondaryTitle: String
+            if languageCode == "zh" {
+                let enrichedTitle = enrichment?.titleZH.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                primaryTitle = enrichedTitle.isEmpty ? paper.displayTitle(language: "zh") : enrichedTitle
+                secondaryTitle = paper.title.en
+            } else {
+                primaryTitle = paper.title.en
+                secondaryTitle = ""
             }
-        )
+
+            let summary: String
+            if languageCode == "zh" {
+                let enrichedSummary = enrichment?.summaryZH.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                if !enrichedSummary.isEmpty {
+                    summary = enrichedSummary
+                } else if !paper.summary.zh.isEmpty {
+                    summary = paper.summary.zh
+                } else if !paper.summary.en.isEmpty {
+                    summary = paper.summary.en
+                } else {
+                    summary = paper.abstract.en
+                }
+            } else if !paper.summary.en.isEmpty {
+                summary = paper.summary.en
+            } else {
+                summary = paper.abstract.en
+            }
+
+            return NativeDiscoverCardModel(
+                id: paper.id,
+                primaryCategory: paper.primaryCategory ?? paper.categories.first ?? "arXiv",
+                arxivID: paper.id,
+                primaryTitle: primaryTitle,
+                secondaryTitle: secondaryTitle,
+                summary: summary,
+                contribution: enrichment?.contribution,
+                error: enrichment?.error,
+                tags: nativeDiscoverTags(for: paper, enrichment: enrichment),
+                links: nativeDiscoverLinks(for: paper, enrichment: enrichment),
+                imageURL: model.cachedArxivAssetURL(for: paper.assets.small),
+                thumbnailURLs: model.cachedArxivPDFThumbnailURLs(for: paper),
+                inLibrary: model.libraryPaper(for: paper) != nil,
+                isBusy: model.isDownloadingArxivPaper(paper),
+                downloadProgress: model.arxivDownloadProgress(for: paper),
+                interactionState: model.discoverPaperInteractionStateByID[paper.id]
+            )
+        }
     }
 
-    private func requestDiscoverScrollRestore(in visiblePapers: [ArxivFeedPaper], columnCount: Int) {
-        guard let paperID = model.discoverScrollPositionPaperID,
-              let paperIndex = visiblePapers.firstIndex(where: { $0.id == paperID }) else {
-            discoverVisibleRowRange = bufferedDiscoverRowRange(around: 0, rowCount: max(1, Int(ceil(Double(visiblePapers.count) / Double(max(columnCount, 1))))))
-            return
+    private func nativeDiscoverTags(for paper: ArxivFeedPaper, enrichment: DiscoverPaperEnrichment?) -> [String] {
+        let fallback = paper.tags.isEmpty ? paper.categories : paper.tags
+        var seen: Set<String> = []
+        var result: [String] = []
+        for tag in (enrichment?.tags ?? []) + fallback {
+            let trimmed = tag.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else {
+                continue
+            }
+            let key = trimmed.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+            guard !seen.contains(key) else {
+                continue
+            }
+            seen.insert(key)
+            result.append(trimmed)
         }
+        return result
+    }
+
+    private func nativeDiscoverLinks(for paper: ArxivFeedPaper, enrichment: DiscoverPaperEnrichment?) -> [NativeDiscoverCardLink] {
+        var result = paper.externalLinks.map {
+            NativeDiscoverCardLink(
+                id: $0.id,
+                title: $0.title,
+                systemImage: $0.systemImage,
+                urlString: $0.urlString
+            )
+        }
+
+        func append(id: String, title: String, systemImage: String, key: String) {
+            guard let value = enrichment?.links[key] else {
+                return
+            }
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty,
+                  !result.contains(where: { $0.urlString.localizedCaseInsensitiveCompare(trimmed) == .orderedSame }) else {
+                return
+            }
+            result.append(NativeDiscoverCardLink(id: id, title: title, systemImage: systemImage, urlString: trimmed))
+        }
+        append(id: "github-enriched", title: "GitHub", systemImage: "chevron.left.forwardslash.chevron.right", key: "github")
+        append(id: "project-enriched", title: "Project", systemImage: "globe", key: "project")
+        append(id: "hf-enriched", title: "HF", systemImage: "shippingbox", key: "hugging_face")
+        return result
+    }
+
+    private func requestNativeDiscoverScrollRestore() {
         discoverScrollPositionCommitTask?.cancel()
         discoverScrollRestoreTask?.cancel()
-        visibleDiscoverPaperID = paperID
+        visibleDiscoverPaperID = model.discoverScrollPositionPaperID
         isRestoringDiscoverScrollPosition = true
-        let safeColumnCount = max(columnCount, 1)
-        let rowCount = max(1, Int(ceil(Double(visiblePapers.count) / Double(safeColumnCount))))
-        let rowIndex = paperIndex / safeColumnCount
-        let fraction = rowCount > 1 ? CGFloat(rowIndex) / CGFloat(rowCount - 1) : 0
-        discoverVisibleRowRange = bufferedDiscoverRowRange(around: rowIndex, rowCount: rowCount)
         discoverScrollRequestToken += 1
-        discoverScrollRequest = PaperCodexNativeScrollRequest(
-            token: discoverScrollRequestToken,
-            target: .verticalFraction(fraction),
-            animated: false
-        )
         discoverScrollRestoreTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: DiscoverImagePreloadPolicy.scrollRestoreSettleNanoseconds)
             guard !Task.isCancelled else {
@@ -501,70 +535,6 @@ struct DiscoverView: View {
             }
             isRestoringDiscoverScrollPosition = false
         }
-    }
-
-    private func updateDiscoverVisibleRow(
-        _ range: PaperCodexNativeVisibleRange,
-        rows: [[ArxivFeedPaper]],
-        in visiblePapers: [ArxivFeedPaper],
-        rowHeight: CGFloat
-    ) {
-        guard !isRestoringDiscoverScrollPosition, !rows.isEmpty else {
-            return
-        }
-        let rowStride = rowHeight + discoverPaperGridRowSpacing
-        let adjustedMinY = max(0, range.minY - discoverPaperGridVerticalPadding)
-        let adjustedMaxY = max(0, range.maxY - discoverPaperGridVerticalPadding)
-        let firstVisibleRowIndex = min(max(0, Int(floor(adjustedMinY / rowStride))), rows.count - 1)
-        let lastVisibleRowIndex = min(max(firstVisibleRowIndex, Int(ceil(adjustedMaxY / rowStride))), rows.count - 1)
-        let rowIndex = firstVisibleRowIndex
-        let newRange = bufferedDiscoverRowRange(
-            lowerBound: firstVisibleRowIndex,
-            upperBound: lastVisibleRowIndex + 1,
-            rowCount: rows.count
-        )
-        if discoverVisibleRowRange != newRange {
-            discoverVisibleRowRange = newRange
-        }
-        guard let paperID = rows[rowIndex].first?.id,
-              paperID != visibleDiscoverPaperID else {
-            return
-        }
-        markDiscoverVisibleRow(paperID, in: visiblePapers)
-    }
-
-    private func clampedDiscoverVisibleRowRange(rowCount: Int) -> Range<Int> {
-        guard rowCount > 0 else {
-            return 0..<0
-        }
-        let lowerBound = min(max(0, discoverVisibleRowRange.lowerBound), rowCount - 1)
-        let upperBound = min(max(lowerBound + 1, discoverVisibleRowRange.upperBound), rowCount)
-        return lowerBound..<upperBound
-    }
-
-    private func bufferedDiscoverRowRange(around rowIndex: Int, rowCount: Int) -> Range<Int> {
-        bufferedDiscoverRowRange(
-            lowerBound: rowIndex,
-            upperBound: rowIndex + 1,
-            rowCount: rowCount
-        )
-    }
-
-    private func bufferedDiscoverRowRange(lowerBound: Int, upperBound: Int, rowCount: Int) -> Range<Int> {
-        guard rowCount > 0 else {
-            return 0..<0
-        }
-        let lower = max(0, lowerBound - discoverPaperGridRenderBufferRows)
-        let upper = min(rowCount, upperBound + discoverPaperGridRenderBufferRows)
-        return lower..<max(lower + 1, upper)
-    }
-
-    private func discoverTopVirtualSpacerHeight(for range: Range<Int>, rowHeight: CGFloat) -> CGFloat {
-        CGFloat(range.lowerBound) * (rowHeight + discoverPaperGridRowSpacing)
-    }
-
-    private func discoverBottomVirtualSpacerHeight(for range: Range<Int>, rowCount: Int, rowHeight: CGFloat) -> CGFloat {
-        CGFloat(max(0, rowCount - range.upperBound)) * (rowHeight + discoverPaperGridRowSpacing)
     }
 
     private func markDiscoverVisibleRow(_ paperID: String?, in visiblePapers: [ArxivFeedPaper]) {

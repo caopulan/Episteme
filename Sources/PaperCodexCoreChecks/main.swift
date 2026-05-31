@@ -1403,6 +1403,8 @@ func runUILayoutSourceChecks() throws {
     let settingsViewSource = try String(contentsOf: settingsViewURL)
     let discoverViewURL = root.appendingPathComponent("Sources/PaperCodexApp/DiscoverView.swift")
     let discoverSource = try String(contentsOf: discoverViewURL)
+    let nativeDiscoverCollectionURL = root.appendingPathComponent("Sources/PaperCodexApp/NativeDiscoverCollectionView.swift")
+    let nativeDiscoverCollectionSource = FileManager.default.fileExists(atPath: nativeDiscoverCollectionURL.path) ? try String(contentsOf: nativeDiscoverCollectionURL) : ""
     let appShellURL = root.appendingPathComponent("Sources/PaperCodexApp/AppShell.swift")
     let appShellSource = FileManager.default.fileExists(atPath: appShellURL.path) ? try String(contentsOf: appShellURL) : ""
     let collectionViewURL = root.appendingPathComponent("Sources/PaperCodexApp/CollectionView.swift")
@@ -1883,6 +1885,19 @@ func runUILayoutSourceChecks() throws {
         "empty states, loading indicators, and remaining lists should use shared AppKit status views instead of SwiftUI ContentUnavailableView/ProgressView/List; remaining files: \(appSourcesWithSwiftUIStatusViews.joined(separator: ", "))"
     )
     try check(
+        discoverSource.contains("NativeDiscoverCollectionView(")
+            && nativeDiscoverCollectionSource.contains("struct NativeDiscoverCollectionView")
+            && nativeDiscoverCollectionSource.contains("NSCollectionView")
+            && nativeDiscoverCollectionSource.contains("NSCollectionViewFlowLayout")
+            && nativeDiscoverCollectionSource.contains("NSCollectionViewItem")
+            && nativeDiscoverCollectionSource.contains("makeItem(withIdentifier:")
+            && nativeDiscoverCollectionSource.contains("final class NativeDiscoverPaperCardView: NSView")
+            && nativeDiscoverCollectionSource.contains("onVisiblePaperChange")
+            && nativeDiscoverCollectionSource.contains("scrollToPaper")
+            && !nativeDiscoverCollectionSource.contains("NSHostingView"),
+        "Discover main results should use a reusable native AppKit NSCollectionView card surface instead of an AppKit scroll view hosting SwiftUI cards"
+    )
+    try check(
         nativeScrollViewSource.contains("struct PaperCodexNativeScrollView")
             && nativeScrollViewSource.contains("struct PaperCodexNativeScrollRequest")
             && nativeScrollViewSource.contains("struct PaperCodexNativeVisibleRange")
@@ -1899,11 +1914,8 @@ func runUILayoutSourceChecks() throws {
             && chatSource.contains("PaperCodexNativeScrollView(scrollRequest: chatScrollRequest")
             && chatSource.contains("requestChatScrollToBottom")
             && discoverSource.contains("PaperCodexNativeScrollView")
-            && discoverSource.contains("onVisibleRangeChange:")
-            && discoverSource.contains("requestDiscoverScrollRestore")
-            && discoverSource.contains("@State private var discoverVisibleRowRange")
-            && discoverSource.contains("bufferedDiscoverRowRange")
-            && discoverSource.contains("discoverTopVirtualSpacerHeight")
+            && discoverSource.contains("NativeDiscoverCollectionView(")
+            && discoverSource.contains("requestNativeDiscoverScrollRestore")
             && readerViewSource.contains("PaperCodexNativeScrollView")
             && !hasSwiftUIScrollViewUse(settingsViewSource)
             && !hasSwiftUIScrollViewUse(librarySource)
@@ -1915,7 +1927,7 @@ func runUILayoutSourceChecks() throws {
             && !chatSource.contains("ScrollViewReader")
             && !discoverSource.contains("ScrollViewReader")
             && appSourcesWithSwiftUIScrollViews.isEmpty,
-        "all app scroll regions should use shared AppKit NSScrollView hosting, including programmable Chat and Discover regions; remaining files: \(appSourcesWithSwiftUIScrollViews.joined(separator: ", "))"
+        "static app scroll regions should use shared AppKit NSScrollView hosting while high-throughput Discover results use native NSCollectionView; remaining SwiftUI scroll files: \(appSourcesWithSwiftUIScrollViews.joined(separator: ", "))"
     )
     try check(
         actionButtonSource.contains("struct PaperCodexToolbarButton")
@@ -2923,14 +2935,15 @@ func runUILayoutSourceChecks() throws {
         "local thumbnail decoding should be delayed, concurrency-limited, and clear reused cells so scrolling stays responsive"
     )
     try check(
-        discoverSource.contains("PaperCodexNativeScrollView(")
-            && discoverSource.contains("requestDiscoverScrollRestore(in:")
+        discoverSource.contains("NativeDiscoverCollectionView(")
+            && discoverSource.contains("requestNativeDiscoverScrollRestore")
             && discoverSource.contains("isRestoringDiscoverScrollPosition")
             && discoverSource.contains("DiscoverImagePreloadPolicy")
-            && discoverSource.contains("onVisibleRangeChange:")
+            && nativeDiscoverCollectionSource.contains("scrollToPaper")
+            && nativeDiscoverCollectionSource.contains("onVisiblePaperChange")
             && !discoverSource.contains(".scrollPosition(id: $discoverScrollAnchorID")
             && !discoverSource.contains("ScrollViewReader"),
-        "discover scrolling should restore through programmable AppKit scroll requests and avoid high-frequency SwiftUI scrollPosition state binding"
+        "discover scrolling should restore through the native collection view instead of SwiftUI scrollPosition or hosted scroll callbacks"
     )
     try check(
         settingsViewSource.contains("Similarity categories")
@@ -3510,7 +3523,8 @@ func runUILayoutSourceChecks() throws {
         "AppModel should remember whether the reader was opened from Library or Discover"
     )
     try check(
-        discoverSource.contains("requestDiscoverScrollRestore"),
+        discoverSource.contains("requestNativeDiscoverScrollRestore")
+            && nativeDiscoverCollectionSource.contains("restorePaperID"),
         "Discover should restore the last visible paper when returning from the reader"
     )
 
@@ -3855,8 +3869,9 @@ func runUILayoutSourceChecks() throws {
             && appModelSource.contains("recordDiscoverScrollPosition")
             && discoverSource.contains("visibleDiscoverPaperID")
             && discoverSource.contains("markDiscoverVisibleRow")
-            && discoverSource.contains("requestDiscoverScrollRestore(in:")
-            && discoverSource.contains("onVisibleRangeChange:")
+            && discoverSource.contains("requestNativeDiscoverScrollRestore")
+            && nativeDiscoverCollectionSource.contains("onVisiblePaperChange")
+            && nativeDiscoverCollectionSource.contains("scrollToPaper")
             && discoverSource.contains("commitDiscoverScrollPosition")
             && !discoverSource.contains("ScrollViewReader")
             && !discoverSource.contains("discoverReturnPaperID"),
@@ -3969,8 +3984,8 @@ func runUILayoutSourceChecks() throws {
     try check(
         discoverSource.contains("@State private var visibleDiscoverPaperID: String?")
             && discoverSource.contains("@State private var discoverScrollPositionCommitTask: Task<Void, Never>?")
-            && discoverSource.contains("PaperCodexNativeScrollView(")
-            && discoverSource.contains("onVisibleRangeChange:")
+            && discoverSource.contains("NativeDiscoverCollectionView(")
+            && nativeDiscoverCollectionSource.contains("onVisiblePaperChange")
             && discoverSource.contains("isRestoringDiscoverScrollPosition")
             && !discoverSource.contains(".scrollPosition(id:")
             && !discoverSource.contains(".scrollTargetLayout()")
@@ -4022,12 +4037,15 @@ func runUILayoutSourceChecks() throws {
     )
     try check(
         discoverSource.contains("private func discoverPaperGridColumnWidth(for containerWidth: CGFloat, columnCount: Int) -> CGFloat")
+            && nativeDiscoverCollectionSource.contains("NativeDiscoverCollectionMetrics.columnCount")
+            && nativeDiscoverCollectionSource.contains("flowLayout.itemSize")
+            && nativeDiscoverCollectionSource.contains("currentItemSize")
             && discoverSource.contains("let columnWidth = discoverPaperGridColumnWidth(for: proxy.size.width, columnCount: columnCount)")
-            && discoverSource.components(separatedBy: ".frame(width: columnWidth, alignment: .topLeading)").count - 1 >= 2
-            && discoverSource.components(separatedBy: ".frame(width: columnWidth)").count - 1 >= 2
+            && discoverSource.components(separatedBy: ".frame(width: columnWidth, alignment: .topLeading)").count - 1 >= 1
+            && discoverSource.components(separatedBy: ".frame(width: columnWidth)").count - 1 >= 1
             && !discoverSource.contains("Color.clear\n                                                .frame(maxWidth: .infinity)")
             && !discoverSource.contains("Color.clear\n                                            .frame(maxWidth: .infinity)"),
-        "Discover and Search paper rows should reserve stable fixed-width grid tracks"
+        "Discover and Search paper rows should reserve stable fixed-width grid tracks or native collection item sizes"
     )
     try check(
         appModelSource.contains("tokenUsage: CodexTokenUsage?")
