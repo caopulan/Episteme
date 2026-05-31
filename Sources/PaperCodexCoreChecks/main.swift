@@ -2110,20 +2110,26 @@ func runUILayoutSourceChecks() throws {
     } else {
         throw CheckFailure(description: "library inspector action source should remain inspectable")
     }
-    if let bulkActionBarRange = librarySource.range(of: "private struct BulkLibraryActionBar: View"),
+    if let bulkActionBarRange = librarySource.range(of: "private struct BulkLibraryActionBar: NSViewRepresentable"),
        let bulkCopySheetRange = librarySource.range(of: "private struct LibraryBulkCopySheet: View", range: bulkActionBarRange.upperBound..<librarySource.endIndex) {
         let bulkActionBarSource = String(librarySource[bulkActionBarRange.lowerBound..<bulkCopySheetRange.lowerBound])
         try check(
-            bulkActionBarSource.components(separatedBy: "PaperCodexToolbarButton(").count - 1 >= 6
+            bulkActionBarSource.contains("private final class NativeBulkLibraryActionBarView: NSView")
+                && bulkActionBarSource.contains("private final class NativeBulkLibraryActionButton: NSButton")
+                && bulkActionBarSource.components(separatedBy: "NativeBulkLibraryActionButton(").count - 1 >= 6
                 && bulkActionBarSource.contains("title: \"Read\"")
                 && bulkActionBarSource.contains("title: \"Chat\"")
                 && bulkActionBarSource.contains("title: \"Copy\"")
                 && bulkActionBarSource.contains("title: \"Tag\"")
                 && bulkActionBarSource.contains("title: \"Delete\"")
                 && bulkActionBarSource.contains("title: \"Clear\"")
+                && bulkActionBarSource.contains("setAccessibilityLabel(\"\\(selectedCount) selected papers\")")
+                && bulkActionBarSource.contains("override func acceptsFirstMouse(for event: NSEvent?) -> Bool")
+                && !bulkActionBarSource.contains("\n        HStack")
+                && !bulkActionBarSource.contains("PaperCodexToolbarButton(")
                 && !bulkActionBarSource.contains("\n            Button")
                 && !bulkActionBarSource.contains(".buttonStyle("),
-            "library bulk action bar should use shared native toolbar buttons for every action"
+            "library bulk action bar should be a native AppKit overlay with reusable NSButtons for every action"
         )
     } else {
         throw CheckFailure(description: "library bulk action bar source should remain inspectable")

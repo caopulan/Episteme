@@ -540,6 +540,7 @@ struct LibraryView: View {
                         lastSelectedPaperID = nil
                     }
                 )
+                .frame(maxWidth: .infinity, minHeight: 46, idealHeight: 46, maxHeight: 46)
                 .padding(.horizontal, 10)
                 .padding(.top, LibraryLayout.bulkActionBarOverlayYOffset)
                 .opacity(LibraryLayout.bulkActionBarOverlayOpacity)
@@ -4080,7 +4081,7 @@ private final class NativeRecentConversationPrimaryActionButton: NSButton {
     }
 }
 
-private struct BulkLibraryActionBar: View {
+private struct BulkLibraryActionBar: NSViewRepresentable {
     var selectedCount: Int
     var canMove: Bool
     var canTag: Bool
@@ -4092,42 +4093,225 @@ private struct BulkLibraryActionBar: View {
     var onDelete: () -> Void
     var onClear: () -> Void
 
-    var body: some View {
-        HStack(spacing: 10) {
-            Label("\(selectedCount) selected", systemImage: "checkmark.circle.fill")
-                .font(.paperCodexSystem(size: 13, weight: .semibold))
-                .foregroundStyle(Color.accentColor)
-                .contentTransition(.numericText())
-            Spacer()
-            PaperCodexToolbarButton(title: "Read", systemImage: "book", disabled: !canOpenConversation) {
-                onRead()
-            }
-            PaperCodexToolbarButton(title: "Chat", systemImage: "text.bubble", disabled: !canOpenConversation) {
-                onChat()
-            }
-            PaperCodexToolbarButton(title: "Copy", systemImage: "doc.on.doc", disabled: !canMove) {
-                onCopy()
-            }
-            PaperCodexToolbarButton(title: "Tag", systemImage: "tag", disabled: !canTag) {
-                onTag()
-            }
-            PaperCodexToolbarButton(title: "Delete", systemImage: "trash", tint: .red) {
-                onDelete()
-            }
-            PaperCodexToolbarButton(title: "Clear", systemImage: "xmark.circle", tint: .secondary) {
-                onClear()
-            }
+    func makeNSView(context: Context) -> NativeBulkLibraryActionBarView {
+        NativeBulkLibraryActionBarView()
+    }
+
+    func updateNSView(_ view: NativeBulkLibraryActionBarView, context: Context) {
+        view.apply(
+            selectedCount: selectedCount,
+            canMove: canMove,
+            canTag: canTag,
+            canOpenConversation: canOpenConversation,
+            onRead: onRead,
+            onChat: onChat,
+            onCopy: onCopy,
+            onTag: onTag,
+            onDelete: onDelete,
+            onClear: onClear
+        )
+    }
+}
+
+private final class NativeBulkLibraryActionBarView: NSView {
+    private let stackView = NSStackView()
+    private let countIconView = NSImageView()
+    private let countLabel = NSTextField(labelWithString: "")
+    private let spacerView = NSView()
+    private let readButton = NativeBulkLibraryActionButton(title: "Read", systemSymbolName: "book", tint: .accent)
+    private let chatButton = NativeBulkLibraryActionButton(title: "Chat", systemSymbolName: "text.bubble", tint: .accent)
+    private let copyButton = NativeBulkLibraryActionButton(title: "Copy", systemSymbolName: "doc.on.doc", tint: .accent)
+    private let tagButton = NativeBulkLibraryActionButton(title: "Tag", systemSymbolName: "tag", tint: .accent)
+    private let deleteButton = NativeBulkLibraryActionButton(title: "Delete", systemSymbolName: "trash", tint: .destructive)
+    private let clearButton = NativeBulkLibraryActionButton(title: "Clear", systemSymbolName: "xmark.circle", tint: .secondary)
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: 46)
+    }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    func apply(
+        selectedCount: Int,
+        canMove: Bool,
+        canTag: Bool,
+        canOpenConversation: Bool,
+        onRead: @escaping () -> Void,
+        onChat: @escaping () -> Void,
+        onCopy: @escaping () -> Void,
+        onTag: @escaping () -> Void,
+        onDelete: @escaping () -> Void,
+        onClear: @escaping () -> Void
+    ) {
+        countLabel.stringValue = "\(selectedCount) selected"
+        setAccessibilityLabel("\(selectedCount) selected papers")
+        readButton.apply(disabled: !canOpenConversation, onPress: onRead)
+        chatButton.apply(disabled: !canOpenConversation, onPress: onChat)
+        copyButton.apply(disabled: !canMove, onPress: onCopy)
+        tagButton.apply(disabled: !canTag, onPress: onTag)
+        deleteButton.apply(disabled: false, onPress: onDelete)
+        clearButton.apply(disabled: false, onPress: onClear)
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        updateChrome()
+    }
+
+    private func setup() {
+        translatesAutoresizingMaskIntoConstraints = false
+        wantsLayer = true
+        setAccessibilityRole(.group)
+
+        stackView.translatesAutoresizingMaskIntoConstraints = false
+        stackView.orientation = .horizontal
+        stackView.alignment = .centerY
+        stackView.spacing = 10
+        stackView.edgeInsets = NSEdgeInsets(top: 8, left: 12, bottom: 8, right: 12)
+
+        countIconView.translatesAutoresizingMaskIntoConstraints = false
+        countIconView.image = NSImage(systemSymbolName: "checkmark.circle.fill", accessibilityDescription: "Selected")
+        countIconView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 14, weight: .semibold)
+        countIconView.contentTintColor = .controlAccentColor
+
+        countLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+        countLabel.textColor = .controlAccentColor
+        countLabel.lineBreakMode = .byTruncatingTail
+        countLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        spacerView.translatesAutoresizingMaskIntoConstraints = false
+        spacerView.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        spacerView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        stackView.addArrangedSubview(countIconView)
+        stackView.addArrangedSubview(countLabel)
+        stackView.addArrangedSubview(spacerView)
+        stackView.addArrangedSubview(readButton)
+        stackView.addArrangedSubview(chatButton)
+        stackView.addArrangedSubview(copyButton)
+        stackView.addArrangedSubview(tagButton)
+        stackView.addArrangedSubview(deleteButton)
+        stackView.addArrangedSubview(clearButton)
+
+        addSubview(stackView)
+        NSLayoutConstraint.activate([
+            stackView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            stackView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            stackView.topAnchor.constraint(equalTo: topAnchor),
+            stackView.bottomAnchor.constraint(equalTo: bottomAnchor),
+            countIconView.widthAnchor.constraint(equalToConstant: 16),
+            countIconView.heightAnchor.constraint(equalToConstant: 16),
+            heightAnchor.constraint(greaterThanOrEqualToConstant: 46)
+        ])
+        updateChrome()
+    }
+
+    private func updateChrome() {
+        layer?.cornerRadius = 9
+        layer?.masksToBounds = true
+        layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.08).cgColor
+        layer?.borderWidth = 1
+        layer?.borderColor = NSColor.controlAccentColor.withAlphaComponent(0.22).cgColor
+    }
+}
+
+private enum NativeBulkLibraryActionTint {
+    case accent
+    case secondary
+    case destructive
+
+    var color: NSColor {
+        switch self {
+        case .accent:
+            .controlAccentColor
+        case .secondary:
+            .secondaryLabelColor
+        case .destructive:
+            .systemRed
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-        .background(
-            RoundedRectangle(cornerRadius: 9)
-                .fill(Color.accentColor.opacity(0.08))
+    }
+}
+
+private final class NativeBulkLibraryActionButton: NSButton {
+    private let actionTint: NativeBulkLibraryActionTint
+    private var onPress: () -> Void = {}
+
+    init(title: String, systemSymbolName: String, tint: NativeBulkLibraryActionTint) {
+        actionTint = tint
+        super.init(frame: .zero)
+        self.title = title
+        image = NSImage(systemSymbolName: systemSymbolName, accessibilityDescription: title)
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+
+    override func highlight(_ flag: Bool) {
+        super.highlight(flag)
+        updateStyle(isPressed: flag)
+    }
+
+    func apply(disabled: Bool, onPress: @escaping () -> Void) {
+        isEnabled = !disabled
+        self.onPress = onPress
+        updateStyle(isPressed: isHighlighted)
+    }
+
+    private func setup() {
+        translatesAutoresizingMaskIntoConstraints = false
+        target = self
+        action = #selector(performPress(_:))
+        bezelStyle = .regularSquare
+        isBordered = false
+        setButtonType(.momentaryPushIn)
+        imagePosition = .imageLeading
+        imageScaling = .scaleProportionallyDown
+        font = .systemFont(ofSize: 12.5, weight: .semibold)
+        controlSize = .small
+        wantsLayer = true
+        setContentHuggingPriority(.required, for: .horizontal)
+        setContentCompressionResistancePriority(.required, for: .horizontal)
+        setAccessibilityRole(.button)
+        setAccessibilityLabel(title)
+        heightAnchor.constraint(equalToConstant: 30).isActive = true
+        updateStyle(isPressed: false)
+    }
+
+    private func updateStyle(isPressed: Bool) {
+        let tint = isEnabled ? actionTint.color : NSColor.tertiaryLabelColor
+        contentTintColor = tint
+        attributedTitle = NSAttributedString(
+            string: title,
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 12.5, weight: .semibold),
+                .foregroundColor: tint
+            ]
         )
-        .overlay(
-            RoundedRectangle(cornerRadius: 9)
-                .stroke(Color.accentColor.opacity(0.22), lineWidth: 1)
-        )
+        layer?.cornerRadius = 7
+        layer?.masksToBounds = true
+        layer?.backgroundColor = isPressed
+            ? tint.withAlphaComponent(0.18).cgColor
+            : tint.withAlphaComponent(isEnabled ? 0.10 : 0.05).cgColor
+    }
+
+    @objc private func performPress(_ sender: NSButton) {
+        guard isEnabled else {
+            return
+        }
+        onPress()
     }
 }
 
