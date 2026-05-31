@@ -352,33 +352,31 @@ struct SettingsView: View {
 
     private var discoverCodexProcessingSettings: some View {
         settingsSection(title: "Explore Processing", systemImage: "cpu") {
-            Picker("Model", selection: $draftDiscoverCodexModel) {
-                Text(codexDefaultModelLabel).tag("")
-                ForEach(model.availableCodexModelIDs, id: \.self) { modelID in
-                    Text(modelID).tag(modelID)
+            HStack(spacing: 12) {
+                SettingsModelPopup(
+                    selectedModelID: draftDiscoverCodexModel,
+                    defaultModelLabel: codexDefaultModelLabel,
+                    availableModelIDs: model.availableCodexModelIDs
+                ) { modelID in
+                    draftDiscoverCodexModel = modelID
                 }
-                if !draftDiscoverCodexModel.isEmpty,
-                   !model.availableCodexModelIDs.contains(draftDiscoverCodexModel) {
-                    Text("\(draftDiscoverCodexModel) (custom)").tag(draftDiscoverCodexModel)
+
+                SettingsReasoningEffortPopup(selection: draftDiscoverCodexReasoningEffort) { effort in
+                    draftDiscoverCodexReasoningEffort = effort
                 }
             }
-            .pickerStyle(.menu)
 
             TextField("Custom model override", text: $draftDiscoverCodexModel)
                 .textFieldStyle(.roundedBorder)
 
-            Picker("Thinking", selection: $draftDiscoverCodexReasoningEffort) {
-                ForEach(CodexReasoningEffort.allCases, id: \.self) { effort in
-                    Text(effort.displayName).tag(effort)
-                }
+            SettingsIntegerStepper(
+                title: "Concurrent Codex processes",
+                value: draftDiscoverCodexConcurrency,
+                range: 1...20,
+                step: 1
+            ) { value in
+                draftDiscoverCodexConcurrency = value
             }
-            .pickerStyle(.menu)
-
-            Stepper(
-                "Concurrent Codex processes: \(draftDiscoverCodexConcurrency)",
-                value: $draftDiscoverCodexConcurrency,
-                in: 1...20
-            )
 
             HStack {
                 SettingsActionButton(
@@ -1206,6 +1204,364 @@ private final class NativeSettingsSegmentedControlView: NSSegmentedControl {
         CATransaction.setAnimationDuration(reduceMotion ? 0 : (isPressed ? 0.05 : 0.12))
         layer?.transform = CATransform3DMakeScale(targetScale, targetScale, 1)
         CATransaction.commit()
+    }
+}
+
+private struct SettingsModelPopup: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var selectedModelID: String
+    var defaultModelLabel: String
+    var availableModelIDs: [String]
+    var onSelect: (String) -> Void
+
+    var body: some View {
+        NativeSettingsPopupButton(
+            accessibilityLabel: "Model",
+            items: modelItems,
+            selectedID: selectedModelID,
+            reduceMotion: reduceMotion,
+            action: onSelect
+        )
+        .frame(width: 300, height: 28, alignment: .leading)
+        .help("Model")
+    }
+
+    private var modelItems: [NativeSettingsPopupItem] {
+        var items = [NativeSettingsPopupItem(id: "", title: defaultModelLabel)]
+        items += availableModelIDs.map { NativeSettingsPopupItem(id: $0, title: $0) }
+        if !selectedModelID.isEmpty,
+           !availableModelIDs.contains(selectedModelID) {
+            items.append(NativeSettingsPopupItem(id: selectedModelID, title: "\(selectedModelID) (custom)"))
+        }
+        return items
+    }
+}
+
+private struct SettingsReasoningEffortPopup: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var selection: CodexReasoningEffort
+    var onSelect: (CodexReasoningEffort) -> Void
+
+    var body: some View {
+        NativeSettingsPopupButton(
+            accessibilityLabel: "Thinking",
+            items: CodexReasoningEffort.allCases.map { effort in
+                NativeSettingsPopupItem(id: effort.rawValue, title: "Think \(effort.displayName)")
+            },
+            selectedID: selection.rawValue,
+            reduceMotion: reduceMotion
+        ) { id in
+            if let effort = CodexReasoningEffort(rawValue: id) {
+                onSelect(effort)
+            }
+        }
+        .frame(width: 160, height: 28, alignment: .leading)
+        .help("Thinking")
+    }
+}
+
+private struct NativeSettingsPopupItem: Equatable {
+    var id: String
+    var title: String
+}
+
+private struct NativeSettingsPopupButton: NSViewRepresentable {
+    var accessibilityLabel: String
+    var items: [NativeSettingsPopupItem]
+    var selectedID: String
+    var reduceMotion: Bool
+    var action: (String) -> Void
+
+    func makeNSView(context: Context) -> NativeSettingsPopupButtonView {
+        let view = NativeSettingsPopupButtonView(frame: .zero)
+        view.apply(
+            accessibilityLabel: accessibilityLabel,
+            items: items,
+            selectedID: selectedID,
+            reduceMotion: reduceMotion,
+            action: action
+        )
+        return view
+    }
+
+    func updateNSView(_ view: NativeSettingsPopupButtonView, context: Context) {
+        view.apply(
+            accessibilityLabel: accessibilityLabel,
+            items: items,
+            selectedID: selectedID,
+            reduceMotion: reduceMotion,
+            action: action
+        )
+    }
+}
+
+private final class NativeSettingsPopupButtonView: NSPopUpButton {
+    private var popupItems: [NativeSettingsPopupItem] = []
+    private var selectedID = ""
+    private var reduceMotion = false
+    private var changeHandler: (String) -> Void = { _ in }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect, pullsDown: false)
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: 28)
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+
+    override func accessibilityValue() -> Any? {
+        popupItems.first { $0.id == selectedID }?.title ?? selectedItem?.title ?? ""
+    }
+
+    func apply(
+        accessibilityLabel: String,
+        items: [NativeSettingsPopupItem],
+        selectedID: String,
+        reduceMotion: Bool,
+        action: @escaping (String) -> Void
+    ) {
+        popupItems = items
+        self.selectedID = selectedID
+        self.reduceMotion = reduceMotion
+        changeHandler = action
+        removeAllItems()
+        for item in items {
+            addItem(withTitle: item.title)
+            lastItem?.representedObject = item.id
+        }
+        selectItem(withRepresentedObject: selectedID)
+        if selectedItem == nil, !items.isEmpty {
+            selectItem(at: 0)
+            self.selectedID = items[0].id
+        }
+        toolTip = selectedItem?.title ?? accessibilityLabel
+        setAccessibilityLabel(accessibilityLabel)
+        setAccessibilityValue(accessibilityValue())
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        pulse(pressed: true)
+        super.mouseDown(with: event)
+        pulse(pressed: false)
+    }
+
+    private func setup() {
+        translatesAutoresizingMaskIntoConstraints = false
+        controlSize = .regular
+        font = .systemFont(ofSize: 13, weight: .regular)
+        target = self
+        action = #selector(selectionChanged)
+        focusRingType = .none
+        setAccessibilityElement(true)
+        setAccessibilityRole(.popUpButton)
+        wantsLayer = true
+    }
+
+    @objc private func selectionChanged() {
+        guard let id = selectedItem?.representedObject as? String else {
+            return
+        }
+        selectedID = id
+        toolTip = selectedItem?.title
+        setAccessibilityValue(accessibilityValue())
+        changeHandler(id)
+        pulse(pressed: false)
+    }
+
+    private func pulse(pressed: Bool) {
+        let scale: CGFloat = reduceMotion || !pressed ? 1 : 0.992
+        CATransaction.begin()
+        CATransaction.setDisableActions(reduceMotion)
+        CATransaction.setAnimationDuration(reduceMotion ? 0 : (pressed ? 0.05 : 0.10))
+        layer?.transform = CATransform3DMakeScale(scale, scale, 1)
+        CATransaction.commit()
+    }
+}
+
+private extension NSPopUpButton {
+    func selectItem(withRepresentedObject representedObject: String) {
+        guard let item = itemArray.first(where: { ($0.representedObject as? String) == representedObject }) else {
+            return
+        }
+        select(item)
+    }
+}
+
+private struct SettingsIntegerStepper: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var title: String
+    var value: Int
+    var range: ClosedRange<Int>
+    var step: Int
+    var onChange: (Int) -> Void
+
+    var body: some View {
+        NativeSettingsIntegerStepper(
+            title: title,
+            value: value,
+            range: range,
+            step: step,
+            reduceMotion: reduceMotion,
+            onChange: onChange
+        )
+        .frame(width: 260, height: 28, alignment: .leading)
+        .help(title)
+    }
+}
+
+private struct NativeSettingsIntegerStepper: NSViewRepresentable {
+    var title: String
+    var value: Int
+    var range: ClosedRange<Int>
+    var step: Int
+    var reduceMotion: Bool
+    var onChange: (Int) -> Void
+
+    func makeNSView(context: Context) -> NativeSettingsIntegerStepperView {
+        let view = NativeSettingsIntegerStepperView()
+        view.apply(
+            title: title,
+            value: value,
+            range: range,
+            step: step,
+            reduceMotion: reduceMotion,
+            onChange: onChange
+        )
+        return view
+    }
+
+    func updateNSView(_ view: NativeSettingsIntegerStepperView, context: Context) {
+        view.apply(
+            title: title,
+            value: value,
+            range: range,
+            step: step,
+            reduceMotion: reduceMotion,
+            onChange: onChange
+        )
+    }
+}
+
+private final class NativeSettingsIntegerStepperView: NSView {
+    private let labelField = NSTextField(labelWithString: "")
+    private let stepper = NSStepper()
+    private var range: ClosedRange<Int> = 0...1
+    private var reduceMotion = false
+    private var changeHandler: (Int) -> Void = { _ in }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override var isFlipped: Bool {
+        true
+    }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: 260, height: 28)
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+
+    func apply(
+        title: String,
+        value: Int,
+        range: ClosedRange<Int>,
+        step: Int,
+        reduceMotion: Bool,
+        onChange: @escaping (Int) -> Void
+    ) {
+        self.range = range
+        self.reduceMotion = reduceMotion
+        changeHandler = onChange
+
+        let clampedValue = min(max(value, range.lowerBound), range.upperBound)
+        labelField.stringValue = "\(title): \(clampedValue)"
+        labelField.toolTip = labelField.stringValue
+        stepper.minValue = Double(range.lowerBound)
+        stepper.maxValue = Double(range.upperBound)
+        stepper.increment = Double(step)
+        stepper.doubleValue = Double(clampedValue)
+        stepper.setAccessibilityLabel(title)
+        stepper.setAccessibilityValue("\(clampedValue)")
+        stepper.toolTip = title
+        setAccessibilityLabel(title)
+        setAccessibilityValue("\(clampedValue)")
+    }
+
+    private func setup() {
+        translatesAutoresizingMaskIntoConstraints = false
+        setAccessibilityElement(false)
+        wantsLayer = true
+
+        labelField.translatesAutoresizingMaskIntoConstraints = false
+        labelField.font = .systemFont(ofSize: 13, weight: .regular)
+        labelField.textColor = .labelColor
+        labelField.lineBreakMode = .byTruncatingTail
+        labelField.maximumNumberOfLines = 1
+
+        stepper.translatesAutoresizingMaskIntoConstraints = false
+        stepper.controlSize = .small
+        stepper.target = self
+        stepper.action = #selector(stepperChanged)
+        stepper.setContentHuggingPriority(.required, for: .horizontal)
+
+        [labelField, stepper].forEach(addSubview(_:))
+
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: 28),
+            labelField.leadingAnchor.constraint(equalTo: leadingAnchor),
+            labelField.centerYAnchor.constraint(equalTo: centerYAnchor),
+            labelField.trailingAnchor.constraint(lessThanOrEqualTo: stepper.leadingAnchor, constant: -8),
+            stepper.trailingAnchor.constraint(equalTo: trailingAnchor),
+            stepper.centerYAnchor.constraint(equalTo: centerYAnchor)
+        ])
+    }
+
+    @objc private func stepperChanged() {
+        let rawValue = Int(stepper.doubleValue.rounded())
+        let clampedValue = min(max(rawValue, range.lowerBound), range.upperBound)
+        stepper.doubleValue = Double(clampedValue)
+        changeHandler(clampedValue)
+        pulse()
+    }
+
+    private func pulse() {
+        CATransaction.begin()
+        CATransaction.setDisableActions(reduceMotion)
+        CATransaction.setAnimationDuration(reduceMotion ? 0 : 0.06)
+        layer?.transform = CATransform3DMakeScale(reduceMotion ? 1 : 0.992, reduceMotion ? 1 : 0.992, 1)
+        CATransaction.commit()
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self else {
+                return
+            }
+            CATransaction.begin()
+            CATransaction.setDisableActions(self.reduceMotion)
+            CATransaction.setAnimationDuration(self.reduceMotion ? 0 : 0.10)
+            self.layer?.transform = CATransform3DIdentity
+            CATransaction.commit()
+        }
     }
 }
 

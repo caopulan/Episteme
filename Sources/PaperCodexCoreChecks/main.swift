@@ -1949,6 +1949,32 @@ func runUILayoutSourceChecks() throws {
     } else {
         throw CheckFailure(description: "settings Codex enrichment section source should remain inspectable")
     }
+    if let discoverProcessingRange = settingsViewSource.range(of: "private var discoverCodexProcessingSettings: some View"),
+       let discoverProcessingEndRange = settingsViewSource.range(of: "private var codexSystemPromptSettings: some View", range: discoverProcessingRange.upperBound..<settingsViewSource.endIndex) {
+        let discoverProcessingSource = String(settingsViewSource[discoverProcessingRange.lowerBound..<discoverProcessingEndRange.lowerBound])
+        try check(
+            discoverProcessingSource.components(separatedBy: "SettingsModelPopup(").count - 1 == 1
+                && discoverProcessingSource.contains("SettingsReasoningEffortPopup(")
+                && discoverProcessingSource.contains("SettingsIntegerStepper(")
+                && settingsViewSource.contains("private struct SettingsModelPopup: View")
+                && settingsViewSource.contains("private struct SettingsReasoningEffortPopup: View")
+                && settingsViewSource.contains("private struct NativeSettingsPopupButton: NSViewRepresentable")
+                && settingsViewSource.contains("private final class NativeSettingsPopupButtonView: NSPopUpButton")
+                && settingsViewSource.contains("super.init(frame: frameRect, pullsDown: false)")
+                && settingsViewSource.contains("selectItem(withRepresentedObject:")
+                && settingsViewSource.contains("selectedItem?.representedObject as? String")
+                && settingsViewSource.contains("private struct SettingsIntegerStepper: View")
+                && settingsViewSource.contains("private struct NativeSettingsIntegerStepper: NSViewRepresentable")
+                && settingsViewSource.contains("private final class NativeSettingsIntegerStepperView: NSView")
+                && settingsViewSource.contains("stepper.setAccessibilityLabel(title)")
+                && !discoverProcessingSource.contains("\n            Picker(")
+                && !discoverProcessingSource.contains("\n            Stepper(")
+                && !discoverProcessingSource.contains(".pickerStyle(.menu)"),
+            "Settings Explore Processing controls should use native AppKit popup and stepper controls"
+        )
+    } else {
+        throw CheckFailure(description: "settings Explore Processing section source should remain inspectable")
+    }
     try check(
         chatSource.contains("Bundle.main.resourceURL")
             && chatSource.contains("loadHTMLString(html, baseURL: htmlBaseURL)"),
@@ -3371,10 +3397,11 @@ func runUILayoutSourceChecks() throws {
     )
     try check(
         settingsViewSource.contains("draftDiscoverCodexReasoningEffort")
-            && settingsViewSource.contains("Picker(\"Thinking\"")
+            && settingsViewSource.contains("SettingsReasoningEffortPopup(selection: draftDiscoverCodexReasoningEffort)")
+            && settingsViewSource.contains("SettingsModelPopup(")
             && settingsViewSource.contains("model.setDiscoverCodexSettings(")
             && settingsViewSource.contains("reasoningEffort: draftDiscoverCodexReasoningEffort"),
-        "Settings should expose the default Discover processing thinking effort next to the default model"
+        "Settings should expose native default Discover processing model and thinking controls"
     )
     try check(
         appModelSource.contains("processDiscoverPaperForEnrichment(")
