@@ -1911,7 +1911,7 @@ func runUILayoutSourceChecks() throws {
             && nativeStatusViewsSource.contains("NSProgressIndicator")
             && nativeStatusViewsSource.contains("NSTextField(labelWithString:")
             && nativeStatusViewsSource.contains("NSImage(systemSymbolName:")
-            && chatSource.contains("PaperCodexNativeEmptyState(")
+            && chatSource.contains("renderEmptyState")
             && discoverSource.contains("PaperCodexNativeProgressBar(")
             && interactionFeedbackSource.contains("PaperCodexNativeSpinner(")
             && appSourcesWithSwiftUIStatusViews.isEmpty,
@@ -1943,8 +1943,8 @@ func runUILayoutSourceChecks() throws {
             && librarySource.contains("PaperCodexNativeScrollView")
             && saveToLibrarySource.contains("PaperCodexNativeScrollView")
             && interactionFeedbackSource.contains("PaperCodexNativeScrollView")
-            && chatSource.contains("PaperCodexNativeScrollView(.horizontal")
-            && chatSource.contains("PaperCodexNativeScrollView(scrollRequest: chatScrollRequest")
+            && chatSource.contains("NativeChatTranscriptView(")
+            && chatSource.contains("scrollRequestToken: chatScrollRequestToken")
             && chatSource.contains("requestChatScrollToBottom")
             && discoverSource.contains("PaperCodexNativeScrollView")
             && discoverSource.contains("NativeDiscoverCollectionView(")
@@ -1960,7 +1960,7 @@ func runUILayoutSourceChecks() throws {
             && !chatSource.contains("ScrollViewReader")
             && !discoverSource.contains("ScrollViewReader")
             && appSourcesWithSwiftUIScrollViews.isEmpty,
-        "static app scroll regions should use shared AppKit NSScrollView hosting while high-throughput Discover results use native NSCollectionView; remaining SwiftUI scroll files: \(appSourcesWithSwiftUIScrollViews.joined(separator: ", "))"
+        "static app scroll regions should use shared AppKit NSScrollView hosting, chat should use a single native transcript surface, and high-throughput Discover results should use native NSCollectionView; remaining SwiftUI scroll files: \(appSourcesWithSwiftUIScrollViews.joined(separator: ", "))"
     )
     if let nativeScrollApplyRange = nativeScrollViewSource.range(of: "    func apply("),
        let nativeScrollSetupRange = nativeScrollViewSource.range(of: "    private func setup()", range: nativeScrollApplyRange.upperBound..<nativeScrollViewSource.endIndex) {
@@ -2204,75 +2204,66 @@ func runUILayoutSourceChecks() throws {
             && !chatSource.contains("SessionNoteListRowButtonStyle"),
         "reader notes panel should use a native AppKit split workspace with selectable notes and editor actions"
     )
-    if let runEventRowRange = chatSource.range(of: "private struct CodexRunEventRow: View"),
-       let runEventRowEndRange = chatSource.range(of: "private struct MessageBubble: View", range: runEventRowRange.upperBound..<chatSource.endIndex) {
-        let runEventRowSource = String(chatSource[runEventRowRange.lowerBound..<runEventRowEndRange.lowerBound])
-        try check(
-            runEventRowSource.contains("NativeChatRunEventDisclosureRow(")
-                && chatSource.contains("private struct NativeChatRunEventDisclosureRow: NSViewRepresentable")
-                && chatSource.contains("private final class NativeChatRunEventDisclosureRowView: NSView")
-                && chatSource.contains("private final class NativeChatRunEventDisclosureButton: NSButton")
-                && chatSource.contains("terminalDetailTextView")
-                && chatSource.contains("NSScrollView")
-                && chatSource.contains("bezelStyle = .disclosure")
-                && chatSource.contains("setButtonType(.onOff)")
-                && chatSource.contains("setAccessibilityRole(.disclosureTriangle)")
-                && chatSource.contains("override func mouseDown(with event: NSEvent)")
-                && !runEventRowSource.contains("DisclosureGroup("),
-            "chat run terminal events should use a native AppKit disclosure row instead of SwiftUI DisclosureGroup"
-        )
-    } else {
-        throw CheckFailure(description: "chat run event row source should remain inspectable")
-    }
-    if let messageBubbleRange = chatSource.range(of: "private struct MessageBubble: View"),
-       let messageBubbleEndRange = chatSource.range(of: "private struct GeneratedImageGallery", range: messageBubbleRange.upperBound..<chatSource.endIndex) {
-        let messageBubbleSource = String(chatSource[messageBubbleRange.lowerBound..<messageBubbleEndRange.lowerBound])
-        try check(
-            messageBubbleSource.components(separatedBy: "PaperCodexPanelButton(").count - 1 >= 2
-                && messageBubbleSource.contains("title: \"Retry\"")
-                && messageBubbleSource.contains("title: \"New Session\"")
-                && actionButtonSource.contains("struct PaperCodexPanelButton: View")
-                && actionButtonSource.contains("private struct NativePaperCodexPanelButton: NSViewRepresentable")
-                && actionButtonSource.contains("private final class NativePaperCodexPanelButtonView: NSButton")
-                && actionButtonSource.contains("override func mouseDown(with event: NSEvent)")
-                && actionButtonSource.contains("setAccessibilityRole(.button)")
-                && actionButtonSource.contains("CATransaction.setAnimationDuration")
-                && !chatSource.contains("private struct ChatPanelActionButtonStyle: ButtonStyle")
-                && !messageBubbleSource.contains(".buttonStyle(.bordered)"),
-            "chat failure recovery actions should use the shared native panel button before retrying or opening a new session"
-        )
-        try check(
-            messageBubbleSource.contains("ChatRoleBadge(")
-                && messageBubbleSource.contains("private var agentMessageRow: some View")
-                && messageBubbleSource.contains("private var userMessageRow: some View")
-                && messageBubbleSource.contains("UserMessageBubbleBackground()")
-                && messageBubbleSource.contains("message.createdAt")
-                && messageBubbleSource.contains("messageFontSize")
-                && messageBubbleSource.contains("fontFamily")
-                && !messageBubbleSource.contains(".background(isUser ? Color.blue.opacity(0.12) : Color(nsColor: .textBackgroundColor))"),
-            "reader chat messages should keep role badges and timestamps while separating full-width Agent replies from user bubbles"
-        )
-    } else {
-        throw CheckFailure(description: "chat message bubble source should remain inspectable")
-    }
-    if let generatedGalleryRange = chatSource.range(of: "private struct GeneratedImageGallery: View"),
-       let generatedGalleryEndRange = chatSource.range(of: "private struct MarkdownMessageView: View", range: generatedGalleryRange.upperBound..<chatSource.endIndex) {
-        let generatedGallerySource = String(chatSource[generatedGalleryRange.lowerBound..<generatedGalleryEndRange.lowerBound])
-        try check(
-            generatedGallerySource.components(separatedBy: "PaperCodexMediaPreviewButton(").count - 1 >= 2
-                && generatedGallerySource.contains("help: \"Preview generated image\"")
-                && generatedGallerySource.contains("help: \"Open quoted source\"")
-                && generatedGallerySource.contains("PaperCodexIconButton(title: \"Close Preview\"")
-                && generatedGallerySource.contains("PaperCodexIconButton(title: \"Remove Source\"")
-                && !generatedGallerySource.contains("\n                    Button")
-                && !generatedGallerySource.contains("\n            Button(action:")
-                && !generatedGallerySource.contains("\n        Button {")
-                && !generatedGallerySource.contains(".buttonStyle("),
-            "reader chat generated image and source reply controls should use native AppKit-backed buttons"
-        )
-    } else {
-        throw CheckFailure(description: "chat generated image and source reply source should remain inspectable")
-    }
+    try check(
+        chatSource.contains("NativeChatTranscriptView(")
+            && chatSource.contains("private struct NativeChatTranscriptView: NSViewRepresentable")
+            && chatSource.contains("private final class NativeChatTranscriptWebView: NSView")
+            && chatSource.contains("private struct NativeChatTranscriptRenderableMessage: Equatable")
+            && chatSource.contains("private enum NativeChatTranscriptHTMLBuilder")
+            && chatSource.contains("WKWebView")
+            && chatSource.contains("ChatMarkdownRenderer.renderFragment")
+            && chatSource.contains("UserSourceAttachmentParser.parse")
+            && chatSource.contains("CitationParser.parse")
+            && chatSource.contains("CodexFailureNotice.parse")
+            && chatSource.contains("generatedImageURLs(in:")
+            && chatSource.contains("papercodex-chat://retry")
+            && chatSource.contains("papercodex-chat://new-session")
+            && chatSource.contains("papercodex-chat://image")
+            && chatSource.contains("onCitation")
+            && chatSource.contains("onRetryFailure")
+            && chatSource.contains("onNewSession")
+            && chatSource.contains("onGeneratedImagePreview")
+            && !chatSource.contains("ForEach(model.messages)")
+            && !chatSource.contains("MessageBubble(")
+            && !chatSource.contains("private struct MessageBubble: View")
+            && !chatSource.contains("private struct MarkdownMessageView: View")
+            && !chatSource.contains("private struct MarkdownWebView: NSViewRepresentable"),
+        "reader chat transcript should use one native AppKit/WebKit surface instead of SwiftUI ForEach message bubbles and per-message WKWebViews"
+    )
+    try check(
+        chatSource.contains("message-user-bubble")
+            && chatSource.contains("message-agent")
+            && chatSource.contains("role-badge")
+            && chatSource.contains("message.createdAt")
+            && chatSource.contains("formattedTimestamp")
+            && chatSource.contains("fontFamily.cssFontFamily")
+            && chatSource.contains("ChatMarkdownRenderStyle(")
+            && !chatSource.contains("private struct UserMessageBubbleBackground: View")
+            && !chatSource.contains("private struct ChatRoleBadge: View"),
+        "reader chat transcript should keep compact user bubbles, full-width agent replies, role badges, timestamps, and appearance settings inside the native surface"
+    )
+    try check(
+        chatSource.contains("renderActiveRun")
+            && chatSource.contains("visibleCodexRunEvents")
+            && chatSource.contains("tokenUsageSummary")
+            && chatSource.contains("case .usage")
+            && chatSource.contains("event.previewDetail")
+            && chatSource.contains("<details")
+            && !chatSource.contains("private struct CodexRunBubble: View")
+            && !chatSource.contains("private struct CodexRunEventRow: View")
+            && !chatSource.contains("private struct NativeChatRunEventDisclosureRow: NSViewRepresentable"),
+        "active chat runs should render inside the same native transcript surface instead of a separate SwiftUI run bubble"
+    )
+    try check(
+        chatSource.contains("renderGeneratedImageGallery")
+            && chatSource.contains("generated-image-gallery")
+            && chatSource.contains("GeneratedImagePreviewOverlay")
+            && chatSource.contains("ZoomableImageScrollView")
+            && chatSource.contains("Preview generated image")
+            && chatSource.contains("Quoted source")
+            && chatSource.contains("Open quoted source"),
+        "reader chat generated images and quoted sources should stay interactive inside the native transcript and use the in-app preview overlay"
+    )
     try check(
         chatAppearanceSource.contains("enum ChatFontFamily: String, CaseIterable, Identifiable")
             && chatAppearanceSource.contains("static let defaultMessageFontSize: Double = 16")
@@ -3769,11 +3760,12 @@ func runUILayoutSourceChecks() throws {
     )
 
     try check(
-        chatSource.contains("PaperCodexNativeScrollView(scrollRequest: chatScrollRequest")
+        chatSource.contains("NativeChatTranscriptView(")
+            && chatSource.contains("scrollRequestToken: chatScrollRequestToken")
             && chatSource.contains("requestChatScrollToBottom")
-            && chatSource.contains("target: .bottom")
+            && chatSource.contains("scrollToBottom")
             && !chatSource.contains("ScrollViewReader"),
-        "chat should auto-scroll to the newest message and active run through programmable AppKit scroll requests"
+        "chat should auto-scroll to the newest message and active run through the native transcript surface"
     )
     try check(
         chatSource.contains("isCurrentSessionSending"),
@@ -3824,21 +3816,12 @@ func runUILayoutSourceChecks() throws {
         "chat session rename should not be hidden behind an ellipsis menu"
     )
     try check(
-        chatSource.contains("GeneratedImageGallery"),
-        "chat should render generated local images as an explicit gallery"
+        chatSource.contains("renderGeneratedImageGallery")
+            && chatSource.contains("papercodex-chat://image")
+            && chatSource.contains("GeneratedImagePreviewOverlay")
+            && chatSource.contains("ZoomableImageScrollView"),
+        "chat should render generated local images as an explicit in-transcript gallery"
     )
-    if let galleryStart = chatSource.range(of: "private struct GeneratedImageGallery"),
-       let galleryEnd = chatSource.range(of: "private struct CurrentSelectionReplyCard", range: galleryStart.upperBound..<chatSource.endIndex) {
-        let gallerySource = String(chatSource[galleryStart.lowerBound..<galleryEnd.lowerBound])
-        try check(
-            gallerySource.contains("ZoomableImageScrollView")
-                && gallerySource.contains("GeneratedImagePreviewOverlay")
-                && !gallerySource.contains("NSWorkspace.shared.open"),
-            "generated image gallery should preview and zoom images inside Paper Codex instead of opening external image files"
-        )
-    } else {
-        throw CheckFailure(description: "generated image gallery source section should be present")
-    }
     try check(
         chatComposerNativeSource.contains("hasMarkedText()"),
         "chat composer should let IME marked text handle Return before submitting"
@@ -4328,38 +4311,28 @@ func runUIDesignSourceChecks() throws {
             && typographySource.contains("paperCodexReadableLineLimit"),
         "Paper Codex typography should preserve readable line length and avoid forcing a single Dynamic Type size"
     )
-    if let messageBubbleRange = chatSource.range(of: "private struct MessageBubble: View"),
-       let messageBubbleEndRange = chatSource.range(of: "private struct ChatRoleBadge: View", range: messageBubbleRange.upperBound..<chatSource.endIndex) {
-        let messageBubbleSource = String(chatSource[messageBubbleRange.lowerBound..<messageBubbleEndRange.lowerBound])
-        try check(
-            messageBubbleSource.contains("private var chatBubbleContentWidth: CGFloat?")
-                && messageBubbleSource.contains(".frame(width: chatBubbleContentWidth, alignment: .leading)")
-                && messageBubbleSource.contains("expandsHorizontally: true")
-                && messageBubbleSource.contains(".frame(maxWidth: .infinity, alignment: .leading)")
-                && messageBubbleSource.contains(".padding(.horizontal, 13)")
-                && messageBubbleSource.contains(".padding(.top, 10)")
-                && messageBubbleSource.contains(".padding(.bottom, 8)")
-                && !messageBubbleSource.contains(".padding(.vertical, 11)")
-                && !messageBubbleSource.contains("ChatMessageBubbleBackground(isUser: isUser)"),
-            "user message bubbles should still shrink short messages while Agent Markdown explicitly expands to the available full width"
-        )
-    } else {
-        throw CheckFailure(description: "message bubble source should remain inspectable")
-    }
     try check(
-        chatSource.contains(".padding(16)")
-            && chatSource.contains(".frame(maxWidth: .infinity, alignment: .leading)")
-            && chatSource.contains("expandsHorizontally")
+        chatSource.contains("private struct NativeChatTranscriptView: NSViewRepresentable")
+            && chatSource.contains("private final class NativeChatTranscriptWebView: NSView")
+            && chatSource.contains("NativeChatTranscriptHTMLBuilder")
+            && chatSource.contains("message-user-bubble")
+            && chatSource.contains("max-width: min(70%,")
+            && chatSource.contains("message-agent")
+            && chatSource.contains("width: 100%")
+            && chatSource.contains("role-badge")
+            && chatSource.contains("loadHTMLString(html, baseURL: htmlBaseURL)")
             && chatSource.contains("setContentHuggingPriority(.defaultLow, for: .horizontal)")
-            && chatSource.contains("setContentCompressionResistancePriority(.defaultLow, for: .horizontal)"),
-        "chat scroll content and Markdown WebViews should carry full-width Agent layout constraints through to WKWebView"
+            && chatSource.contains("setContentCompressionResistancePriority(.defaultLow, for: .horizontal)")
+            && !chatSource.contains("private struct MessageBubble: View")
+            && !chatSource.contains("private struct MarkdownWebView: NSViewRepresentable"),
+        "chat transcript should keep short user messages compact while Agent Markdown expands full-width inside one native WebKit surface"
     )
     try check(
-        chatSource.contains("private struct UserMessageBubbleBackground: View")
-            && chatSource.contains("Color.accentColor.opacity(0.08)")
-            && chatSource.contains("Color.accentColor.opacity(0.16)")
+        chatSource.contains("background: color-mix(in srgb, LinkText 9%, transparent)")
+            && chatSource.contains("border: 1px solid color-mix(in srgb, LinkText 18%, transparent)")
+            && !chatSource.contains("private struct UserMessageBubbleBackground: View")
             && !chatSource.contains("private struct ChatMessageBubbleBackground: View"),
-        "only user chat bubbles should keep a quiet framed background"
+        "only user chat bubbles should keep a quiet framed background, now rendered by the native transcript CSS"
     )
 }
 
@@ -6396,7 +6369,8 @@ func runAgentRuntimeSourceChecks() throws {
         chatViewSource.contains("case terminal")
             && chatViewSource.contains("AgentTerminalView()")
             && readerSessionToolbarSource.contains("(\"terminal\", \"Terminal\")")
-            && chatViewSource.contains("$0.kind == .thinking || $0.kind == .tool || $0.kind == .answer || $0.kind == .usage"),
+            && chatViewSource.contains("visibleCodexRunEvents(from run: ActiveCodexRun)")
+            && chatViewSource.contains("case .thinking, .tool, .terminal, .answer, .usage, .warning, .error:"),
         "ChatView should add a Terminal session panel tab and show tool events in active agent runs"
     )
     try check(
