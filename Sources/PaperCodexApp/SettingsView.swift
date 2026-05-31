@@ -732,14 +732,12 @@ struct SettingsView: View {
                     text: $newPromptTitle,
                     placeholder: "Prompt title"
                 )
-                TextEditor(text: $newPromptContent)
-                    .font(.paperCodexSystem(size: 13))
-                    .frame(minHeight: 78)
-                    .scrollContentBackground(.hidden)
-                    .background(Color(nsColor: .controlBackgroundColor))
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                    .accessibilityLabel("New quick prompt editor")
-                    .accessibilityValue("\(newPromptContent.count) characters")
+                SettingsMultilineTextView(
+                    title: "New quick prompt editor",
+                    text: $newPromptContent,
+                    placeholder: "Prompt content",
+                    minHeight: 78
+                )
                 SettingsActionButton(
                     title: "Add Prompt",
                     systemImage: "plus",
@@ -822,14 +820,13 @@ struct SettingsView: View {
             Text("Workspace placeholder: \(PromptBuilder.workspacePathPlaceholder)")
                 .font(.caption.monospaced())
                 .foregroundStyle(.secondary)
-            TextEditor(text: $draftCodexSystemPrompt)
-                .font(.paperCodexSystem(size: 13, design: .monospaced))
-                .frame(minHeight: 320)
-                .scrollContentBackground(.hidden)
-                .background(Color(nsColor: .controlBackgroundColor))
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-                .accessibilityLabel("System prompt template editor")
-                .accessibilityValue("\(draftCodexSystemPrompt.count) characters")
+            SettingsMultilineTextView(
+                title: "System prompt template editor",
+                text: $draftCodexSystemPrompt,
+                placeholder: "System prompt template",
+                fontStyle: .monospaced,
+                minHeight: 320
+            )
             HStack {
                 Text("\(draftCodexSystemPrompt.count) characters")
                     .font(.caption.monospacedDigit())
@@ -863,16 +860,17 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 16) {
             Label("Edit Quick Prompt", systemImage: "pencil")
                 .font(.title3.weight(.semibold))
-            TextField("Prompt title", text: $editingPromptTitle)
-                .textFieldStyle(.roundedBorder)
-            TextEditor(text: $editingPromptContent)
-                .font(.paperCodexSystem(size: 13))
-                .frame(minHeight: 120)
-                .scrollContentBackground(.hidden)
-                .background(Color(nsColor: .controlBackgroundColor))
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-                .accessibilityLabel("Quick prompt editor")
-                .accessibilityValue("\(editingPromptContent.count) characters")
+            SettingsTextField(
+                title: "Prompt title",
+                text: $editingPromptTitle,
+                placeholder: "Prompt title"
+            )
+            SettingsMultilineTextView(
+                title: "Quick prompt editor",
+                text: $editingPromptContent,
+                placeholder: "Prompt content",
+                minHeight: 120
+            )
             HStack {
                 Spacer()
                 SettingsActionButton(title: "Cancel") {
@@ -890,6 +888,10 @@ struct SettingsView: View {
         }
         .padding(22)
         .frame(width: 460)
+        .onAppear {
+            editingPromptTitle = prompt.title
+            editingPromptContent = prompt.content
+        }
     }
 
     private func pathRow(label: String, value: String) -> some View {
@@ -1692,6 +1694,39 @@ private extension NSPopUpButton {
         }
     }
 
+    private enum SettingsMultilineTextFontStyle {
+        case regular
+        case monospaced
+
+        var nsFont: NSFont {
+            switch self {
+            case .regular:
+                .systemFont(ofSize: 13)
+            case .monospaced:
+                .monospacedSystemFont(ofSize: 13, weight: .regular)
+            }
+        }
+    }
+
+    private struct SettingsMultilineTextView: View {
+        var title: String
+        @Binding var text: String
+        var placeholder: String
+        var fontStyle: SettingsMultilineTextFontStyle = .regular
+        var minHeight: CGFloat
+
+        var body: some View {
+            NativeSettingsMultilineTextView(
+                title: title,
+                text: $text,
+                placeholder: placeholder,
+                font: fontStyle.nsFont
+            )
+            .frame(maxWidth: .infinity, minHeight: minHeight, alignment: .leading)
+            .help(title)
+        }
+    }
+
     private struct NativeSettingsTextField: NSViewRepresentable {
         var title: String
         @Binding var text: String
@@ -1758,6 +1793,41 @@ private extension NSPopUpButton {
         }
     }
 
+    private struct NativeSettingsMultilineTextView: NSViewRepresentable {
+        var title: String
+        @Binding var text: String
+        var placeholder: String
+        var font: NSFont
+
+        func makeNSView(context: Context) -> NativeSettingsMultilineTextViewContainer {
+            let view = NativeSettingsMultilineTextViewContainer()
+            context.coordinator.update(text: $text)
+            view.apply(
+                title: title,
+                text: text,
+                placeholder: placeholder,
+                font: font,
+                delegate: context.coordinator
+            )
+            return view
+        }
+
+        func updateNSView(_ view: NativeSettingsMultilineTextViewContainer, context: Context) {
+            context.coordinator.update(text: $text)
+            view.apply(
+                title: title,
+                text: text,
+                placeholder: placeholder,
+                font: font,
+                delegate: context.coordinator
+            )
+        }
+
+        func makeCoordinator() -> SettingsTextViewCoordinator {
+            SettingsTextViewCoordinator(text: $text)
+        }
+    }
+
     private final class SettingsTextFieldCoordinator: NSObject, NSTextFieldDelegate {
         private var text: Binding<String>
         private var onCommit: () -> Void
@@ -1782,6 +1852,126 @@ private extension NSPopUpButton {
 
         func controlTextDidEndEditing(_ obj: Notification) {
             onCommit()
+        }
+    }
+
+    private final class SettingsTextViewCoordinator: NSObject, NSTextViewDelegate {
+        private var text: Binding<String>
+
+        init(text: Binding<String>) {
+            self.text = text
+            super.init()
+        }
+
+        func update(text: Binding<String>) {
+            self.text = text
+        }
+
+        func textDidChange(_ notification: Notification) {
+            guard let textView = notification.object as? NSTextView else {
+                return
+            }
+            text.wrappedValue = textView.string
+        }
+    }
+
+    private final class NativeSettingsMultilineTextViewContainer: NSView {
+        private let scrollView = NSScrollView()
+        private let textView = NativeSettingsPromptTextView()
+        private let placeholderLabel = NSTextField(labelWithString: "")
+
+        override init(frame frameRect: NSRect) {
+            super.init(frame: frameRect)
+            setup()
+        }
+
+        required init?(coder: NSCoder) {
+            nil
+        }
+
+        override var isFlipped: Bool {
+            true
+        }
+
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+            true
+        }
+
+        func apply(
+            title: String,
+            text: String,
+            placeholder: String,
+            font: NSFont,
+            delegate: NSTextViewDelegate
+        ) {
+            textView.delegate = delegate
+            textView.font = font
+            if textView.string != text && !textView.hasMarkedText() {
+                textView.string = text
+            }
+            placeholderLabel.stringValue = placeholder
+            placeholderLabel.font = font
+            placeholderLabel.isHidden = !textView.string.isEmpty
+            textView.setAccessibilityLabel(title)
+            setAccessibilityLabel(title)
+        }
+
+        private func setup() {
+            translatesAutoresizingMaskIntoConstraints = false
+            wantsLayer = true
+            setAccessibilityElement(false)
+
+            scrollView.translatesAutoresizingMaskIntoConstraints = false
+            scrollView.borderType = .bezelBorder
+            scrollView.hasVerticalScroller = true
+            scrollView.hasHorizontalScroller = false
+            scrollView.autohidesScrollers = true
+            scrollView.drawsBackground = true
+            scrollView.backgroundColor = .controlBackgroundColor
+
+            textView.minSize = NSSize(width: 0, height: 0)
+            textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+            textView.isVerticallyResizable = true
+            textView.isHorizontallyResizable = false
+            textView.autoresizingMask = [.width]
+            textView.textContainer?.widthTracksTextView = true
+            textView.textContainerInset = NSSize(width: 8, height: 7)
+            textView.drawsBackground = true
+            textView.backgroundColor = .controlBackgroundColor
+            textView.allowsUndo = true
+            textView.isRichText = false
+            textView.importsGraphics = false
+            textView.isAutomaticQuoteSubstitutionEnabled = false
+            textView.isAutomaticDashSubstitutionEnabled = false
+            textView.isAutomaticTextReplacementEnabled = false
+            textView.isContinuousSpellCheckingEnabled = false
+
+            placeholderLabel.translatesAutoresizingMaskIntoConstraints = false
+            placeholderLabel.textColor = .placeholderTextColor
+            placeholderLabel.backgroundColor = .clear
+            placeholderLabel.isBezeled = false
+            placeholderLabel.isEditable = false
+            placeholderLabel.isSelectable = false
+
+            scrollView.documentView = textView
+            addSubview(scrollView)
+            addSubview(placeholderLabel)
+
+            NSLayoutConstraint.activate([
+                scrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
+                scrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
+                scrollView.topAnchor.constraint(equalTo: topAnchor),
+                scrollView.bottomAnchor.constraint(equalTo: bottomAnchor),
+                placeholderLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+                placeholderLabel.topAnchor.constraint(equalTo: topAnchor, constant: 9),
+                placeholderLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -12)
+            ])
+        }
+    }
+
+    private final class NativeSettingsPromptTextView: NSTextView {
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+            true
         }
     }
 
@@ -1811,7 +2001,10 @@ private extension NSPopUpButton {
             setAccessibilityLabel(title)
             setAccessibilityValue(text)
             font = .systemFont(ofSize: 13)
-            stringValue = text
+            let fieldEditorHasMarkedText = (currentEditor() as? NSTextView)?.hasMarkedText() == true
+            if stringValue != text && !fieldEditorHasMarkedText {
+                stringValue = text
+            }
             placeholderString = placeholder
             toolTip = title
         }
@@ -1855,7 +2048,10 @@ private extension NSPopUpButton {
             setAccessibilityLabel(title)
             setAccessibilityValue(text.isEmpty ? "" : "\(text.count) characters")
             font = .systemFont(ofSize: 13)
-            stringValue = text
+            let fieldEditorHasMarkedText = (currentEditor() as? NSTextView)?.hasMarkedText() == true
+            if stringValue != text && !fieldEditorHasMarkedText {
+                stringValue = text
+            }
             placeholderString = placeholder
             toolTip = title
         }

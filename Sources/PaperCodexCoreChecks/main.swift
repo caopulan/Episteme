@@ -2039,11 +2039,40 @@ func runUILayoutSourceChecks() throws {
         let quickPromptSettingsSource = String(settingsViewSource[quickPromptRange.lowerBound..<quickPromptEndRange.lowerBound])
         try check(
             !quickPromptSettingsSource.contains("\n            TextField(")
+                && !quickPromptSettingsSource.contains("\n                TextEditor(")
                 && !quickPromptSettingsSource.contains(".textFieldStyle(.roundedBorder)"),
             "Quick prompt main settings controls should use native SettingsTextField"
         )
     } else {
         throw CheckFailure(description: "quick prompt section source should remain inspectable")
+    }
+    if let systemPromptSheetRange = settingsViewSource.range(of: "private var codexSystemPromptEditSheet: some View"),
+       let systemPromptSheetEndRange = settingsViewSource.range(of: "private func quickPromptEditSheet", range: systemPromptSheetRange.upperBound..<settingsViewSource.endIndex),
+       let quickPromptSheetRange = settingsViewSource.range(of: "private func quickPromptEditSheet"),
+       let quickPromptSheetEndRange = settingsViewSource.range(of: "private func pathRow", range: quickPromptSheetRange.upperBound..<settingsViewSource.endIndex) {
+        let systemPromptSheetSource = String(settingsViewSource[systemPromptSheetRange.lowerBound..<systemPromptSheetEndRange.lowerBound])
+        let quickPromptSheetSource = String(settingsViewSource[quickPromptSheetRange.lowerBound..<quickPromptSheetEndRange.lowerBound])
+        try check(
+            settingsViewSource.contains("private struct SettingsMultilineTextView: View")
+                && settingsViewSource.contains("private struct NativeSettingsMultilineTextView: NSViewRepresentable")
+                && settingsViewSource.contains("private final class NativeSettingsMultilineTextViewContainer: NSView")
+                && settingsViewSource.contains("private final class SettingsTextViewCoordinator: NSObject, NSTextViewDelegate")
+                && settingsViewSource.contains("NSScrollView()")
+                && settingsViewSource.contains("NSTextView")
+                && settingsViewSource.contains("textDidChange")
+                && settingsViewSource.contains("hasMarkedText()")
+                && systemPromptSheetSource.contains("SettingsMultilineTextView(")
+                && quickPromptSheetSource.contains("SettingsTextField(")
+                && quickPromptSheetSource.contains("SettingsMultilineTextView(")
+                && quickPromptSheetSource.contains("editingPromptTitle = prompt.title")
+                && quickPromptSheetSource.contains("editingPromptContent = prompt.content")
+                && !systemPromptSheetSource.contains("TextEditor(")
+                && !quickPromptSheetSource.contains("\n            TextField(")
+                && !quickPromptSheetSource.contains("TextEditor("),
+            "Settings prompt editors should use native AppKit text fields and text views"
+        )
+    } else {
+        throw CheckFailure(description: "settings prompt editor sheet sources should remain inspectable")
     }
     if let storageRulesRange = settingsViewSource.range(of: "private var storageRules: some View"),
        let storageRulesEndRange = settingsViewSource.range(of: "private var cacheControls: some View", range: storageRulesRange.upperBound..<settingsViewSource.endIndex) {
@@ -2609,7 +2638,8 @@ func runUILayoutSourceChecks() throws {
     try check(
         settingsViewSource.contains("isEditingCodexSystemPrompt")
             && settingsViewSource.contains("codexSystemPromptEditSheet")
-            && settingsViewSource.contains("TextEditor(text: $draftCodexSystemPrompt)")
+            && settingsViewSource.contains("text: $draftCodexSystemPrompt")
+            && settingsViewSource.contains("SettingsMultilineTextView(")
             && settingsViewSource.contains("SettingsActionButton(title: \"Edit Prompt\", systemImage: \"pencil\", kind: .primary)"),
         "settings should edit the Codex system prompt in an on-demand sheet instead of loading the editor on route entry"
     )
@@ -3608,9 +3638,10 @@ func runUILayoutSourceChecks() throws {
         "settings should lazily build offscreen sections and should not refresh Codex models on every route entry"
     )
     try check(
-        settingsViewSource.contains(".accessibilityLabel(\"System prompt template editor\")")
-            && settingsViewSource.contains(".accessibilityValue(\"\\(draftCodexSystemPrompt.count) characters\")")
-            && settingsViewSource.contains(".accessibilityLabel(\"New quick prompt editor\")")
+        settingsViewSource.contains("title: \"System prompt template editor\"")
+            && settingsViewSource.contains("textView.setAccessibilityLabel(title)")
+            && settingsViewSource.contains("placeholderLabel.isHidden = !textView.string.isEmpty")
+            && settingsViewSource.contains("title: \"New quick prompt editor\"")
             && !settingsViewSource.contains(".frame(height: 240)"),
         "settings should avoid exposing full long prompt editor contents as route-level accessibility text"
     )
