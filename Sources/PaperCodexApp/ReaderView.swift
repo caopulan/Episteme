@@ -1,3 +1,4 @@
+import AppKit
 import PaperCodexCore
 import SwiftUI
 
@@ -132,14 +133,9 @@ struct ReaderView: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
                 Spacer()
-                Button {
+                PaperCodexIconButton(title: "Close Split", systemImage: "xmark") {
                     closePDFSplit()
-                } label: {
-                    Image(systemName: "xmark")
-                        .frame(width: 22, height: 22)
                 }
-                .buttonStyle(.borderless)
-                .help("Close Split")
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 5)
@@ -297,40 +293,206 @@ private struct AddPaperToSessionSheet: View {
                 ScrollView {
                     LazyVStack(spacing: 6) {
                         ForEach(filteredPapers) { paper in
-                            Button {
+                            AddPaperToSessionRowButton(
+                                title: paper.title,
+                                detail: paper.authors.isEmpty ? "Authors not set" : paper.authors.joined(separator: ", ")
+                            ) {
                                 onAdd(paper)
-                            } label: {
-                                HStack(spacing: 10) {
-                                    Image(systemName: "doc.text")
-                                        .foregroundStyle(Color.accentColor)
-                                    VStack(alignment: .leading, spacing: 3) {
-                                        Text(paper.title)
-                                            .font(.headline)
-                                            .lineLimit(1)
-                                        Text(paper.authors.isEmpty ? "Authors not set" : paper.authors.joined(separator: ", "))
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                            .lineLimit(1)
-                                    }
-                                    Spacer()
-                                }
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 8)
-                                .background(Color(nsColor: .controlBackgroundColor))
-                                .clipShape(RoundedRectangle(cornerRadius: 7))
                             }
-                            .buttonStyle(.plain)
+                            .frame(maxWidth: .infinity, minHeight: 54, maxHeight: 54)
                         }
                     }
+                    .frame(maxWidth: .infinity)
                 }
                 .frame(width: 520, height: 280)
             }
             HStack {
                 Spacer()
-                Button("Cancel", action: onCancel)
+                PaperCodexPanelButton(title: "Cancel", systemImage: "xmark") {
+                    onCancel()
+                }
             }
         }
         .padding(22)
         .frame(width: 560)
+    }
+}
+
+private struct AddPaperToSessionRowButton: NSViewRepresentable {
+    var title: String
+    var detail: String
+    var action: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(action: action)
+    }
+
+    func makeNSView(context: Context) -> NativeAddPaperToSessionRowButtonView {
+        let button = NativeAddPaperToSessionRowButtonView()
+        button.target = context.coordinator
+        button.action = #selector(Coordinator.performAction(_:))
+        button.apply(title: title, detail: detail)
+        return button
+    }
+
+    func updateNSView(_ button: NativeAddPaperToSessionRowButtonView, context: Context) {
+        context.coordinator.action = action
+        button.apply(title: title, detail: detail)
+    }
+
+    @MainActor final class Coordinator: NSObject {
+        var action: () -> Void
+
+        init(action: @escaping () -> Void) {
+            self.action = action
+            super.init()
+        }
+
+        @objc func performAction(_ sender: NSButton) {
+            action()
+        }
+    }
+}
+
+private final class NativeAddPaperToSessionRowButtonView: NSButton {
+    private let iconView = NSImageView()
+    private let titleLabel = NSTextField(labelWithString: "")
+    private let detailLabel = NSTextField(labelWithString: "")
+    private var trackingAreaToken: NSTrackingArea?
+    private var isHovering = false
+    private var isPressed = false
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: 54)
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingAreaToken {
+            removeTrackingArea(trackingAreaToken)
+        }
+        let area = NSTrackingArea(rect: bounds, options: [.activeInKeyWindow, .mouseEnteredAndExited, .inVisibleRect], owner: self, userInfo: nil)
+        addTrackingArea(area)
+        trackingAreaToken = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isHovering = true
+        updateAppearance()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHovering = false
+        isPressed = false
+        updateAppearance()
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        isPressed = true
+        updateAppearance()
+        super.mouseDown(with: event)
+        isPressed = false
+        updateAppearance()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        updateAppearance()
+    }
+
+    func apply(title: String, detail: String) {
+        titleLabel.stringValue = title
+        detailLabel.stringValue = detail
+        toolTip = "\(title)\n\(detail)"
+        setAccessibilityLabel(title)
+        setAccessibilityValue(detail)
+        updateAppearance()
+    }
+
+    private func setup() {
+        translatesAutoresizingMaskIntoConstraints = false
+        wantsLayer = true
+        isBordered = false
+        title = ""
+        bezelStyle = .regularSquare
+        setButtonType(.momentaryChange)
+        focusRingType = .none
+
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+        iconView.image = NSImage(systemSymbolName: "doc.text", accessibilityDescription: nil)
+        iconView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 16, weight: .semibold)
+        iconView.contentTintColor = .controlAccentColor
+        iconView.imageScaling = .scaleProportionallyDown
+
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        titleLabel.font = .systemFont(ofSize: 13.5, weight: .semibold)
+        titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.maximumNumberOfLines = 1
+
+        detailLabel.translatesAutoresizingMaskIntoConstraints = false
+        detailLabel.font = .systemFont(ofSize: 11.5, weight: .regular)
+        detailLabel.textColor = .secondaryLabelColor
+        detailLabel.lineBreakMode = .byTruncatingTail
+        detailLabel.maximumNumberOfLines = 1
+
+        addSubview(iconView)
+        addSubview(titleLabel)
+        addSubview(detailLabel)
+
+        NSLayoutConstraint.activate([
+            iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
+            iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            iconView.widthAnchor.constraint(equalToConstant: 18),
+            iconView.heightAnchor.constraint(equalToConstant: 18),
+
+            titleLabel.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 10),
+            titleLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            titleLabel.topAnchor.constraint(equalTo: topAnchor, constant: 9),
+
+            detailLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+            detailLabel.trailingAnchor.constraint(equalTo: titleLabel.trailingAnchor),
+            detailLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 3)
+        ])
+
+        setContentHuggingPriority(.defaultLow, for: .horizontal)
+        setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        updateAppearance()
+    }
+
+    private func updateAppearance() {
+        layer?.cornerRadius = 7
+        layer?.masksToBounds = false
+        let accent = NSColor.controlAccentColor
+        if isPressed {
+            layer?.backgroundColor = accent.withAlphaComponent(0.16).cgColor
+            layer?.borderColor = accent.withAlphaComponent(0.42).cgColor
+            layer?.borderWidth = 1
+        } else if isHovering {
+            layer?.backgroundColor = accent.withAlphaComponent(0.10).cgColor
+            layer?.borderColor = accent.withAlphaComponent(0.26).cgColor
+            layer?.borderWidth = 1
+        } else {
+            layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
+            layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.35).cgColor
+            layer?.borderWidth = 1
+        }
+        layer?.shadowColor = NSColor.black.cgColor
+        layer?.shadowOpacity = isHovering && !isPressed ? 0.08 : 0
+        layer?.shadowRadius = isHovering ? 5 : 0
+        layer?.shadowOffset = CGSize(width: 0, height: -2)
+        alphaValue = isPressed ? 0.78 : 1
     }
 }

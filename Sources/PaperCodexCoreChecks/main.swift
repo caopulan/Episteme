@@ -3245,6 +3245,21 @@ func runUILayoutSourceChecks() throws {
         "reader should provide explicit native PDF toolbar controls"
     )
     try check(
+        readerViewSource.contains("PaperCodexIconButton(title: \"Close Split\", systemImage: \"xmark\")")
+            && readerViewSource.contains("PaperCodexPanelButton(title: \"Cancel\", systemImage: \"xmark\")")
+            && readerViewSource.contains("AddPaperToSessionRowButton(")
+            && readerViewSource.contains("private struct AddPaperToSessionRowButton: NSViewRepresentable")
+            && readerViewSource.contains("private final class NativeAddPaperToSessionRowButtonView: NSButton")
+            && readerViewSource.contains("override func mouseDown(with event: NSEvent)")
+            && readerViewSource.contains("setAccessibilityLabel(title)")
+            && readerViewSource.contains(".frame(maxWidth: .infinity, minHeight: 54, maxHeight: 54)")
+            && !readerViewSource.contains("\n                Button {")
+            && !readerViewSource.contains("\n                            Button {")
+            && !readerViewSource.contains("Button(\"Cancel\", action: onCancel)")
+            && !readerViewSource.contains(".buttonStyle("),
+        "reader split preview and add-paper sheet should use AppKit-backed buttons instead of SwiftUI Button styles"
+    )
+    try check(
         readerViewSource.contains("ReaderSplitView(")
             && readerViewSource.contains("ReaderPDFSplitView(")
             && readerSplitSource.contains("NSSplitView")
