@@ -1822,6 +1822,45 @@ func runUILayoutSourceChecks() throws {
             && !actionButtonSource.contains(".buttonStyle(.plain)"),
         "shared toolbar and icon actions should use native AppKit buttons with immediate pressed feedback"
     )
+    if let categoryAssignmentsRange = librarySource.range(of: "private func categoryAssignments(for paper: Paper) -> some View"),
+       let filterButtonRange = librarySource.range(of: "private func filterButton(", range: categoryAssignmentsRange.upperBound..<librarySource.endIndex) {
+        let libraryInspectorActionSource = String(librarySource[categoryAssignmentsRange.lowerBound..<filterButtonRange.lowerBound])
+        try check(
+            libraryInspectorActionSource.contains("PaperCodexIconButton(title: \"New Category\"")
+                && libraryInspectorActionSource.contains("PaperCodexIconButton(title: \"New Tag\"")
+                && libraryInspectorActionSource.contains("PaperCodexIconButton(title: \"New Note\"")
+                && libraryInspectorActionSource.contains("PaperCodexPanelButton(")
+                && libraryInspectorActionSource.contains("title: editingNoteID == nil ? \"Add Note\" : \"Save Note\"")
+                && libraryInspectorActionSource.contains("PaperCodexPanelButton(title: \"Cancel\", systemImage: \"xmark\")")
+                && librarySource.contains("PaperCodexTagToggleButton(")
+                && librarySource.contains("private struct PaperCodexTagToggleButton: NSViewRepresentable")
+                && librarySource.contains("private final class NativePaperCodexTagToggleButtonView: NSButton")
+                && !libraryInspectorActionSource.contains("\n                Button")
+                && !libraryInspectorActionSource.contains("\n                    Button")
+                && !libraryInspectorActionSource.contains(".buttonStyle("),
+            "library inspector category, tag, and note actions should use native AppKit-backed buttons instead of SwiftUI Button styles"
+        )
+    } else {
+        throw CheckFailure(description: "library inspector action source should remain inspectable")
+    }
+    if let bulkActionBarRange = librarySource.range(of: "private struct BulkLibraryActionBar: View"),
+       let bulkCopySheetRange = librarySource.range(of: "private struct LibraryBulkCopySheet: View", range: bulkActionBarRange.upperBound..<librarySource.endIndex) {
+        let bulkActionBarSource = String(librarySource[bulkActionBarRange.lowerBound..<bulkCopySheetRange.lowerBound])
+        try check(
+            bulkActionBarSource.components(separatedBy: "PaperCodexToolbarButton(").count - 1 >= 6
+                && bulkActionBarSource.contains("title: \"Read\"")
+                && bulkActionBarSource.contains("title: \"Chat\"")
+                && bulkActionBarSource.contains("title: \"Copy\"")
+                && bulkActionBarSource.contains("title: \"Tag\"")
+                && bulkActionBarSource.contains("title: \"Delete\"")
+                && bulkActionBarSource.contains("title: \"Clear\"")
+                && !bulkActionBarSource.contains("\n            Button")
+                && !bulkActionBarSource.contains(".buttonStyle("),
+            "library bulk action bar should use shared native toolbar buttons for every action"
+        )
+    } else {
+        throw CheckFailure(description: "library bulk action bar source should remain inspectable")
+    }
     try check(
         readerSessionToolbarSource.contains("ReaderSessionToolbarView")
             && readerSessionToolbarSource.contains("NSSegmentedControl")

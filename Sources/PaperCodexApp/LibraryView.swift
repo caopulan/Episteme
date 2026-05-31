@@ -49,6 +49,11 @@ struct LibraryView: View {
         )
     }
 
+    private var isNoteDraftEmpty: Bool {
+        noteTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && noteBody.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     private var selectedCategoryID: String? {
         get { model.librarySelectedCategoryID }
         nonmutating set { model.librarySelectedCategoryID = newValue }
@@ -734,14 +739,10 @@ struct LibraryView: View {
                 Label("Categories", systemImage: "folder")
                     .font(.headline)
                 Spacer()
-                Button {
+                PaperCodexIconButton(title: "New Category", systemImage: "plus") {
                     newCategoryParentID = ""
                     isCreatingCategory = true
-                } label: {
-                    Image(systemName: "plus")
                 }
-                .buttonStyle(.borderless)
-                .help("New Category")
             }
 
             if model.categories.isEmpty {
@@ -774,13 +775,9 @@ struct LibraryView: View {
                 Label("Tags", systemImage: "tag")
                     .font(.headline)
                 Spacer()
-                Button {
+                PaperCodexIconButton(title: "New Tag", systemImage: "plus") {
                     isCreatingTag = true
-                } label: {
-                    Image(systemName: "plus")
                 }
-                .buttonStyle(.borderless)
-                .help("New Tag")
             }
 
             if model.tags.isEmpty {
@@ -789,9 +786,10 @@ struct LibraryView: View {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 118), spacing: 8)], alignment: .leading, spacing: 8) {
                     ForEach(model.tags) { tag in
                         let assigned = model.paperTagsByID[paper.id, default: []].contains { $0.id == tag.id }
-                        TagToggleChip(tag: tag, isAssigned: assigned) {
+                        PaperCodexTagToggleButton(title: tag.name, isSelected: assigned) {
                             model.setTag(tag.id, assigned: !assigned, for: paper)
                         }
+                        .frame(maxWidth: .infinity, minHeight: 30, maxHeight: 30)
                     }
                 }
             }
@@ -805,10 +803,9 @@ struct LibraryView: View {
                     .font(.headline)
                 Spacer()
                 if editingNoteID != nil {
-                    Button("New") {
+                    PaperCodexIconButton(title: "New Note", systemImage: "plus") {
                         clearNoteDraft()
                     }
-                    .buttonStyle(.borderless)
                 }
             }
 
@@ -842,20 +839,20 @@ struct LibraryView: View {
             )
             .frame(minHeight: 72)
             HStack {
-                Button {
+                PaperCodexPanelButton(
+                    title: editingNoteID == nil ? "Add Note" : "Save Note",
+                    systemImage: "checkmark",
+                    kind: .primary,
+                    disabled: isNoteDraftEmpty
+                ) {
                     model.saveNote(paperID: paper.id, noteID: editingNoteID, title: noteTitle, bodyMarkdown: noteBody)
                     clearNoteDraft()
-                } label: {
-                    Label(editingNoteID == nil ? "Add Note" : "Save Note", systemImage: "checkmark")
                 }
-                .buttonStyle(.bordered)
-                .disabled(noteTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && noteBody.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
                 if editingNoteID != nil {
-                    Button("Cancel") {
+                    PaperCodexPanelButton(title: "Cancel", systemImage: "xmark") {
                         clearNoteDraft()
                     }
-                    .buttonStyle(.borderless)
                 }
             }
         }
@@ -866,11 +863,9 @@ struct LibraryView: View {
             Label(title, systemImage: systemImage)
                 .font(.headline)
             Spacer()
-            Button(action: onAdd) {
-                Image(systemName: "plus")
+            PaperCodexIconButton(title: "New \(title.dropLast())", systemImage: "plus") {
+                onAdd()
             }
-            .buttonStyle(.borderless)
-            .help("New \(title.dropLast())")
         }
     }
 
@@ -2217,19 +2212,177 @@ private struct LibraryMetadataBlock: View {
     }
 }
 
-private struct TagToggleChip: View {
-    var tag: PaperTag
-    var isAssigned: Bool
+private struct PaperCodexTagToggleButton: NSViewRepresentable {
+    var title: String
+    var isSelected: Bool
     var action: () -> Void
 
-    var body: some View {
-        Button(action: action) {
-            Label(tag.name, systemImage: isAssigned ? "checkmark.circle.fill" : "circle")
-                .lineLimit(1)
-                .frame(maxWidth: .infinity, alignment: .leading)
+    func makeCoordinator() -> Coordinator {
+        Coordinator(action: action)
+    }
+
+    func makeNSView(context: Context) -> NativePaperCodexTagToggleButtonView {
+        let button = NativePaperCodexTagToggleButtonView()
+        button.target = context.coordinator
+        button.action = #selector(Coordinator.performAction(_:))
+        button.apply(title: title, isSelected: isSelected)
+        return button
+    }
+
+    func updateNSView(_ button: NativePaperCodexTagToggleButtonView, context: Context) {
+        context.coordinator.action = action
+        button.apply(title: title, isSelected: isSelected)
+    }
+
+    @MainActor final class Coordinator: NSObject {
+        var action: () -> Void
+
+        init(action: @escaping () -> Void) {
+            self.action = action
+            super.init()
         }
-        .buttonStyle(.bordered)
-        .tint(isAssigned ? .accentColor : .secondary)
+
+        @objc func performAction(_ sender: NSButton) {
+            action()
+        }
+    }
+}
+
+private final class NativePaperCodexTagToggleButtonView: NSButton {
+    private let iconView = NSImageView()
+    private let titleLabel = NSTextField(labelWithString: "")
+    private var trackingAreaToken: NSTrackingArea?
+    private var isHovering = false
+    private var isPressed = false
+    private var selectedState = false
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: 30)
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingAreaToken {
+            removeTrackingArea(trackingAreaToken)
+        }
+        let area = NSTrackingArea(rect: bounds, options: [.activeInKeyWindow, .mouseEnteredAndExited, .inVisibleRect], owner: self, userInfo: nil)
+        addTrackingArea(area)
+        trackingAreaToken = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isHovering = true
+        updateAppearance()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHovering = false
+        isPressed = false
+        updateAppearance()
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        isPressed = true
+        updateAppearance()
+        super.mouseDown(with: event)
+        isPressed = false
+        updateAppearance()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        updateAppearance()
+    }
+
+    func apply(title: String, isSelected: Bool) {
+        selectedState = isSelected
+        titleLabel.stringValue = title
+        toolTip = title
+        setAccessibilityLabel(title)
+        setAccessibilityValue(isSelected ? 1 : 0)
+        updateAppearance()
+    }
+
+    private func setup() {
+        translatesAutoresizingMaskIntoConstraints = false
+        wantsLayer = true
+        isBordered = false
+        title = ""
+        bezelStyle = .regularSquare
+        setButtonType(.momentaryChange)
+        focusRingType = .none
+        setAccessibilityElement(true)
+        setAccessibilityRole(.checkBox)
+
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+        iconView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 12.5, weight: .semibold)
+        iconView.imageScaling = .scaleProportionallyDown
+
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        titleLabel.font = .systemFont(ofSize: 12.5, weight: .medium)
+        titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.maximumNumberOfLines = 1
+
+        addSubview(iconView)
+        addSubview(titleLabel)
+
+        NSLayoutConstraint.activate([
+            iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 9),
+            iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            iconView.widthAnchor.constraint(equalToConstant: 14),
+            iconView.heightAnchor.constraint(equalToConstant: 14),
+
+            titleLabel.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 6),
+            titleLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -9),
+            titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor)
+        ])
+
+        setContentHuggingPriority(.defaultLow, for: .horizontal)
+        setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        updateAppearance()
+    }
+
+    private func updateAppearance() {
+        layer?.cornerRadius = 7
+        layer?.masksToBounds = false
+
+        let accent = NSColor.controlAccentColor
+        let secondary = NSColor.secondaryLabelColor
+        let foreground: NSColor
+        let background: NSColor
+        let border: NSColor
+
+        if selectedState {
+            foreground = accent
+            background = accent.withAlphaComponent(isPressed ? 0.20 : isHovering ? 0.14 : 0.10)
+            border = accent.withAlphaComponent(isHovering || isPressed ? 0.48 : 0.30)
+            iconView.image = NSImage(systemSymbolName: "checkmark.circle.fill", accessibilityDescription: nil)
+        } else {
+            foreground = isHovering || isPressed ? accent : secondary
+            background = isPressed ? accent.withAlphaComponent(0.12) : NSColor.controlBackgroundColor
+            border = isHovering ? accent.withAlphaComponent(0.28) : NSColor.separatorColor.withAlphaComponent(0.35)
+            iconView.image = NSImage(systemSymbolName: "circle", accessibilityDescription: nil)
+        }
+
+        iconView.contentTintColor = foreground
+        titleLabel.textColor = selectedState ? NSColor.labelColor : NSColor.secondaryLabelColor
+        layer?.backgroundColor = background.cgColor
+        layer?.borderColor = border.cgColor
+        layer?.borderWidth = 1
+        alphaValue = isPressed ? 0.82 : 1
     }
 }
 
@@ -2696,36 +2849,25 @@ private struct BulkLibraryActionBar: View {
                 .foregroundStyle(Color.accentColor)
                 .contentTransition(.numericText())
             Spacer()
-            Button(action: onRead) {
-                Label("Read", systemImage: "book")
+            PaperCodexToolbarButton(title: "Read", systemImage: "book", disabled: !canOpenConversation) {
+                onRead()
             }
-            .disabled(!canOpenConversation)
-            .help("Read selected papers together")
-            Button(action: onChat) {
-                Label("Chat", systemImage: "text.bubble")
+            PaperCodexToolbarButton(title: "Chat", systemImage: "text.bubble", disabled: !canOpenConversation) {
+                onChat()
             }
-            .disabled(!canOpenConversation)
-            .help("Chat with selected papers together")
-            Button(action: onCopy) {
-                Label("Copy", systemImage: "doc.on.doc")
+            PaperCodexToolbarButton(title: "Copy", systemImage: "doc.on.doc", disabled: !canMove) {
+                onCopy()
             }
-            .disabled(!canMove)
-            .help("Copy selected papers to a folder")
-            Button(action: onTag) {
-                Label("Tag", systemImage: "tag")
+            PaperCodexToolbarButton(title: "Tag", systemImage: "tag", disabled: !canTag) {
+                onTag()
             }
-            .disabled(!canTag)
-            .help("Add tags to selected papers")
-            Button(role: .destructive, action: onDelete) {
-                Label("Delete", systemImage: "trash")
+            PaperCodexToolbarButton(title: "Delete", systemImage: "trash", tint: .red) {
+                onDelete()
             }
-            .help("Delete selected papers")
-            Button(action: onClear) {
-                Label("Clear", systemImage: "xmark.circle")
+            PaperCodexToolbarButton(title: "Clear", systemImage: "xmark.circle", tint: .secondary) {
+                onClear()
             }
-            .help("Clear selection")
         }
-        .buttonStyle(.bordered)
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
         .background(
