@@ -1895,7 +1895,7 @@ func runUILayoutSourceChecks() throws {
             && appModelSource.contains("@Published var chatFontFamily")
             && appModelSource.contains("func setChatAppearance(")
             && settingsViewSource.contains("private var chatAppearanceSettings: some View")
-            && settingsViewSource.contains("Picker(\"Chat font\"")
+            && settingsViewSource.contains("SettingsChatFontSegmentedControl(")
             && settingsViewSource.contains("Stepper(")
             && settingsViewSource.contains("Message text:")
             && settingsViewSource.contains("Composer text:")
@@ -2301,6 +2301,24 @@ func runUILayoutSourceChecks() throws {
         "Settings category rows should use native AppKit checkbox buttons with immediate selection feedback"
     )
     try check(
+        settingsViewSource.contains("SettingsLanguageSegmentedControl(")
+            && settingsViewSource.contains("SettingsChatFontSegmentedControl(")
+            && settingsViewSource.contains("private struct NativeSettingsSegmentedControl: NSViewRepresentable")
+            && settingsViewSource.contains("private final class NativeSettingsSegmentedControlView: NSSegmentedControl")
+            && settingsViewSource.contains("setSegmentCount")
+            && settingsViewSource.contains("setLabel(")
+            && settingsViewSource.contains("segmentStyle = .rounded")
+            && settingsViewSource.contains("trackingMode = .selectOne")
+            && settingsViewSource.contains("setAccessibilityLabel")
+            && settingsViewSource.contains("override func mouseDown(with event: NSEvent)")
+            && settingsViewSource.contains("override func accessibilityValue() -> Any?")
+            && settingsViewSource.contains("CATransaction.setAnimationDuration")
+            && !settingsViewSource.contains("Picker(\"App language\"")
+            && !settingsViewSource.contains("Picker(\"Chat font\"")
+            && !settingsViewSource.contains(".pickerStyle(.segmented)"),
+        "Settings first-screen segmented controls should use native AppKit NSSegmentedControl pickers"
+    )
+    try check(
         homeChromeSource.contains("static let sidebarTopPadding: CGFloat = 28")
             && librarySource.contains("static let splitPaneTopInset: CGFloat = 0")
             && librarySource.contains(".padding(.top, 14)")
@@ -2454,8 +2472,8 @@ func runUILayoutSourceChecks() throws {
         "settings should include a dedicated global language section"
     )
     try check(
-        settingsViewSource.contains("Picker(\"App language\""),
-        "settings should expose an app-wide language picker"
+        settingsViewSource.contains("SettingsLanguageSegmentedControl("),
+        "settings should expose an app-wide native language picker"
     )
     try check(
         settingsViewSource.contains("Controls the whole app interface"),

@@ -187,15 +187,12 @@ struct SettingsView: View {
 
     private var globalLanguageSettings: some View {
         settingsSection(title: "Language", systemImage: "globe") {
-            Picker("App language", selection: Binding(
-                get: { model.globalLanguageMode },
-                set: { model.setGlobalLanguageMode($0) }
-            )) {
-                ForEach(PaperCodexLanguageMode.allCases) { mode in
-                    Text(mode.title(appLanguage: model.globalLanguageMode)).tag(mode)
-                }
+            SettingsLanguageSegmentedControl(
+                selection: model.globalLanguageMode,
+                appLanguage: model.globalLanguageMode
+            ) { mode in
+                model.setGlobalLanguageMode(mode)
             }
-            .pickerStyle(.segmented)
 
             Text("Controls the whole app interface, Explore language, and the default Codex prompt.")
                 .font(.caption)
@@ -205,12 +202,9 @@ struct SettingsView: View {
 
     private var chatAppearanceSettings: some View {
         settingsSection(title: "Reader Chat Appearance", systemImage: "text.bubble") {
-            Picker("Chat font", selection: $draftChatFontFamily) {
-                ForEach(ChatFontFamily.allCases) { family in
-                    Text(family.title).tag(family)
-                }
+            SettingsChatFontSegmentedControl(selection: draftChatFontFamily) { family in
+                draftChatFontFamily = family
             }
-            .pickerStyle(.segmented)
 
             Stepper(
                 "Message text: \(Int(ChatAppearanceDefaults.clampedMessageFontSize(draftChatMessageFontSize))) pt",
@@ -1007,6 +1001,199 @@ private struct ChatAppearancePreview: View {
                         .stroke(Color.black.opacity(0.08), lineWidth: 1)
                 )
         }
+    }
+}
+
+private struct SettingsLanguageSegmentedControl: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var selection: PaperCodexLanguageMode
+    var appLanguage: PaperCodexLanguageMode
+    var onSelect: (PaperCodexLanguageMode) -> Void
+
+    var body: some View {
+        NativeSettingsSegmentedControl(
+            accessibilityLabel: "App language",
+            items: PaperCodexLanguageMode.allCases.map { mode in
+                NativeSettingsSegmentItem(id: mode.rawValue, title: mode.title(appLanguage: appLanguage))
+            },
+            selectedID: selection.rawValue,
+            reduceMotion: reduceMotion
+        ) { id in
+            if let mode = PaperCodexLanguageMode(rawValue: id) {
+                onSelect(mode)
+            }
+        }
+        .frame(maxWidth: 280, minHeight: 28, maxHeight: 28, alignment: .leading)
+        .help("App language")
+    }
+}
+
+private struct SettingsChatFontSegmentedControl: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var selection: ChatFontFamily
+    var onSelect: (ChatFontFamily) -> Void
+
+    var body: some View {
+        NativeSettingsSegmentedControl(
+            accessibilityLabel: "Chat font",
+            items: ChatFontFamily.allCases.map { family in
+                NativeSettingsSegmentItem(id: family.rawValue, title: family.title)
+            },
+            selectedID: selection.rawValue,
+            reduceMotion: reduceMotion
+        ) { id in
+            if let family = ChatFontFamily(rawValue: id) {
+                onSelect(family)
+            }
+        }
+        .frame(maxWidth: 360, minHeight: 28, maxHeight: 28, alignment: .leading)
+        .help("Chat font")
+    }
+}
+
+private struct NativeSettingsSegmentItem: Equatable {
+    var id: String
+    var title: String
+}
+
+private struct NativeSettingsSegmentedControl: NSViewRepresentable {
+    var accessibilityLabel: String
+    var items: [NativeSettingsSegmentItem]
+    var selectedID: String
+    var reduceMotion: Bool
+    var action: (String) -> Void
+
+    func makeNSView(context: Context) -> NativeSettingsSegmentedControlView {
+        let view = NativeSettingsSegmentedControlView()
+        view.apply(
+            accessibilityLabel: accessibilityLabel,
+            items: items,
+            selectedID: selectedID,
+            reduceMotion: reduceMotion,
+            action: action
+        )
+        return view
+    }
+
+    func updateNSView(_ view: NativeSettingsSegmentedControlView, context: Context) {
+        view.apply(
+            accessibilityLabel: accessibilityLabel,
+            items: items,
+            selectedID: selectedID,
+            reduceMotion: reduceMotion,
+            action: action
+        )
+    }
+}
+
+private final class NativeSettingsSegmentedControlView: NSSegmentedControl {
+    private var segmentItems: [NativeSettingsSegmentItem] = []
+    private var selectedID = ""
+    private var reduceMotion = false
+    private var pressHandler: (String) -> Void = { _ in }
+    private var isPressed = false
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: 28)
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+
+    override func accessibilityValue() -> Any? {
+        segmentItems.first { $0.id == selectedID }?.title ?? ""
+    }
+
+    func apply(
+        accessibilityLabel: String,
+        items: [NativeSettingsSegmentItem],
+        selectedID: String,
+        reduceMotion: Bool,
+        action: @escaping (String) -> Void
+    ) {
+        segmentItems = items
+        self.selectedID = selectedID
+        self.reduceMotion = reduceMotion
+        pressHandler = action
+        setAccessibilityLabel(accessibilityLabel)
+        toolTip = accessibilityLabel
+
+        if segmentCount != items.count {
+            setSegmentCount(items.count)
+        }
+        for (index, item) in items.enumerated() {
+            setLabel(item.title, forSegment: index)
+            setToolTip(item.title, forSegment: index)
+            setEnabled(true, forSegment: index)
+        }
+        selectedSegment = items.firstIndex { $0.id == selectedID } ?? -1
+        updateAppearance()
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        setPressed(true)
+        super.mouseDown(with: event)
+        setPressed(false)
+    }
+
+    private func setup() {
+        translatesAutoresizingMaskIntoConstraints = false
+        segmentStyle = .rounded
+        trackingMode = .selectOne
+        controlSize = .regular
+        font = .systemFont(ofSize: 12, weight: .medium)
+        target = self
+        action = #selector(selectionChanged)
+        focusRingType = .none
+        setAccessibilityElement(true)
+        setAccessibilityRole(.radioGroup)
+        wantsLayer = true
+    }
+
+    private func setSegmentCount(_ count: Int) {
+        segmentCount = count
+    }
+
+    @objc private func selectionChanged() {
+        guard selectedSegment >= 0, selectedSegment < segmentItems.count else {
+            return
+        }
+        let id = segmentItems[selectedSegment].id
+        selectedID = id
+        pressHandler(id)
+        updateAppearance()
+    }
+
+    private func setPressed(_ pressed: Bool) {
+        isPressed = pressed
+        updateAppearance()
+    }
+
+    private func updateAppearance() {
+        let targetScale: CGFloat
+        if reduceMotion {
+            targetScale = 1
+        } else {
+            targetScale = isPressed ? 0.992 : 1
+        }
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(reduceMotion)
+        CATransaction.setAnimationDuration(reduceMotion ? 0 : (isPressed ? 0.05 : 0.12))
+        layer?.transform = CATransform3DMakeScale(targetScale, targetScale, 1)
+        CATransaction.commit()
     }
 }
 
