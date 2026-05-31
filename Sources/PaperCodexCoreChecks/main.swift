@@ -1890,6 +1890,26 @@ func runUILayoutSourceChecks() throws {
             && !chatSource.contains("SessionNoteListRowButtonStyle"),
         "reader notes panel should use a native AppKit split workspace with selectable notes and editor actions"
     )
+    if let runEventRowRange = chatSource.range(of: "private struct CodexRunEventRow: View"),
+       let runEventRowEndRange = chatSource.range(of: "private struct MessageBubble: View", range: runEventRowRange.upperBound..<chatSource.endIndex) {
+        let runEventRowSource = String(chatSource[runEventRowRange.lowerBound..<runEventRowEndRange.lowerBound])
+        try check(
+            runEventRowSource.contains("NativeChatRunEventDisclosureRow(")
+                && chatSource.contains("private struct NativeChatRunEventDisclosureRow: NSViewRepresentable")
+                && chatSource.contains("private final class NativeChatRunEventDisclosureRowView: NSView")
+                && chatSource.contains("private final class NativeChatRunEventDisclosureButton: NSButton")
+                && chatSource.contains("terminalDetailTextView")
+                && chatSource.contains("NSScrollView")
+                && chatSource.contains("bezelStyle = .disclosure")
+                && chatSource.contains("setButtonType(.onOff)")
+                && chatSource.contains("setAccessibilityRole(.disclosureTriangle)")
+                && chatSource.contains("override func mouseDown(with event: NSEvent)")
+                && !runEventRowSource.contains("DisclosureGroup("),
+            "chat run terminal events should use a native AppKit disclosure row instead of SwiftUI DisclosureGroup"
+        )
+    } else {
+        throw CheckFailure(description: "chat run event row source should remain inspectable")
+    }
     if let messageBubbleRange = chatSource.range(of: "private struct MessageBubble: View"),
        let messageBubbleEndRange = chatSource.range(of: "private struct GeneratedImageGallery", range: messageBubbleRange.upperBound..<chatSource.endIndex) {
         let messageBubbleSource = String(chatSource[messageBubbleRange.lowerBound..<messageBubbleEndRange.lowerBound])

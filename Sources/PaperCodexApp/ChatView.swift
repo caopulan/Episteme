@@ -608,18 +608,15 @@ private struct CodexRunEventRow: View {
 
     var body: some View {
         if event.kind == .terminal {
-            DisclosureGroup(isExpanded: $isExpanded) {
-                Text(event.detail)
-                    .font(.paperCodexSystem(size: 12, design: .monospaced))
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(8)
-                    .background(Color(nsColor: .controlBackgroundColor))
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
-            } label: {
-                eventHeader
-            }
-            .font(.caption)
+            NativeChatRunEventDisclosureRow(
+                title: event.displayTitle,
+                preview: event.previewDetail,
+                detail: event.detail,
+                systemImage: iconName,
+                tint: nativeTint,
+                isExpanded: $isExpanded
+            )
+            .frame(maxWidth: .infinity, minHeight: isExpanded ? 132 : 24)
         } else {
             VStack(alignment: .leading, spacing: 3) {
                 eventHeader
@@ -629,6 +626,29 @@ private struct CodexRunEventRow: View {
                     .textSelection(.enabled)
                     .lineLimit(event.kind == .tool ? 3 : 2)
             }
+        }
+    }
+
+    private var nativeTint: NSColor {
+        switch event.kind {
+        case .status:
+            .systemBlue
+        case .thinking:
+            .systemPurple
+        case .tool:
+            .systemIndigo
+        case .terminal:
+            .secondaryLabelColor
+        case .answer:
+            .systemGreen
+        case .usage:
+            .systemIndigo
+        case .warning:
+            .systemOrange
+        case .error:
+            .systemRed
+        case .raw:
+            .secondaryLabelColor
         }
     }
 
@@ -696,6 +716,253 @@ private struct CodexRunEventRow: View {
         case .raw:
             .secondary
         }
+    }
+}
+
+private struct NativeChatRunEventDisclosureRow: NSViewRepresentable {
+    var title: String
+    var preview: String
+    var detail: String
+    var systemImage: String
+    var tint: NSColor
+    @Binding var isExpanded: Bool
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(isExpanded: $isExpanded)
+    }
+
+    func makeNSView(context: Context) -> NativeChatRunEventDisclosureRowView {
+        let row = NativeChatRunEventDisclosureRowView()
+        row.apply(
+            title: title,
+            preview: preview,
+            detail: detail,
+            systemImage: systemImage,
+            tint: tint,
+            isExpanded: isExpanded
+        ) { expanded in
+            context.coordinator.expansionChanged(expanded)
+        }
+        return row
+    }
+
+    func updateNSView(_ row: NativeChatRunEventDisclosureRowView, context: Context) {
+        context.coordinator.isExpanded = $isExpanded
+        row.apply(
+            title: title,
+            preview: preview,
+            detail: detail,
+            systemImage: systemImage,
+            tint: tint,
+            isExpanded: isExpanded
+        ) { expanded in
+            context.coordinator.expansionChanged(expanded)
+        }
+    }
+
+    @MainActor final class Coordinator: NSObject {
+        var isExpanded: Binding<Bool>
+
+        init(isExpanded: Binding<Bool>) {
+            self.isExpanded = isExpanded
+            super.init()
+        }
+
+        func expansionChanged(_ expanded: Bool) {
+            isExpanded.wrappedValue = expanded
+        }
+    }
+}
+
+private final class NativeChatRunEventDisclosureRowView: NSView {
+    private let disclosureButton = NativeChatRunEventDisclosureButton()
+    private let iconView = NSImageView()
+    private let titleLabel = NSTextField(labelWithString: "")
+    private let previewLabel = NSTextField(labelWithString: "")
+    private let terminalDetailScrollView = NSScrollView()
+    private let terminalDetailTextView = NSTextView()
+    private var heightConstraint: NSLayoutConstraint?
+    private var detailTopConstraint: NSLayoutConstraint?
+    private var currentIsExpanded = false
+    private var expansionHandler: (Bool) -> Void = { _ in }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: currentIsExpanded ? 132 : 24)
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        setExpanded(!currentIsExpanded, notify: true)
+    }
+
+    func apply(
+        title: String,
+        preview: String,
+        detail: String,
+        systemImage: String,
+        tint: NSColor,
+        isExpanded: Bool,
+        onExpansionChange: @escaping (Bool) -> Void
+    ) {
+        expansionHandler = onExpansionChange
+        titleLabel.stringValue = title
+        previewLabel.stringValue = preview
+        iconView.image = NSImage(systemSymbolName: systemImage, accessibilityDescription: title)
+        iconView.contentTintColor = tint
+        if terminalDetailTextView.string != detail {
+            terminalDetailTextView.string = detail
+        }
+        toolTip = isExpanded ? title : preview
+        disclosureButton.setAccessibilityLabel(title)
+        setExpanded(isExpanded, notify: false)
+    }
+
+    private func setup() {
+        translatesAutoresizingMaskIntoConstraints = false
+
+        disclosureButton.translatesAutoresizingMaskIntoConstraints = false
+        disclosureButton.target = self
+        disclosureButton.action = #selector(disclosureChanged(_:))
+
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+        iconView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 12.5, weight: .medium)
+        iconView.imageScaling = .scaleProportionallyDown
+
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        titleLabel.font = .systemFont(ofSize: 12, weight: .medium)
+        titleLabel.textColor = .labelColor
+        titleLabel.lineBreakMode = .byTruncatingMiddle
+        titleLabel.maximumNumberOfLines = 1
+
+        previewLabel.translatesAutoresizingMaskIntoConstraints = false
+        previewLabel.font = .systemFont(ofSize: 12)
+        previewLabel.textColor = .secondaryLabelColor
+        previewLabel.lineBreakMode = .byTruncatingTail
+        previewLabel.maximumNumberOfLines = 1
+
+        terminalDetailScrollView.translatesAutoresizingMaskIntoConstraints = false
+        terminalDetailScrollView.borderType = .noBorder
+        terminalDetailScrollView.hasVerticalScroller = true
+        terminalDetailScrollView.drawsBackground = false
+        terminalDetailScrollView.wantsLayer = true
+        terminalDetailScrollView.layer?.cornerRadius = 6
+        terminalDetailScrollView.layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
+
+        terminalDetailTextView.translatesAutoresizingMaskIntoConstraints = false
+        terminalDetailTextView.isEditable = false
+        terminalDetailTextView.isSelectable = true
+        terminalDetailTextView.isRichText = false
+        terminalDetailTextView.drawsBackground = false
+        terminalDetailTextView.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+        terminalDetailTextView.textColor = .secondaryLabelColor
+        terminalDetailTextView.textContainerInset = NSSize(width: 8, height: 7)
+        terminalDetailTextView.textContainer?.widthTracksTextView = true
+        terminalDetailTextView.textContainer?.containerSize = NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude)
+        terminalDetailTextView.setAccessibilityLabel("Terminal output")
+
+        terminalDetailScrollView.documentView = terminalDetailTextView
+
+        addSubview(disclosureButton)
+        addSubview(iconView)
+        addSubview(titleLabel)
+        addSubview(previewLabel)
+        addSubview(terminalDetailScrollView)
+
+        let heightConstraint = heightAnchor.constraint(equalToConstant: 24)
+        let detailTopConstraint = terminalDetailScrollView.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 7)
+        self.heightConstraint = heightConstraint
+        self.detailTopConstraint = detailTopConstraint
+
+        NSLayoutConstraint.activate([
+            heightConstraint,
+            disclosureButton.leadingAnchor.constraint(equalTo: leadingAnchor),
+            disclosureButton.topAnchor.constraint(equalTo: topAnchor, constant: 2),
+            disclosureButton.widthAnchor.constraint(equalToConstant: 18),
+            disclosureButton.heightAnchor.constraint(equalToConstant: 18),
+            iconView.leadingAnchor.constraint(equalTo: disclosureButton.trailingAnchor, constant: 3),
+            iconView.centerYAnchor.constraint(equalTo: disclosureButton.centerYAnchor),
+            iconView.widthAnchor.constraint(equalToConstant: 14),
+            iconView.heightAnchor.constraint(equalToConstant: 14),
+            titleLabel.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 6),
+            titleLabel.centerYAnchor.constraint(equalTo: disclosureButton.centerYAnchor),
+            previewLabel.leadingAnchor.constraint(equalTo: titleLabel.trailingAnchor, constant: 6),
+            previewLabel.trailingAnchor.constraint(equalTo: trailingAnchor),
+            previewLabel.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
+            detailTopConstraint,
+            terminalDetailScrollView.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+            terminalDetailScrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            terminalDetailScrollView.bottomAnchor.constraint(equalTo: bottomAnchor),
+            terminalDetailScrollView.heightAnchor.constraint(equalToConstant: 98)
+        ])
+        setContentHuggingPriority(.defaultLow, for: .horizontal)
+        setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    }
+
+    @objc private func disclosureChanged(_ sender: NSButton) {
+        setExpanded(sender.state == .on, notify: true)
+    }
+
+    private func setExpanded(_ expanded: Bool, notify: Bool) {
+        currentIsExpanded = expanded
+        disclosureButton.state = expanded ? .on : .off
+        disclosureButton.setAccessibilityValue(expanded ? "Expanded" : "Collapsed")
+        previewLabel.isHidden = expanded
+        terminalDetailScrollView.isHidden = !expanded
+        heightConstraint?.constant = expanded ? 132 : 24
+        detailTopConstraint?.isActive = expanded
+        invalidateIntrinsicContentSize()
+        if notify {
+            expansionHandler(expanded)
+        }
+    }
+}
+
+private final class NativeChatRunEventDisclosureButton: NSButton {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.06
+            animator().alphaValue = 0.68
+        }
+        super.mouseDown(with: event)
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.08
+            animator().alphaValue = 1
+        }
+    }
+
+    private func setup() {
+        title = ""
+        isBordered = true
+        bezelStyle = .disclosure
+        setButtonType(.onOff)
+        focusRingType = .default
+        setAccessibilityElement(true)
+        setAccessibilityRole(.disclosureTriangle)
     }
 }
 
