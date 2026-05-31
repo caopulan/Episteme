@@ -3637,6 +3637,19 @@ func runUILayoutSourceChecks() throws {
         "reader should use native AppKit split views for main reading/chat and top-bottom PDF link preview"
     )
     try check(
+        readerViewSource.contains("ReaderSplitView(secondaryContentID: \"reader-chat\"")
+            && readerViewSource.contains("ReaderPDFSplitView(secondaryContentID: pdfSplitSecondaryContentID")
+            && readerViewSource.contains("private var pdfSplitSecondaryContentID: AnyHashable")
+            && readerSplitSource.contains("private var lastPrimaryContentID: AnyHashable?")
+            && readerSplitSource.contains("private var lastSecondaryContentID: AnyHashable?")
+            && readerSplitSource.contains("primaryContentID: AnyHashable? = nil")
+            && readerSplitSource.contains("secondaryContentID: AnyHashable? = nil")
+            && readerSplitSource.contains("ReaderSplitHostUpdate.shouldReplaceHostedContent")
+            && readerSplitSource.contains("guard let nextID else {\n            return true")
+            && readerSplitSource.contains("lastSecondaryContentID = secondaryContentID"),
+        "reader split hosts should use content IDs to avoid reassigning stable Chat and PDF-preview NSHostingView roots during high-frequency PDF status updates"
+    )
+    try check(
         readerToolbarSource.contains("keyEquivalent = \"\\\\\"")
             && readerToolbarSource.contains("keyEquivalentModifierMask = [.command, .shift]")
             && readerViewSource.contains("PaperCodexMotion.perform(PaperCodexMotion.pdfSplitOpen")

@@ -4,46 +4,78 @@ import SwiftUI
 struct ReaderSplitView<Primary: View, Secondary: View>: NSViewRepresentable {
     private var primary: Primary
     private var secondary: Secondary
+    private var primaryContentID: AnyHashable?
+    private var secondaryContentID: AnyHashable?
 
     init(
+        primaryContentID: AnyHashable? = nil,
+        secondaryContentID: AnyHashable? = nil,
         @ViewBuilder _ primary: () -> Primary,
         @ViewBuilder secondary: () -> Secondary
     ) {
+        self.primaryContentID = primaryContentID
+        self.secondaryContentID = secondaryContentID
         self.primary = primary()
         self.secondary = secondary()
     }
 
     func makeNSView(context: Context) -> ReaderSplitContainerView {
         let splitView = ReaderSplitContainerView()
-        splitView.apply(primary: AnyView(primary), secondary: AnyView(secondary))
+        splitView.apply(
+            primary: AnyView(primary),
+            primaryContentID: primaryContentID,
+            secondary: AnyView(secondary),
+            secondaryContentID: secondaryContentID
+        )
         return splitView
     }
 
     func updateNSView(_ splitView: ReaderSplitContainerView, context: Context) {
-        splitView.apply(primary: AnyView(primary), secondary: AnyView(secondary))
+        splitView.apply(
+            primary: AnyView(primary),
+            primaryContentID: primaryContentID,
+            secondary: AnyView(secondary),
+            secondaryContentID: secondaryContentID
+        )
     }
 }
 
 struct ReaderPDFSplitView<Primary: View, Secondary: View>: NSViewRepresentable {
     private var primary: Primary
     private var secondary: Secondary
+    private var primaryContentID: AnyHashable?
+    private var secondaryContentID: AnyHashable?
 
     init(
+        primaryContentID: AnyHashable? = nil,
+        secondaryContentID: AnyHashable? = nil,
         @ViewBuilder _ primary: () -> Primary,
         @ViewBuilder secondary: () -> Secondary
     ) {
+        self.primaryContentID = primaryContentID
+        self.secondaryContentID = secondaryContentID
         self.primary = primary()
         self.secondary = secondary()
     }
 
     func makeNSView(context: Context) -> ReaderPDFSplitContainerView {
         let splitView = ReaderPDFSplitContainerView()
-        splitView.apply(primary: AnyView(primary), secondary: AnyView(secondary))
+        splitView.apply(
+            primary: AnyView(primary),
+            primaryContentID: primaryContentID,
+            secondary: AnyView(secondary),
+            secondaryContentID: secondaryContentID
+        )
         return splitView
     }
 
     func updateNSView(_ splitView: ReaderPDFSplitContainerView, context: Context) {
-        splitView.apply(primary: AnyView(primary), secondary: AnyView(secondary))
+        splitView.apply(
+            primary: AnyView(primary),
+            primaryContentID: primaryContentID,
+            secondary: AnyView(secondary),
+            secondaryContentID: secondaryContentID
+        )
     }
 }
 
@@ -52,6 +84,8 @@ final class ReaderSplitContainerView: NSView, NSSplitViewDelegate {
     private let primaryHost = NSHostingView(rootView: AnyView(EmptyView()))
     private let secondaryHost = NSHostingView(rootView: AnyView(EmptyView()))
     private var didSetInitialDivider = false
+    private var lastPrimaryContentID: AnyHashable?
+    private var lastSecondaryContentID: AnyHashable?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -84,9 +118,20 @@ final class ReaderSplitContainerView: NSView, NSSplitViewDelegate {
         splitView.setPosition(dividerPosition, ofDividerAt: 0)
     }
 
-    func apply(primary: AnyView, secondary: AnyView) {
-        primaryHost.rootView = primary
-        secondaryHost.rootView = secondary
+    func apply(
+        primary: AnyView,
+        primaryContentID: AnyHashable?,
+        secondary: AnyView,
+        secondaryContentID: AnyHashable?
+    ) {
+        if ReaderSplitHostUpdate.shouldReplaceHostedContent(currentID: lastPrimaryContentID, nextID: primaryContentID) {
+            primaryHost.rootView = primary
+            lastPrimaryContentID = primaryContentID
+        }
+        if ReaderSplitHostUpdate.shouldReplaceHostedContent(currentID: lastSecondaryContentID, nextID: secondaryContentID) {
+            secondaryHost.rootView = secondary
+            lastSecondaryContentID = secondaryContentID
+        }
     }
 
     private func setup() {
@@ -140,6 +185,8 @@ final class ReaderPDFSplitContainerView: NSView, NSSplitViewDelegate {
     private let primaryHost = NSHostingView(rootView: AnyView(EmptyView()))
     private let secondaryHost = NSHostingView(rootView: AnyView(EmptyView()))
     private var didSetInitialDivider = false
+    private var lastPrimaryContentID: AnyHashable?
+    private var lastSecondaryContentID: AnyHashable?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -172,9 +219,20 @@ final class ReaderPDFSplitContainerView: NSView, NSSplitViewDelegate {
         splitView.setPosition(dividerPosition, ofDividerAt: 0)
     }
 
-    func apply(primary: AnyView, secondary: AnyView) {
-        primaryHost.rootView = primary
-        secondaryHost.rootView = secondary
+    func apply(
+        primary: AnyView,
+        primaryContentID: AnyHashable?,
+        secondary: AnyView,
+        secondaryContentID: AnyHashable?
+    ) {
+        if ReaderSplitHostUpdate.shouldReplaceHostedContent(currentID: lastPrimaryContentID, nextID: primaryContentID) {
+            primaryHost.rootView = primary
+            lastPrimaryContentID = primaryContentID
+        }
+        if ReaderSplitHostUpdate.shouldReplaceHostedContent(currentID: lastSecondaryContentID, nextID: secondaryContentID) {
+            secondaryHost.rootView = secondary
+            lastSecondaryContentID = secondaryContentID
+        }
     }
 
     private func setup() {
@@ -227,4 +285,13 @@ private enum ReaderSplitMetrics {
     static let minimumReaderPaneWidth: CGFloat = 360
     static let minimumChatPaneWidth: CGFloat = 330
     static let minimumPDFSplitPaneHeight: CGFloat = 220
+}
+
+private enum ReaderSplitHostUpdate {
+    static func shouldReplaceHostedContent(currentID: AnyHashable?, nextID: AnyHashable?) -> Bool {
+        guard let nextID else {
+            return true
+        }
+        return currentID != nextID
+    }
 }

@@ -13,16 +13,13 @@ struct ReaderView: View {
     @State private var pdfSplitOpenGeneration = 0
 
     var body: some View {
-        ReaderSplitView(
-            {
-                pdfPane
-                    .frame(minWidth: ReaderPDFLayout.minimumPaneWidth, maxWidth: .infinity)
-            },
-            secondary: {
-                ChatView()
-                    .frame(minWidth: ReaderPDFLayout.minimumChatPaneWidth, idealWidth: 420, maxWidth: .infinity)
-            }
-        )
+        ReaderSplitView(secondaryContentID: "reader-chat") {
+            pdfPane
+                .frame(minWidth: ReaderPDFLayout.minimumPaneWidth, maxWidth: .infinity)
+        } secondary: {
+            ChatView()
+                .frame(minWidth: ReaderPDFLayout.minimumChatPaneWidth, idealWidth: 420, maxWidth: .infinity)
+        }
         .background(Color(nsColor: .windowBackgroundColor))
         .onChange(of: model.selectedPaper?.id) { _, _ in
             resetPDFSplit()
@@ -79,20 +76,28 @@ struct ReaderView: View {
         .background(Color(nsColor: .textBackgroundColor))
     }
 
+    private var pdfSplitSecondaryContentID: AnyHashable {
+        let target = pendingPDFSplitTarget ?? pdfSplitTarget
+        let targetToken: String
+        if let target {
+            targetToken = "\(target.pageIndex):\(target.pagePointX):\(target.pagePointY)"
+        } else {
+            targetToken = "none"
+        }
+        return "\(model.selectedPaper?.id ?? "no-paper")|\(isPDFSplitContentReady)|\(targetToken)"
+    }
+
     @ViewBuilder
     private func pdfContent(for paper: Paper) -> some View {
         Group {
             if isPDFSplitVisible {
-                ReaderPDFSplitView(
-                    {
-                        primaryPDFView(for: paper)
-                            .frame(minHeight: ReaderPDFLayout.minimumSplitPaneHeight, maxHeight: .infinity)
-                    },
-                    secondary: {
-                        secondaryPDFView(for: paper)
-                            .frame(minHeight: ReaderPDFLayout.minimumSplitPaneHeight, maxHeight: .infinity)
-                    }
-                )
+                ReaderPDFSplitView(secondaryContentID: pdfSplitSecondaryContentID) {
+                    primaryPDFView(for: paper)
+                        .frame(minHeight: ReaderPDFLayout.minimumSplitPaneHeight, maxHeight: .infinity)
+                } secondary: {
+                    secondaryPDFView(for: paper)
+                        .frame(minHeight: ReaderPDFLayout.minimumSplitPaneHeight, maxHeight: .infinity)
+                }
                 .transition(.opacity)
             } else {
                 primaryPDFView(for: paper)
