@@ -3827,6 +3827,20 @@ func runUILayoutSourceChecks() throws {
         "chat composer should let IME marked text handle Return before submitting"
     )
     try check(
+        chatSource.contains("CurrentSelectionReplyCard(selection: selection)")
+            && chatSource.contains("private struct CurrentSelectionReplyCard: NSViewRepresentable")
+            && chatSource.contains("private final class CurrentSelectionReplyCardView: NSView")
+            && chatSource.contains("private final class CurrentSelectionReplyClearButton: NSButton")
+            && chatSource.contains("NSTextField(labelWithString:")
+            && chatSource.contains("NSImageView()")
+            && chatSource.contains("NSButton")
+            && chatSource.contains("setAccessibilityLabel(\"Remove Source\")")
+            && chatSource.contains("override func acceptsFirstMouse(for event: NSEvent?) -> Bool")
+            && !chatSource.contains("private struct CurrentSelectionReplyCard: View")
+            && !chatSource.contains("PaperCodexIconButton(title: \"Remove Source\""),
+        "chat selected-source reply card should use a native AppKit view above the composer instead of a SwiftUI HStack"
+    )
+    try check(
         appKitMenuSource.contains("item(\"Focus Chat Composer\", action: #selector(focusChatComposer), key: \"l\")")
             && appModelSource.contains("@Published var chatComposerFocusRequestID")
             && appModelSource.contains("func requestChatComposerFocus()")

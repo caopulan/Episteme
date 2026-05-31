@@ -229,6 +229,7 @@ struct ChatView: View {
                     CurrentSelectionReplyCard(selection: selection) {
                         model.clearCurrentSelection()
                     }
+                    .frame(height: CurrentSelectionReplyCard.height)
                 }
 
                 ChatComposerNativePanelView(
@@ -1576,37 +1577,182 @@ private struct GeneratedImagePreviewOverlay: View {
     }
 }
 
-private struct CurrentSelectionReplyCard: View {
+private struct CurrentSelectionReplyCard: NSViewRepresentable {
+    static let height: CGFloat = 62
+
     var selection: PDFSelectionInfo
     var onClear: () -> Void
 
-    var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "quote.opening")
-                .foregroundStyle(Color.accentColor)
-                .frame(width: 18)
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Replying to source · p\(selection.page)")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.primary)
-                Text(selection.text)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-                .truncationMode(.tail)
-            }
-            Spacer(minLength: 8)
-            PaperCodexIconButton(title: "Remove Source", systemImage: "xmark.circle.fill", tint: .secondary) {
-                onClear()
-            }
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onClear: onClear)
+    }
+
+    func makeNSView(context: Context) -> CurrentSelectionReplyCardView {
+        let view = CurrentSelectionReplyCardView()
+        view.apply(selection: selection, onClear: context.coordinator.clear)
+        return view
+    }
+
+    func updateNSView(_ view: CurrentSelectionReplyCardView, context: Context) {
+        context.coordinator.onClear = onClear
+        view.apply(selection: selection, onClear: context.coordinator.clear)
+    }
+
+    @MainActor final class Coordinator: NSObject {
+        var onClear: () -> Void
+
+        init(onClear: @escaping () -> Void) {
+            self.onClear = onClear
+            super.init()
         }
-        .padding(10)
-        .background(Color.accentColor.opacity(0.08))
-        .overlay(alignment: .leading) {
-            Rectangle()
-                .fill(Color.accentColor.opacity(0.65))
-                .frame(width: 3)
+
+        func clear() {
+            onClear()
         }
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+private final class CurrentSelectionReplyCardView: NSView {
+    private let leadingStripe = NSView()
+    private let quoteIconView = NSImageView()
+    private let titleLabel = NSTextField(labelWithString: "")
+    private let bodyLabel = NSTextField(labelWithString: "")
+    private let clearButton = CurrentSelectionReplyClearButton()
+    private var onClear: () -> Void = {}
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: CurrentSelectionReplyCard.height)
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+
+    func apply(selection: PDFSelectionInfo, onClear: @escaping () -> Void) {
+        self.onClear = onClear
+        titleLabel.stringValue = "Replying to source · p\(selection.page)"
+        bodyLabel.stringValue = selection.text
+        toolTip = selection.text
+    }
+
+    private func setup() {
+        translatesAutoresizingMaskIntoConstraints = false
+        wantsLayer = true
+        layer?.cornerRadius = PaperCodexCornerRadius.control
+        layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.08).cgColor
+
+        leadingStripe.translatesAutoresizingMaskIntoConstraints = false
+        leadingStripe.wantsLayer = true
+        leadingStripe.layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.65).cgColor
+
+        quoteIconView.translatesAutoresizingMaskIntoConstraints = false
+        quoteIconView.image = NSImage(systemSymbolName: "quote.opening", accessibilityDescription: "Replying to source")
+        quoteIconView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 14, weight: .medium)
+        quoteIconView.contentTintColor = .controlAccentColor
+
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        titleLabel.font = .systemFont(ofSize: 12, weight: .semibold)
+        titleLabel.textColor = .labelColor
+        titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.maximumNumberOfLines = 1
+
+        bodyLabel.translatesAutoresizingMaskIntoConstraints = false
+        bodyLabel.font = .systemFont(ofSize: 12)
+        bodyLabel.textColor = .secondaryLabelColor
+        bodyLabel.lineBreakMode = .byTruncatingTail
+        bodyLabel.maximumNumberOfLines = 2
+        bodyLabel.usesSingleLineMode = false
+
+        clearButton.translatesAutoresizingMaskIntoConstraints = false
+        clearButton.target = self
+        clearButton.action = #selector(clearSelection)
+
+        addSubview(leadingStripe)
+        addSubview(quoteIconView)
+        addSubview(titleLabel)
+        addSubview(bodyLabel)
+        addSubview(clearButton)
+
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(greaterThanOrEqualToConstant: CurrentSelectionReplyCard.height),
+            leadingStripe.leadingAnchor.constraint(equalTo: leadingAnchor),
+            leadingStripe.topAnchor.constraint(equalTo: topAnchor),
+            leadingStripe.bottomAnchor.constraint(equalTo: bottomAnchor),
+            leadingStripe.widthAnchor.constraint(equalToConstant: 3),
+
+            quoteIconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 11),
+            quoteIconView.topAnchor.constraint(equalTo: topAnchor, constant: 11),
+            quoteIconView.widthAnchor.constraint(equalToConstant: 18),
+            quoteIconView.heightAnchor.constraint(equalToConstant: 18),
+
+            clearButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -9),
+            clearButton.topAnchor.constraint(equalTo: topAnchor, constant: 9),
+            clearButton.widthAnchor.constraint(equalToConstant: 24),
+            clearButton.heightAnchor.constraint(equalToConstant: 24),
+
+            titleLabel.leadingAnchor.constraint(equalTo: quoteIconView.trailingAnchor, constant: 10),
+            titleLabel.trailingAnchor.constraint(equalTo: clearButton.leadingAnchor, constant: -8),
+            titleLabel.topAnchor.constraint(equalTo: topAnchor, constant: 9),
+
+            bodyLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+            bodyLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            bodyLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 3),
+            bodyLabel.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -9)
+        ])
+    }
+
+    @objc private func clearSelection() {
+        onClear()
+    }
+}
+
+private final class CurrentSelectionReplyClearButton: NSButton {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.06
+            animator().alphaValue = 0.62
+        }
+        super.mouseDown(with: event)
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.08
+            animator().alphaValue = 1
+        }
+    }
+
+    private func setup() {
+        title = ""
+        image = NSImage(systemSymbolName: "xmark.circle.fill", accessibilityDescription: "Remove Source")
+        imagePosition = .imageOnly
+        isBordered = false
+        bezelStyle = .regularSquare
+        focusRingType = .none
+        contentTintColor = .secondaryLabelColor
+        setButtonType(.momentaryPushIn)
+        setAccessibilityElement(true)
+        setAccessibilityRole(.button)
+        setAccessibilityLabel("Remove Source")
+        toolTip = "Remove Source"
     }
 }
