@@ -1045,6 +1045,28 @@ func runUILayoutSourceChecks() throws {
             && libraryToolbarSource.contains("All levels"),
         "library folders should keep search, scope, count, and reading actions in one native inline toolbar without a breadcrumb path"
     )
+    if let rootFolderRange = librarySource.range(of: "private struct LibraryRootFolderRow: View"),
+       let rootFolderEndRange = librarySource.range(of: "private struct LibraryPaperListState", range: rootFolderRange.upperBound..<librarySource.endIndex) {
+        let rootFolderSource = String(librarySource[rootFolderRange.lowerBound..<rootFolderEndRange.lowerBound])
+        try check(
+            rootFolderSource.contains("LibraryRootFolderSelectionButton(")
+                && rootFolderSource.contains("private struct NativeLibraryRootFolderSelectionButton: NSViewRepresentable")
+                && rootFolderSource.contains("private final class NativeLibraryRootFolderSelectionButtonView: NSButton")
+                && rootFolderSource.contains("override func mouseDown(with event: NSEvent)")
+                && rootFolderSource.contains("override func accessibilityValue() -> Any?")
+                && rootFolderSource.contains("pressHandler()")
+                && rootFolderSource.contains("setAccessibilityRole(.button)")
+                && rootFolderSource.contains("CATransaction.setAnimationDuration")
+                && rootFolderSource.contains(".id(\"library-root-folder-\\(isSelected)-\\(isDropTargeted)\")")
+                && rootFolderSource.contains(".onDrop(")
+                && !rootFolderSource.contains("Button(action: onSelect)")
+                && !rootFolderSource.contains("super.mouseDown(with: event)")
+                && !rootFolderSource.contains(".buttonStyle(.plain)"),
+            "library root All Papers row should use a native AppKit selection button while preserving top-level drop behavior"
+        )
+    } else {
+        throw CheckFailure(description: "library root folder row source should remain inspectable")
+    }
     try check(
         librarySource.contains("LibraryNativeToolbarView(")
             && !librarySource.contains("LibraryInlineControlRow(")

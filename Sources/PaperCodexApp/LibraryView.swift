@@ -1478,7 +1478,7 @@ struct LibraryPaperArxivMetadata: Equatable {
 }
 
 private struct LibraryRootFolderRow: View {
-    @State private var isHovering = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isDropTargeted = false
 
     var countText: String
@@ -1489,62 +1489,15 @@ private struct LibraryRootFolderRow: View {
     var onSelect: () -> Void
 
     var body: some View {
-        Button(action: onSelect) {
-            ZStack(alignment: .trailing) {
-                HStack(spacing: 8) {
-                    Image(systemName: isSelected ? "tray.full.fill" : "tray.full")
-                        .frame(width: 18)
-                        .foregroundStyle(isSelected || isDropTargeted ? Color.accentColor : Color.secondary)
-                    Text("All Papers")
-                        .font(.paperCodexSystem(size: 13, weight: isSelected ? .semibold : .medium))
-                        .lineLimit(1)
-                    Spacer(minLength: 8)
-                }
-                .padding(.horizontal, 9)
-                .padding(.vertical, 7)
-
-                if isDropTargeted {
-                    Label("Top Level", systemImage: "arrow.up.to.line")
-                        .font(.paperCodexSystem(size: 11, weight: .semibold))
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 4)
-                        .foregroundStyle(Color.accentColor)
-                        .background(Capsule().fill(Color.accentColor.opacity(0.16)))
-                        .padding(.trailing, 6)
-                        .transition(.opacity.combined(with: .scale(scale: 0.96)))
-                } else {
-                    Text(countText)
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                        .contentTransition(.numericText())
-                        .padding(.trailing, 9)
-                        .transition(.opacity.combined(with: .scale(scale: 0.92)))
-                }
-            }
-        }
-        .buttonStyle(.plain)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(isDropTargeted ? Color.accentColor.opacity(0.12) : (isSelected ? Color.accentColor.opacity(0.13) : (isHovering ? Color.primary.opacity(0.045) : Color.clear)))
+        LibraryRootFolderSelectionButton(
+            countText: countText,
+            isSelected: isSelected,
+            isDropTargeted: isDropTargeted,
+            reduceMotion: reduceMotion,
+            action: onSelect
         )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(isDropTargeted ? Color.accentColor.opacity(0.55) : (isSelected ? Color.accentColor.opacity(0.22) : (isHovering ? Color.accentColor.opacity(0.18) : Color.clear)), lineWidth: isDropTargeted ? 1.5 : 1)
-        )
-        .overlay(alignment: .leading) {
-            if isSelected {
-                Capsule()
-                    .fill(Color.accentColor.opacity(0.72))
-                    .frame(width: 3, height: 18)
-                    .padding(.leading, 3)
-                    .transition(.opacity.combined(with: .scale(scale: 0.82)))
-            }
-        }
-        .scaleEffect(isDropTargeted ? 1.02 : (isHovering ? 1.01 : 1), anchor: .center)
-        .animation(PaperCodexMotion.hover, value: isHovering)
-        .animation(PaperCodexMotion.hover, value: isDropTargeted)
-        .animation(PaperCodexMotion.selection, value: isSelected)
-        .contentShape(Rectangle())
+        .frame(maxWidth: .infinity, minHeight: PaperCodexHitTarget.sidebarRowHeight, maxHeight: PaperCodexHitTarget.sidebarRowHeight)
+        .id("library-root-folder-\(isSelected)-\(isDropTargeted)")
         .onDrop(
             of: LibraryLayout.categoryDropContentTypes,
             delegate: LibraryRootFolderDropDelegate(
@@ -1554,11 +1507,6 @@ private struct LibraryRootFolderRow: View {
             )
         )
         .help("Show all papers or drop a folder here to move it to the top level")
-        .onHover { hovering in
-            withAnimation(PaperCodexMotion.hover) {
-                isHovering = hovering
-            }
-        }
     }
 
     private func loadDroppedItems(from providers: [NSItemProvider]) -> Bool {
@@ -1591,6 +1539,320 @@ private struct LibraryRootFolderRow: View {
             }
         }
         return true
+    }
+}
+
+private struct LibraryRootFolderSelectionButton: View {
+    var countText: String
+    var isSelected: Bool
+    var isDropTargeted: Bool
+    var reduceMotion: Bool
+    var action: () -> Void
+
+    var body: some View {
+        NativeLibraryRootFolderSelectionButton(
+            countText: countText,
+            isSelected: isSelected,
+            isDropTargeted: isDropTargeted,
+            reduceMotion: reduceMotion,
+            action: action
+        )
+    }
+}
+
+private struct NativeLibraryRootFolderSelectionButton: NSViewRepresentable {
+    var countText: String
+    var isSelected: Bool
+    var isDropTargeted: Bool
+    var reduceMotion: Bool
+    var action: () -> Void
+
+    func makeNSView(context: Context) -> NativeLibraryRootFolderSelectionButtonView {
+        let view = NativeLibraryRootFolderSelectionButtonView()
+        view.apply(
+            countText: countText,
+            isSelected: isSelected,
+            isDropTargeted: isDropTargeted,
+            reduceMotion: reduceMotion,
+            action: action
+        )
+        return view
+    }
+
+    func updateNSView(_ view: NativeLibraryRootFolderSelectionButtonView, context: Context) {
+        view.apply(
+            countText: countText,
+            isSelected: isSelected,
+            isDropTargeted: isDropTargeted,
+            reduceMotion: reduceMotion,
+            action: action
+        )
+    }
+}
+
+private final class NativeLibraryRootFolderSelectionButtonView: NSButton {
+    private let selectionIndicator = NSView()
+    private let iconView = NSImageView()
+    private let titleLabel = NSTextField(labelWithString: "")
+    private let trailingStack = NSStackView()
+    private let countLabel = NSTextField(labelWithString: "")
+    private let dropIconView = NSImageView()
+    private let dropLabel = NSTextField(labelWithString: "")
+    private var trackingArea: NSTrackingArea?
+    private var pressHandler: () -> Void = {}
+    private var isSelectedRow = false
+    private var isDropTargetedRow = false
+    private var isHovering = false
+    private var isPressed = false
+    private var reduceMotion = false
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override var isFlipped: Bool {
+        true
+    }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: PaperCodexHitTarget.sidebarRowHeight)
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+
+    func apply(
+        countText: String,
+        isSelected: Bool,
+        isDropTargeted: Bool,
+        reduceMotion: Bool,
+        action: @escaping () -> Void
+    ) {
+        pressHandler = action
+        isSelectedRow = isSelected
+        isDropTargetedRow = isDropTargeted
+        self.reduceMotion = reduceMotion
+        state = isSelected ? .on : .off
+        title = ""
+        titleLabel.stringValue = Self.localized("All Papers")
+        countLabel.stringValue = countText
+        dropLabel.stringValue = Self.localized("Top Level")
+        iconView.image = NSImage(
+            systemSymbolName: isSelected ? "tray.full.fill" : "tray.full",
+            accessibilityDescription: Self.localized("All Papers")
+        )
+        setAccessibilityLabel(Self.localized("All Papers"))
+        setAccessibilityValue(isSelected ? Self.localized("Selected") : Self.localized("Not selected"))
+        toolTip = Self.localized("Show all papers or drop a folder here to move it to the top level")
+        configureTrailingContent()
+        updateAppearance()
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea {
+            removeTrackingArea(trackingArea)
+        }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.activeInKeyWindow, .mouseEnteredAndExited, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isHovering = true
+        updateAppearance()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHovering = false
+        updateAppearance()
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        setPressed(true)
+        pressHandler()
+        isSelectedRow = true
+        state = .on
+        setPressed(false)
+    }
+
+    override func accessibilityValue() -> Any? {
+        isSelectedRow ? Self.localized("Selected") : Self.localized("Not selected")
+    }
+
+    private func setup() {
+        translatesAutoresizingMaskIntoConstraints = false
+        isBordered = false
+        bezelStyle = .regularSquare
+        imagePosition = .noImage
+        focusRingType = .none
+        setButtonType(.momentaryChange)
+        target = self
+        action = #selector(performPress)
+        setAccessibilityElement(true)
+        setAccessibilityRole(.button)
+        wantsLayer = true
+        layer?.cornerRadius = PaperCodexCornerRadius.control
+        layer?.masksToBounds = false
+
+        selectionIndicator.translatesAutoresizingMaskIntoConstraints = false
+        selectionIndicator.wantsLayer = true
+        selectionIndicator.layer?.cornerRadius = PaperCodexHitTarget.sidebarSelectionIndicatorWidth / 2
+
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+        iconView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 13, weight: .semibold)
+        iconView.imageScaling = .scaleProportionallyDown
+
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        titleLabel.font = .systemFont(ofSize: 13, weight: .medium)
+        titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.maximumNumberOfLines = 1
+        titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        trailingStack.translatesAutoresizingMaskIntoConstraints = false
+        trailingStack.orientation = .horizontal
+        trailingStack.alignment = .centerY
+        trailingStack.spacing = 4
+        trailingStack.wantsLayer = true
+        trailingStack.setContentHuggingPriority(.required, for: .horizontal)
+        trailingStack.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        countLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+        countLabel.textColor = .secondaryLabelColor
+        countLabel.alignment = .right
+
+        dropIconView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 11, weight: .semibold)
+        dropIconView.image = NSImage(systemSymbolName: "arrow.up.to.line", accessibilityDescription: Self.localized("Top Level"))
+        dropIconView.imageScaling = .scaleProportionallyDown
+
+        dropLabel.font = .systemFont(ofSize: 11, weight: .semibold)
+        dropLabel.lineBreakMode = .byTruncatingTail
+        dropLabel.maximumNumberOfLines = 1
+
+        [selectionIndicator, iconView, titleLabel, trailingStack].forEach(addSubview(_:))
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(greaterThanOrEqualToConstant: PaperCodexHitTarget.sidebarRowHeight),
+            selectionIndicator.leadingAnchor.constraint(equalTo: leadingAnchor, constant: PaperCodexHitTarget.sidebarSelectionIndicatorInset),
+            selectionIndicator.centerYAnchor.constraint(equalTo: centerYAnchor),
+            selectionIndicator.widthAnchor.constraint(equalToConstant: PaperCodexHitTarget.sidebarSelectionIndicatorWidth),
+            selectionIndicator.heightAnchor.constraint(equalToConstant: PaperCodexHitTarget.sidebarSelectionIndicatorHeight),
+            iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: PaperCodexSpacing.sidebarRowLeading),
+            iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            iconView.widthAnchor.constraint(equalToConstant: PaperCodexHitTarget.sidebarIconWidth),
+            iconView.heightAnchor.constraint(equalToConstant: PaperCodexHitTarget.sidebarIconWidth),
+            titleLabel.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: PaperCodexHitTarget.sidebarIconTextSpacing),
+            titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingStack.leadingAnchor, constant: -8),
+            trailingStack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -PaperCodexSpacing.sidebarRowTrailing),
+            trailingStack.centerYAnchor.constraint(equalTo: centerYAnchor)
+        ])
+        configureTrailingContent()
+        updateAppearance()
+    }
+
+    @objc private func performPress() {
+        pressHandler()
+    }
+
+    private func setPressed(_ pressed: Bool) {
+        isPressed = pressed
+        updateAppearance()
+    }
+
+    private func configureTrailingContent() {
+        trailingStack.arrangedSubviews.forEach { view in
+            trailingStack.removeArrangedSubview(view)
+            view.removeFromSuperview()
+        }
+
+        if isDropTargetedRow {
+            trailingStack.edgeInsets = NSEdgeInsets(top: 4, left: 7, bottom: 4, right: 7)
+            trailingStack.addArrangedSubview(dropIconView)
+            trailingStack.addArrangedSubview(dropLabel)
+        } else {
+            trailingStack.edgeInsets = NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
+            trailingStack.addArrangedSubview(countLabel)
+        }
+    }
+
+    private func updateAppearance() {
+        let accent = NSColor.controlAccentColor
+        let active = isSelectedRow || isDropTargetedRow
+        iconView.contentTintColor = active ? accent : .secondaryLabelColor
+        titleLabel.font = .systemFont(ofSize: 13, weight: isSelectedRow ? .semibold : .medium)
+        titleLabel.textColor = .labelColor
+        countLabel.textColor = .secondaryLabelColor
+        dropIconView.contentTintColor = accent
+        dropLabel.textColor = accent
+        selectionIndicator.isHidden = !isSelectedRow
+        selectionIndicator.layer?.backgroundColor = accent.withAlphaComponent(0.72).cgColor
+
+        let background: NSColor
+        let border: NSColor
+        let borderWidth: CGFloat
+        if isDropTargetedRow {
+            background = accent.withAlphaComponent(isPressed ? 0.18 : 0.12)
+            border = accent.withAlphaComponent(0.55)
+            borderWidth = 1.5
+        } else if isSelectedRow {
+            background = accent.withAlphaComponent(isPressed ? 0.18 : 0.13)
+            border = isPressed ? accent.withAlphaComponent(0.38) : accent.withAlphaComponent(0.22)
+            borderWidth = 1
+        } else if isPressed {
+            background = accent.withAlphaComponent(0.10)
+            border = accent.withAlphaComponent(0.38)
+            borderWidth = 1
+        } else if isHovering {
+            background = .labelColor.withAlphaComponent(0.045)
+            border = accent.withAlphaComponent(0.18)
+            borderWidth = 1
+        } else {
+            background = .clear
+            border = .clear
+            borderWidth = 0
+        }
+
+        layer?.backgroundColor = background.cgColor
+        layer?.borderWidth = borderWidth
+        layer?.borderColor = border.cgColor
+        layer?.shadowColor = NSColor.black.cgColor
+        layer?.shadowOpacity = isPressed ? 0.12 : (isHovering ? 0.08 : 0)
+        layer?.shadowRadius = isPressed ? 3 : (isHovering ? 6 : 0)
+        layer?.shadowOffset = CGSize(width: 0, height: isPressed ? 1 : -2)
+
+        trailingStack.layer?.cornerRadius = 10
+        trailingStack.layer?.backgroundColor = isDropTargetedRow ? accent.withAlphaComponent(0.16).cgColor : NSColor.clear.cgColor
+
+        let targetScale: CGFloat
+        if reduceMotion {
+            targetScale = 1
+        } else if isDropTargetedRow {
+            targetScale = 1.02
+        } else if isPressed {
+            targetScale = 0.985
+        } else {
+            targetScale = isHovering ? 1.01 : 1
+        }
+        CATransaction.begin()
+        CATransaction.setDisableActions(reduceMotion)
+        CATransaction.setAnimationDuration(reduceMotion ? 0 : (isPressed ? 0.05 : 0.12))
+        layer?.transform = CATransform3DMakeScale(targetScale, targetScale, 1)
+        CATransaction.commit()
+    }
+
+    private static func localized(_ key: String) -> String {
+        NSLocalizedString(key, comment: "")
     }
 }
 
