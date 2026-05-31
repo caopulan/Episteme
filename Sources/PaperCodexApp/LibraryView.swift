@@ -96,6 +96,17 @@ struct LibraryView: View {
         return model.recentSessions.first
     }
 
+    private var tagSidebarRows: [LibraryTagSidebarRowModel] {
+        model.tags.map { tag in
+            LibraryTagSidebarRowModel(
+                id: tag.id,
+                title: tag.name,
+                countText: "\(paperCount(forTag: tag.id))",
+                isSelected: selectedLibrarySurface == .papers && selectedTagID == tag.id
+            )
+        }
+    }
+
     private func makePaperListState() -> LibraryPaperListState {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         let derivedState = model.libraryDerivedState
@@ -369,17 +380,16 @@ struct LibraryView: View {
             if model.tags.isEmpty {
                 SidebarEmptyText("No tags")
             } else {
-                ForEach(model.tags) { tag in
-                    TagSidebarRow(
-                        title: tag.name,
-                        countText: "\(paperCount(forTag: tag.id))",
-                        isSelected: selectedLibrarySurface == .papers && selectedTagID == tag.id
-                    ) {
-                        selectLibraryTag(tag.id)
-                    } onManage: {
-                        tagPendingManagement = tag
+                LibraryTagSidebarList(
+                    tagRows: tagSidebarRows,
+                    onSelect: selectLibraryTag,
+                    onManage: { tagID in
+                        if let tag = model.tags.first(where: { $0.id == tagID }) {
+                            tagPendingManagement = tag
+                        }
                     }
-                }
+                )
+                .frame(maxWidth: .infinity, minHeight: LibraryTagSidebarList.height(for: tagSidebarRows.count))
             }
         }
     }
@@ -3999,42 +4009,316 @@ private struct LibraryRootFolderDropDelegate: DropDelegate {
     }
 }
 
-private struct TagSidebarRow: View {
-    @State private var isHovering = false
-
+private struct LibraryTagSidebarRowModel: Equatable, Identifiable {
+    var id: String
     var title: String
     var countText: String
     var isSelected: Bool
-    var onSelect: () -> Void
-    var onManage: () -> Void
+}
 
-    var body: some View {
-        ZStack(alignment: .trailing) {
-            SidebarRowButton(
-                title: title,
-                systemImage: isSelected ? "tag.fill" : "tag",
-                selected: isSelected,
-                trailingReserve: 58,
-                action: onSelect
+private struct LibraryTagSidebarList: NSViewRepresentable {
+    var tagRows: [LibraryTagSidebarRowModel]
+    var onSelect: (String) -> Void
+    var onManage: (String) -> Void
+
+    static func height(for rowCount: Int) -> CGFloat {
+        CGFloat(rowCount) * PaperCodexHitTarget.sidebarRowHeight
+    }
+
+    func makeNSView(context: Context) -> NativeLibraryTagSidebarListView {
+        let view = NativeLibraryTagSidebarListView()
+        view.apply(rows: tagRows, onSelect: onSelect, onManage: onManage)
+        return view
+    }
+
+    func updateNSView(_ view: NativeLibraryTagSidebarListView, context: Context) {
+        view.apply(rows: tagRows, onSelect: onSelect, onManage: onManage)
+    }
+}
+
+private final class NativeLibraryTagSidebarListView: NSView {
+    private let stackView = NSStackView()
+    private var rowViewsByID: [String: NativeLibraryTagSidebarRowView] = [:]
+    private var rows: [LibraryTagSidebarRowModel] = []
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override var isFlipped: Bool {
+        true
+    }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: LibraryTagSidebarList.height(for: rows.count))
+    }
+
+    func apply(
+        rows: [LibraryTagSidebarRowModel],
+        onSelect: @escaping (String) -> Void,
+        onManage: @escaping (String) -> Void
+    ) {
+        self.rows = rows
+        var reusableRows = rowViewsByID
+        rowViewsByID.removeAll(keepingCapacity: true)
+        stackView.arrangedSubviews.forEach { view in
+            stackView.removeArrangedSubview(view)
+            view.removeFromSuperview()
+        }
+
+        for row in rows {
+            let rowView = reusableRows.removeValue(forKey: row.id) ?? NativeLibraryTagSidebarRowView()
+            rowView.apply(
+                row: row,
+                onSelect: { onSelect(row.id) },
+                onManage: { onManage(row.id) }
             )
-            HStack(spacing: 4) {
-                Text(countText)
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .contentTransition(.numericText())
-                if isHovering || isSelected {
-                    PaperCodexIconButton(title: "Manage \(title)", systemImage: "ellipsis") {
-                        onManage()
-                    }
-                }
-            }
-            .padding(.trailing, 6)
+            stackView.addArrangedSubview(rowView)
+            rowViewsByID[row.id] = rowView
         }
-        .onHover { hovering in
-            withAnimation(.easeOut(duration: 0.12)) {
-                isHovering = hovering
-            }
+        invalidateIntrinsicContentSize()
+    }
+
+    private func setup() {
+        translatesAutoresizingMaskIntoConstraints = false
+        stackView.translatesAutoresizingMaskIntoConstraints = false
+        stackView.orientation = .vertical
+        stackView.alignment = .leading
+        stackView.distribution = .fill
+        stackView.spacing = 0
+        addSubview(stackView)
+        NSLayoutConstraint.activate([
+            stackView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            stackView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            stackView.topAnchor.constraint(equalTo: topAnchor),
+            stackView.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor)
+        ])
+    }
+}
+
+private final class NativeLibraryTagSidebarRowView: NSView {
+    private let selectionIndicator = NSView()
+    private let iconView = NSImageView()
+    private let titleLabel = NSTextField(labelWithString: "")
+    private let trailingStack = NSStackView()
+    private let countLabel = NSTextField(labelWithString: "")
+    private let manageButton = NativeLibraryTagSidebarManageButton()
+    private var trackingArea: NSTrackingArea?
+    private var selectHandler: () -> Void = {}
+    private var isSelectedRow = false
+    private var isHovering = false
+    private var isPressed = false
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override var isFlipped: Bool {
+        true
+    }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: PaperCodexHitTarget.sidebarRowHeight)
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+
+    func apply(row: LibraryTagSidebarRowModel, onSelect: @escaping () -> Void, onManage: @escaping () -> Void) {
+        selectHandler = onSelect
+        isSelectedRow = row.isSelected
+        iconView.image = NSImage(systemSymbolName: row.isSelected ? "tag.fill" : "tag", accessibilityDescription: row.title)
+        titleLabel.stringValue = row.title
+        countLabel.stringValue = row.countText
+        manageButton.apply(title: row.title, onPress: onManage)
+        setAccessibilityLabel(row.title)
+        setAccessibilityValue(row.isSelected ? "Selected" : "Not selected")
+        toolTip = row.title
+        updateAppearance()
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea {
+            removeTrackingArea(trackingArea)
         }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.activeInKeyWindow, .mouseEnteredAndExited, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isHovering = true
+        updateAppearance()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHovering = false
+        isPressed = false
+        updateAppearance()
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        isPressed = true
+        updateAppearance()
+        selectHandler()
+        isSelectedRow = true
+        isPressed = false
+        updateAppearance()
+    }
+
+    private func setup() {
+        translatesAutoresizingMaskIntoConstraints = false
+        wantsLayer = true
+        layer?.cornerRadius = PaperCodexCornerRadius.control
+        layer?.masksToBounds = false
+        setAccessibilityElement(true)
+        setAccessibilityRole(.button)
+
+        selectionIndicator.translatesAutoresizingMaskIntoConstraints = false
+        selectionIndicator.wantsLayer = true
+        selectionIndicator.layer?.cornerRadius = PaperCodexHitTarget.sidebarSelectionIndicatorWidth / 2
+
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+        iconView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 13, weight: .semibold)
+        iconView.imageScaling = .scaleProportionallyDown
+
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        titleLabel.font = .systemFont(ofSize: 13, weight: .medium)
+        titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.maximumNumberOfLines = 1
+        titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        countLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+        countLabel.textColor = .secondaryLabelColor
+        countLabel.alignment = .right
+        countLabel.setContentHuggingPriority(.required, for: .horizontal)
+
+        trailingStack.translatesAutoresizingMaskIntoConstraints = false
+        trailingStack.orientation = .horizontal
+        trailingStack.alignment = .centerY
+        trailingStack.distribution = .fill
+        trailingStack.spacing = 4
+        trailingStack.setContentHuggingPriority(.required, for: .horizontal)
+        trailingStack.setContentCompressionResistancePriority(.required, for: .horizontal)
+        trailingStack.addArrangedSubview(countLabel)
+        trailingStack.addArrangedSubview(manageButton)
+
+        [selectionIndicator, iconView, titleLabel, trailingStack].forEach(addSubview(_:))
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(greaterThanOrEqualToConstant: PaperCodexHitTarget.sidebarRowHeight),
+            selectionIndicator.leadingAnchor.constraint(equalTo: leadingAnchor, constant: PaperCodexHitTarget.sidebarSelectionIndicatorInset),
+            selectionIndicator.centerYAnchor.constraint(equalTo: centerYAnchor),
+            selectionIndicator.widthAnchor.constraint(equalToConstant: PaperCodexHitTarget.sidebarSelectionIndicatorWidth),
+            selectionIndicator.heightAnchor.constraint(equalToConstant: PaperCodexHitTarget.sidebarSelectionIndicatorHeight),
+            iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: PaperCodexSpacing.sidebarRowLeading),
+            iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            iconView.widthAnchor.constraint(equalToConstant: PaperCodexHitTarget.sidebarIconWidth),
+            iconView.heightAnchor.constraint(equalToConstant: PaperCodexHitTarget.sidebarIconWidth),
+            titleLabel.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: PaperCodexHitTarget.sidebarIconTextSpacing),
+            titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingStack.leadingAnchor, constant: -8),
+            trailingStack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
+            trailingStack.centerYAnchor.constraint(equalTo: centerYAnchor)
+        ])
+        updateAppearance()
+    }
+
+    private func updateAppearance() {
+        let accent = NSColor.controlAccentColor
+        let showManageButton = isHovering || isSelectedRow
+        selectionIndicator.isHidden = !isSelectedRow
+        selectionIndicator.layer?.backgroundColor = accent.withAlphaComponent(0.72).cgColor
+        iconView.contentTintColor = isSelectedRow ? accent : .secondaryLabelColor
+        titleLabel.font = .systemFont(ofSize: 13, weight: isSelectedRow ? .semibold : .medium)
+        titleLabel.textColor = .labelColor
+        countLabel.textColor = .secondaryLabelColor
+        manageButton.isHidden = !showManageButton
+
+        let background: NSColor
+        let border: NSColor
+        if isSelectedRow {
+            background = accent.withAlphaComponent(isPressed ? 0.18 : 0.13)
+            border = isPressed ? accent.withAlphaComponent(0.38) : accent.withAlphaComponent(0.22)
+        } else if isPressed {
+            background = accent.withAlphaComponent(0.10)
+            border = accent.withAlphaComponent(0.38)
+        } else if isHovering {
+            background = .textBackgroundColor
+            border = accent.withAlphaComponent(0.18)
+        } else {
+            background = .clear
+            border = .clear
+        }
+        layer?.backgroundColor = background.cgColor
+        layer?.borderWidth = border == .clear ? 0 : 1
+        layer?.borderColor = border.cgColor
+    }
+}
+
+private final class NativeLibraryTagSidebarManageButton: NSButton {
+    private var onPress: () -> Void = {}
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        alphaValue = 0.72
+        super.mouseDown(with: event)
+        alphaValue = 1
+    }
+
+    func apply(title: String, onPress: @escaping () -> Void) {
+        self.onPress = onPress
+        image = NSImage(systemSymbolName: "ellipsis", accessibilityDescription: "Manage \(title)")
+        setAccessibilityLabel("Manage \(title)")
+        toolTip = "Manage \(title)"
+    }
+
+    private func setup() {
+        translatesAutoresizingMaskIntoConstraints = false
+        isBordered = false
+        bezelStyle = .regularSquare
+        imagePosition = .imageOnly
+        target = self
+        action = #selector(performPress(_:))
+        focusRingType = .none
+        setButtonType(.momentaryChange)
+        setAccessibilityRole(.button)
+        NSLayoutConstraint.activate([
+            widthAnchor.constraint(equalToConstant: 22),
+            heightAnchor.constraint(equalToConstant: 22)
+        ])
+    }
+
+    @objc private func performPress(_ sender: NSButton) {
+        onPress()
     }
 }
 

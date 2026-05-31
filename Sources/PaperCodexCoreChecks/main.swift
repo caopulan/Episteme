@@ -1119,6 +1119,28 @@ func runUILayoutSourceChecks() throws {
             librarySource.contains("sidebarLists"),
         "library sidebar category and tag lists should live inside a native AppKit scroll view"
     )
+    if let tagSectionRange = librarySource.range(of: "private var tagSidebarSection: some View"),
+       let tagSectionEndRange = librarySource.range(of: "private var contentPane: some View", range: tagSectionRange.upperBound..<librarySource.endIndex) {
+        let tagSectionSource = String(librarySource[tagSectionRange.lowerBound..<tagSectionEndRange.lowerBound])
+        try check(
+            tagSectionSource.contains("LibraryTagSidebarList(")
+                && !tagSectionSource.contains("ForEach(model.tags)")
+                && !tagSectionSource.contains("TagSidebarRow(")
+                && librarySource.contains("private struct LibraryTagSidebarRowModel: Equatable, Identifiable")
+                && librarySource.contains("private struct LibraryTagSidebarList: NSViewRepresentable")
+                && librarySource.contains("private final class NativeLibraryTagSidebarListView: NSView")
+                && librarySource.contains("private final class NativeLibraryTagSidebarRowView: NSView")
+                && librarySource.contains("private final class NativeLibraryTagSidebarManageButton: NSButton")
+                && librarySource.contains("tagRows: tagSidebarRows")
+                && librarySource.contains("NSStackView")
+                && librarySource.contains("NSTrackingArea")
+                && librarySource.contains("setAccessibilityLabel(\"Manage")
+                && !librarySource.contains("private struct TagSidebarRow: View"),
+            "library tag sidebar should render as one native AppKit list with native hover/manage rows instead of SwiftUI ForEach rows"
+        )
+    } else {
+        throw CheckFailure(description: "library tag sidebar source should remain inspectable")
+    }
     try check(
         librarySource.contains("onCreateChild"),
         "library category rows should expose a direct child-category creation action"
@@ -2093,14 +2115,17 @@ func runUILayoutSourceChecks() throws {
     } else {
         throw CheckFailure(description: "library arXiv import sheet source should remain inspectable")
     }
-    if let tagSidebarRange = librarySource.range(of: "private struct TagSidebarRow: View"),
+    if let tagSidebarRange = librarySource.range(of: "private struct LibraryTagSidebarList: NSViewRepresentable"),
        let categoryManagementRange = librarySource.range(of: "private struct CategoryManagementSheet: View", range: tagSidebarRange.upperBound..<librarySource.endIndex) {
         let tagSidebarSource = String(librarySource[tagSidebarRange.lowerBound..<categoryManagementRange.lowerBound])
         try check(
-            tagSidebarSource.contains("PaperCodexIconButton(title: \"Manage \\(title)\"")
+            tagSidebarSource.contains("NativeLibraryTagSidebarManageButton")
+                && tagSidebarSource.contains("setAccessibilityLabel(\"Manage \\(title)\")")
+                && tagSidebarSource.contains("setAccessibilityRole(.button)")
+                && !tagSidebarSource.contains("PaperCodexIconButton")
                 && !tagSidebarSource.contains("\n                    Button")
                 && !tagSidebarSource.contains(".buttonStyle("),
-            "library tag sidebar manage action should use the shared native icon button"
+            "library tag sidebar manage action should use a native AppKit icon button"
         )
     } else {
         throw CheckFailure(description: "library tag sidebar source should remain inspectable")
