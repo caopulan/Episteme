@@ -2054,7 +2054,7 @@ func runUILayoutSourceChecks() throws {
                 && nativeScrollViewSource.contains("let contentChanged = contentID == nil || self.contentID != contentID")
                 && nativeScrollViewSource.contains("if contentChanged {")
                 && nativeScrollViewSource.contains("guard !isLayingOutHostedContent else")
-                && discoverSource.contains("PaperCodexNativeScrollView(contentID: sidebarContentID)")
+                && discoverSource.contains("NativeDiscoverSidebarFilterList(")
                 && !nativeScrollApplySource.contains("layoutSubtreeIfNeeded()"),
             "shared native hosted scroll view should avoid synchronous update-layout recursion and cache content measurement/root updates"
         )
@@ -2599,17 +2599,42 @@ func runUILayoutSourceChecks() throws {
         "Discover and Search media preview actions should be native AppKit buttons before opening PDFs or previews"
     )
     try check(
-        discoverSource.contains("private struct NativeSidebarFilterButton: NSViewRepresentable")
+        discoverSource.contains("NativeDiscoverSidebarFilterList(")
             && discoverSource.contains("NativeSidebarFilterButtonView")
             && discoverSource.contains("final class NativeSidebarFilterButtonView: NSButton")
             && discoverSource.contains("override func mouseDown(with event: NSEvent)")
             && discoverSource.contains("setAccessibilityRole(.button)")
             && discoverSource.contains("setAccessibilityValue(selected ?")
             && discoverSource.contains("CATransaction.setAnimationDuration")
+            && !discoverSource.contains("private struct SidebarFilterButton: View")
+            && !discoverSource.contains("private struct NativeSidebarFilterButton: NSViewRepresentable")
             && !discoverSource.contains("private struct SidebarFilterButtonStyle")
             && !discoverSource.contains(".buttonStyle(SidebarFilterButtonStyle("),
         "Discover and Search sidebar filter buttons should use native AppKit buttons with immediate pressed feedback before list recalculation"
     )
+    if let discoverSidebarRange = discoverSource.range(of: "private var sidebar: some View"),
+       let discoverFeedRange = discoverSource.range(of: "private var feed: some View", range: discoverSidebarRange.upperBound..<discoverSource.endIndex),
+       let arxivSearchRange = discoverSource.range(of: "struct ArxivSearchView: View"),
+       let searchSidebarRange = discoverSource.range(of: "private var sidebar: some View", range: arxivSearchRange.upperBound..<discoverSource.endIndex),
+       let searchFeedRange = discoverSource.range(of: "private var feed: some View", range: searchSidebarRange.upperBound..<discoverSource.endIndex) {
+        let discoverSidebarSource = String(discoverSource[discoverSidebarRange.lowerBound..<discoverFeedRange.lowerBound])
+        let searchSidebarSource = String(discoverSource[searchSidebarRange.lowerBound..<searchFeedRange.lowerBound])
+        try check(
+            discoverSidebarSource.contains("NativeDiscoverSidebarFilterList(")
+                && searchSidebarSource.contains("NativeDiscoverSidebarFilterList(")
+                && discoverSource.contains("private struct DiscoverSidebarFilterSectionModel: Equatable")
+                && discoverSource.contains("private struct DiscoverSidebarFilterRowModel: Equatable")
+                && discoverSource.contains("private struct NativeDiscoverSidebarFilterList: NSViewRepresentable")
+                && discoverSource.contains("private final class NativeDiscoverSidebarFilterListView: NSScrollView")
+                && !discoverSidebarSource.contains("PaperCodexNativeScrollView(contentID: sidebarContentID)")
+                && !discoverSidebarSource.contains("ForEach(")
+                && !searchSidebarSource.contains("PaperCodexNativeScrollView(contentID: sidebarContentID)")
+                && !searchSidebarSource.contains("ForEach("),
+            "Discover and Search sidebar filter groups should render as one native AppKit list instead of SwiftUI scroll stacks"
+        )
+    } else {
+        throw CheckFailure(description: "Discover/Search sidebar source should remain inspectable")
+    }
     if let filterChipRange = discoverSource.range(of: "private struct DiscoverFilterChip: View"),
        let filterChipEndRange = discoverSource.range(of: "private struct ArxivSearchYearField", range: filterChipRange.upperBound..<discoverSource.endIndex) {
         let filterChipSource = String(discoverSource[filterChipRange.lowerBound..<filterChipEndRange.lowerBound])
@@ -2630,7 +2655,7 @@ func runUILayoutSourceChecks() throws {
         throw CheckFailure(description: "Discover active filter chip source should remain inspectable")
     }
     if let arxivSearchRange = discoverSource.range(of: "struct ArxivSearchView: View"),
-       let arxivSearchEndRange = discoverSource.range(of: "private struct SidebarFilterButton: View", range: arxivSearchRange.upperBound..<discoverSource.endIndex) {
+       let arxivSearchEndRange = discoverSource.range(of: "private struct DiscoverFilterChip: View", range: arxivSearchRange.upperBound..<discoverSource.endIndex) {
         let arxivSearchSource = String(discoverSource[arxivSearchRange.lowerBound..<arxivSearchEndRange.lowerBound])
         if let searchFeedRange = arxivSearchSource.range(of: "private var feed: some View"),
            let searchToolbarRange = arxivSearchSource.range(of: "private var toolbar: some View", range: searchFeedRange.upperBound..<arxivSearchSource.endIndex) {
@@ -4361,7 +4386,7 @@ func runUILayoutSourceChecks() throws {
         "Explore and Search should keep a stable toolbar and lightweight loading shell so route switches do not visually jump"
     )
     if let searchRowRange = discoverSource.range(of: "private var searchAndActionRow: some View"),
-       let filterButtonRange = discoverSource.range(of: "private func filterButton", range: searchRowRange.upperBound..<discoverSource.endIndex) {
+       let filterButtonRange = discoverSource.range(of: "private var activeFilterChips: some View", range: searchRowRange.upperBound..<discoverSource.endIndex) {
         let searchRowSource = String(discoverSource[searchRowRange.lowerBound..<filterButtonRange.lowerBound])
         try check(
             searchRowSource.contains("DiscoverSearchField(")

@@ -9,6 +9,30 @@ private enum DiscoverScrollPolicy {
     static let scrollPositionCommitDelayNanoseconds: UInt64 = 550_000_000
 }
 
+private enum DiscoverSidebarFilterID {
+    static let mainCategoryAll = "discover.category.all"
+    static let mainCategoryPrefix = "discover.category."
+    static let mainProcessingPrefix = "discover.processing."
+    static let mainLibraryPrefix = "discover.library."
+    static let mainRequiresProject = "discover.project.required"
+    static let mainSimilarityPrefix = "discover.similarity."
+    static let mainTagAll = "discover.tag.all"
+    static let mainTagPrefix = "discover.tag."
+
+    static let searchRequiredNone = "search.required.none"
+    static let searchRequiredPrefix = "search.required."
+    static let searchResultCategoryAll = "search.result-category.all"
+    static let searchResultCategoryPrefix = "search.result-category."
+    static let searchLibraryPrefix = "search.library."
+
+    static func value(from id: String, prefix: String) -> String? {
+        guard id.hasPrefix(prefix) else {
+            return nil
+        }
+        return String(id.dropFirst(prefix.count))
+    }
+}
+
 private struct DiscoverLayoutSignature: Hashable {
     var columnCount: Int
     var paperCount: Int
@@ -227,6 +251,7 @@ private final class NativeDiscoverCardModelCache: ObservableObject {
 
 struct DiscoverView: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @StateObject private var cardModelCache = NativeDiscoverCardModelCache()
     @State private var nativeDiscoverCardModels: [NativeDiscoverCardModel] = []
     @State private var nativeDiscoverCardInputID: Int?
@@ -279,26 +304,6 @@ struct DiscoverView: View {
 
     private var commonCategories: [String] {
         ["cs.CV", "cs.CL", "cs.AI", "cs.LG", "cs.RO", "stat.ML", "cs.HC", "cs.IR", "cs.SE"]
-    }
-
-    private var sidebarContentID: AnyHashable {
-        var hasher = Hasher()
-        hasher.combine("discover-sidebar")
-        hasher.combine(selectedCategory)
-        hasher.combine(selectedTag)
-        hasher.combine(selectedProcessingFilter.rawValue)
-        hasher.combine(selectedLibraryFilter.rawValue)
-        hasher.combine(requiresProjectLink)
-        hasher.combine(selectedSimilarityBucket.rawValue)
-        hasher.combine(totalTagCount)
-        for category in categories {
-            hasher.combine(category)
-        }
-        for tag in tags.prefix(18) {
-            hasher.combine(tag)
-            hasher.combine(tagCounts[tag, default: 0])
-        }
-        return AnyHashable(hasher.finalize())
     }
 
     var body: some View {
@@ -388,91 +393,120 @@ struct DiscoverView: View {
                 .font(.headline)
                 .foregroundStyle(.secondary)
 
-            PaperCodexNativeScrollView(contentID: sidebarContentID) {
-                VStack(alignment: .leading, spacing: 18) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Label("Categories", systemImage: "line.3.horizontal.decrease.circle")
-                            .font(.headline)
-                        filterButton(title: "All", selected: selectedCategory == nil && selectedTag == nil) {
-                            selectedCategory = nil
-                            selectedTag = nil
-                        }
-                        ForEach(categories, id: \.self) { category in
-                            filterButton(title: category, selected: selectedCategory == category) {
-                                selectedCategory = category
-                                selectedTag = nil
-                            }
-                        }
-                    }
-
-                    Divider()
-
-                    VStack(alignment: .leading, spacing: 8) {
-                        Label("Status", systemImage: "checklist")
-                            .font(.headline)
-                        ForEach(DiscoverProcessingFilter.allCases) { filter in
-                            filterButton(title: filter.title, selected: selectedProcessingFilter == filter) {
-                                selectedProcessingFilter = filter
-                            }
-                        }
-                    }
-
-                    Divider()
-
-                    VStack(alignment: .leading, spacing: 8) {
-                        Label("Library", systemImage: "books.vertical")
-                            .font(.headline)
-                        ForEach(DiscoverLibraryFilter.allCases) { filter in
-                            filterButton(title: filter.title, selected: selectedLibraryFilter == filter) {
-                                selectedLibraryFilter = filter
-                            }
-                        }
-                        filterButton(title: "Has Code / Project", selected: requiresProjectLink) {
-                            requiresProjectLink.toggle()
-                        }
-                    }
-
-                    Divider()
-
-                    VStack(alignment: .leading, spacing: 8) {
-                        Label("Similarity", systemImage: "point.3.connected.trianglepath.dotted")
-                            .font(.headline)
-                        ForEach(DiscoverSimilarityBucket.allCases) { bucket in
-                            filterButton(title: bucket.title, selected: selectedSimilarityBucket == bucket) {
-                                selectedSimilarityBucket = bucket
-                            }
-                        }
-                    }
-
-                    Divider()
-
-                    VStack(alignment: .leading, spacing: 8) {
-                        Label("Tags", systemImage: "tag")
-                            .font(.headline)
-                        filterButton(
-                            title: "All Tags",
-                            detail: "\(totalTagCount)",
-                            selected: selectedTag == nil
-                        ) {
-                            selectedTag = nil
-                        }
-                        ForEach(tags.prefix(18), id: \.self) { tag in
-                            filterButton(
-                                title: tag,
-                                detail: "\(tagCounts[tag, default: 0])",
-                                selected: selectedTag == tag
-                            ) {
-                                selectedTag = tag
-                                selectedCategory = nil
-                            }
-                        }
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
+            GeometryReader { proxy in
+                NativeDiscoverSidebarFilterList(
+                    sections: nativeSidebarFilterSections,
+                    reduceMotion: reduceMotion,
+                    onSelect: handleNativeSidebarFilterSelection
+                )
+                .frame(width: proxy.size.width, height: proxy.size.height, alignment: .leading)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         }
         .paperCodexSidebarChromePadding()
         .background(Color(nsColor: .controlBackgroundColor))
+    }
+
+    private var nativeSidebarFilterSections: [DiscoverSidebarFilterSectionModel] {
+        let categoryRows = [
+            DiscoverSidebarFilterRowModel(
+                id: DiscoverSidebarFilterID.mainCategoryAll,
+                title: "All",
+                detail: nil,
+                isSelected: selectedCategory == nil && selectedTag == nil
+            )
+        ] + categories.map { category in
+            DiscoverSidebarFilterRowModel(
+                id: DiscoverSidebarFilterID.mainCategoryPrefix + category,
+                title: category,
+                detail: nil,
+                isSelected: selectedCategory == category
+            )
+        }
+
+        let statusRows = DiscoverProcessingFilter.allCases.map { filter in
+            DiscoverSidebarFilterRowModel(
+                id: DiscoverSidebarFilterID.mainProcessingPrefix + filter.rawValue,
+                title: filter.title,
+                detail: nil,
+                isSelected: selectedProcessingFilter == filter
+            )
+        }
+
+        let libraryRows = DiscoverLibraryFilter.allCases.map { filter in
+            DiscoverSidebarFilterRowModel(
+                id: DiscoverSidebarFilterID.mainLibraryPrefix + filter.rawValue,
+                title: filter.title,
+                detail: nil,
+                isSelected: selectedLibraryFilter == filter
+            )
+        } + [
+            DiscoverSidebarFilterRowModel(
+                id: DiscoverSidebarFilterID.mainRequiresProject,
+                title: "Has Code / Project",
+                detail: nil,
+                isSelected: requiresProjectLink
+            )
+        ]
+
+        let similarityRows = DiscoverSimilarityBucket.allCases.map { bucket in
+            DiscoverSidebarFilterRowModel(
+                id: DiscoverSidebarFilterID.mainSimilarityPrefix + bucket.rawValue,
+                title: bucket.title,
+                detail: nil,
+                isSelected: selectedSimilarityBucket == bucket
+            )
+        }
+
+        let tagRows = [
+            DiscoverSidebarFilterRowModel(
+                id: DiscoverSidebarFilterID.mainTagAll,
+                title: "All Tags",
+                detail: "\(totalTagCount)",
+                isSelected: selectedTag == nil
+            )
+        ] + tags.prefix(18).map { tag in
+            DiscoverSidebarFilterRowModel(
+                id: DiscoverSidebarFilterID.mainTagPrefix + tag,
+                title: tag,
+                detail: "\(tagCounts[tag, default: 0])",
+                isSelected: selectedTag == tag
+            )
+        }
+
+        return [
+            DiscoverSidebarFilterSectionModel(id: "discover-categories", title: "Categories", systemImage: "line.3.horizontal.decrease.circle", rows: categoryRows),
+            DiscoverSidebarFilterSectionModel(id: "discover-status", title: "Status", systemImage: "checklist", rows: statusRows),
+            DiscoverSidebarFilterSectionModel(id: "discover-library", title: "Library", systemImage: "books.vertical", rows: libraryRows),
+            DiscoverSidebarFilterSectionModel(id: "discover-similarity", title: "Similarity", systemImage: "point.3.connected.trianglepath.dotted", rows: similarityRows),
+            DiscoverSidebarFilterSectionModel(id: "discover-tags", title: "Tags", systemImage: "tag", rows: tagRows)
+        ]
+    }
+
+    private func handleNativeSidebarFilterSelection(_ id: String) {
+        if id == DiscoverSidebarFilterID.mainCategoryAll {
+            selectedCategory = nil
+            selectedTag = nil
+        } else if let category = DiscoverSidebarFilterID.value(from: id, prefix: DiscoverSidebarFilterID.mainCategoryPrefix) {
+            selectedCategory = category
+            selectedTag = nil
+        } else if let rawValue = DiscoverSidebarFilterID.value(from: id, prefix: DiscoverSidebarFilterID.mainProcessingPrefix),
+                  let filter = DiscoverProcessingFilter(rawValue: rawValue) {
+            selectedProcessingFilter = filter
+        } else if let rawValue = DiscoverSidebarFilterID.value(from: id, prefix: DiscoverSidebarFilterID.mainLibraryPrefix),
+                  let filter = DiscoverLibraryFilter(rawValue: rawValue) {
+            selectedLibraryFilter = filter
+        } else if id == DiscoverSidebarFilterID.mainRequiresProject {
+            requiresProjectLink.toggle()
+        } else if let rawValue = DiscoverSidebarFilterID.value(from: id, prefix: DiscoverSidebarFilterID.mainSimilarityPrefix),
+                  let bucket = DiscoverSimilarityBucket(rawValue: rawValue) {
+            selectedSimilarityBucket = bucket
+        } else if id == DiscoverSidebarFilterID.mainTagAll {
+            selectedTag = nil
+        } else if let tag = DiscoverSidebarFilterID.value(from: id, prefix: DiscoverSidebarFilterID.mainTagPrefix) {
+            selectedTag = tag
+            selectedCategory = nil
+        }
     }
 
     private var feed: some View {
@@ -754,10 +788,6 @@ struct DiscoverView: View {
         .controlSize(.small)
     }
 
-    private func filterButton(title: String, detail: String? = nil, selected: Bool, action: @escaping () -> Void) -> some View {
-        SidebarFilterButton(title: title, detail: detail, selected: selected, action: action)
-    }
-
     private var activeFilterChips: some View {
         FlowLayout(spacing: 8) {
             if let selectedCategory {
@@ -797,6 +827,7 @@ struct DiscoverView: View {
 
 struct ArxivSearchView: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @StateObject private var cardModelCache = NativeDiscoverCardModelCache()
     @State private var nativeSearchCardModels: [NativeDiscoverCardModel] = []
     @State private var nativeSearchCardInputID: Int?
@@ -847,23 +878,6 @@ struct ArxivSearchView: View {
 
     private var sortOrderSystemImage: String {
         model.arxivSearchSortOrderRawValue == ArxivAPISortOrder.descending.rawValue ? "arrow.down" : "arrow.up"
-    }
-
-    private var sidebarContentID: AnyHashable {
-        var hasher = Hasher()
-        hasher.combine("search-sidebar")
-        hasher.combine(selectedCategory)
-        hasher.combine(selectedLibraryFilter.rawValue)
-        for category in model.arxivSearchRequiredCategories {
-            hasher.combine(category)
-        }
-        for category in requiredCategoryOptions {
-            hasher.combine(category)
-        }
-        for category in resultCategories {
-            hasher.combine(category)
-        }
-        return AnyHashable(hasher.finalize())
     }
 
     var body: some View {
@@ -945,55 +959,82 @@ struct ArxivSearchView: View {
                 .font(.headline)
                 .foregroundStyle(.secondary)
 
-            PaperCodexNativeScrollView(contentID: sidebarContentID) {
-                VStack(alignment: .leading, spacing: 18) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Label("至少包含类别", systemImage: "checklist.checked")
-                            .font(.headline)
-
-                        SidebarFilterButton(title: "不限制", selected: model.arxivSearchRequiredCategories.isEmpty) {
-                            model.arxivSearchRequiredCategories = []
-                        }
-
-                        ForEach(requiredCategoryOptions, id: \.self) { category in
-                            SidebarFilterButton(title: category, selected: model.arxivSearchRequiredCategories.contains(category)) {
-                                toggleRequiredCategory(category)
-                            }
-                        }
-                    }
-
-                    Divider()
-
-                    VStack(alignment: .leading, spacing: 8) {
-                        Label("结果类别", systemImage: "line.3.horizontal.decrease.circle")
-                            .font(.headline)
-                        SidebarFilterButton(title: "All", selected: selectedCategory == nil) {
-                            selectedCategory = nil
-                        }
-                        ForEach(resultCategories, id: \.self) { category in
-                            SidebarFilterButton(title: category, selected: selectedCategory == category) {
-                                selectedCategory = category
-                            }
-                        }
-                    }
-
-                    Divider()
-
-                    VStack(alignment: .leading, spacing: 8) {
-                        Label("Library", systemImage: "books.vertical")
-                            .font(.headline)
-                        ForEach(DiscoverLibraryFilter.allCases) { filter in
-                            SidebarFilterButton(title: filter.title, selected: selectedLibraryFilter == filter) {
-                                selectedLibraryFilter = filter
-                            }
-                        }
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
+            GeometryReader { proxy in
+                NativeDiscoverSidebarFilterList(
+                    sections: nativeSidebarFilterSections,
+                    reduceMotion: reduceMotion,
+                    onSelect: handleNativeSidebarFilterSelection
+                )
+                .frame(width: proxy.size.width, height: proxy.size.height, alignment: .leading)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         }
         .paperCodexSidebarChromePadding()
         .background(Color(nsColor: .controlBackgroundColor))
+    }
+
+    private var nativeSidebarFilterSections: [DiscoverSidebarFilterSectionModel] {
+        let requiredRows = [
+            DiscoverSidebarFilterRowModel(
+                id: DiscoverSidebarFilterID.searchRequiredNone,
+                title: "不限制",
+                detail: nil,
+                isSelected: model.arxivSearchRequiredCategories.isEmpty
+            )
+        ] + requiredCategoryOptions.map { category in
+            DiscoverSidebarFilterRowModel(
+                id: DiscoverSidebarFilterID.searchRequiredPrefix + category,
+                title: category,
+                detail: nil,
+                isSelected: model.arxivSearchRequiredCategories.contains(category)
+            )
+        }
+
+        let resultCategoryRows = [
+            DiscoverSidebarFilterRowModel(
+                id: DiscoverSidebarFilterID.searchResultCategoryAll,
+                title: "All",
+                detail: nil,
+                isSelected: selectedCategory == nil
+            )
+        ] + resultCategories.map { category in
+            DiscoverSidebarFilterRowModel(
+                id: DiscoverSidebarFilterID.searchResultCategoryPrefix + category,
+                title: category,
+                detail: nil,
+                isSelected: selectedCategory == category
+            )
+        }
+
+        let libraryRows = DiscoverLibraryFilter.allCases.map { filter in
+            DiscoverSidebarFilterRowModel(
+                id: DiscoverSidebarFilterID.searchLibraryPrefix + filter.rawValue,
+                title: filter.title,
+                detail: nil,
+                isSelected: selectedLibraryFilter == filter
+            )
+        }
+
+        return [
+            DiscoverSidebarFilterSectionModel(id: "search-required-categories", title: "至少包含类别", systemImage: "checklist.checked", rows: requiredRows),
+            DiscoverSidebarFilterSectionModel(id: "search-result-categories", title: "结果类别", systemImage: "line.3.horizontal.decrease.circle", rows: resultCategoryRows),
+            DiscoverSidebarFilterSectionModel(id: "search-library", title: "Library", systemImage: "books.vertical", rows: libraryRows)
+        ]
+    }
+
+    private func handleNativeSidebarFilterSelection(_ id: String) {
+        if id == DiscoverSidebarFilterID.searchRequiredNone {
+            model.arxivSearchRequiredCategories = []
+        } else if let category = DiscoverSidebarFilterID.value(from: id, prefix: DiscoverSidebarFilterID.searchRequiredPrefix) {
+            toggleRequiredCategory(category)
+        } else if id == DiscoverSidebarFilterID.searchResultCategoryAll {
+            selectedCategory = nil
+        } else if let category = DiscoverSidebarFilterID.value(from: id, prefix: DiscoverSidebarFilterID.searchResultCategoryPrefix) {
+            selectedCategory = category
+        } else if let rawValue = DiscoverSidebarFilterID.value(from: id, prefix: DiscoverSidebarFilterID.searchLibraryPrefix),
+                  let filter = DiscoverLibraryFilter(rawValue: rawValue) {
+            selectedLibraryFilter = filter
+        }
     }
 
     private var feed: some View {
@@ -1210,40 +1251,254 @@ private enum NativeSidebarFilterMetrics {
     static let cornerRadius: CGFloat = PaperCodexCornerRadius.control
 }
 
-private struct SidebarFilterButton: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+private struct DiscoverSidebarFilterSectionModel: Equatable {
+    var id: String
     var title: String
-    var detail: String?
-    var selected: Bool
-    var action: () -> Void
-
-    var body: some View {
-        NativeSidebarFilterButton(
-            title: title,
-            detail: detail,
-            selected: selected,
-            reduceMotion: reduceMotion,
-            action: action
-        )
-        .frame(maxWidth: .infinity, minHeight: NativeSidebarFilterMetrics.rowHeight, maxHeight: NativeSidebarFilterMetrics.rowHeight)
-    }
+    var systemImage: String
+    var rows: [DiscoverSidebarFilterRowModel]
 }
 
-private struct NativeSidebarFilterButton: NSViewRepresentable {
+private struct DiscoverSidebarFilterRowModel: Equatable {
+    var id: String
     var title: String
     var detail: String?
-    var selected: Bool
-    var reduceMotion: Bool
-    var action: () -> Void
+    var isSelected: Bool
+}
 
-    func makeNSView(context: Context) -> NativeSidebarFilterButtonView {
-        let view = NativeSidebarFilterButtonView()
-        view.apply(title: title, detail: detail, selected: selected, reduceMotion: reduceMotion, action: action)
+private struct NativeDiscoverSidebarFilterList: NSViewRepresentable {
+    var sections: [DiscoverSidebarFilterSectionModel]
+    var reduceMotion: Bool
+    var onSelect: (String) -> Void
+
+    func makeNSView(context: Context) -> NativeDiscoverSidebarFilterListView {
+        let view = NativeDiscoverSidebarFilterListView()
+        view.apply(sections: sections, reduceMotion: reduceMotion, onSelect: onSelect)
         return view
     }
 
-    func updateNSView(_ view: NativeSidebarFilterButtonView, context: Context) {
-        view.apply(title: title, detail: detail, selected: selected, reduceMotion: reduceMotion, action: action)
+    func updateNSView(_ view: NativeDiscoverSidebarFilterListView, context: Context) {
+        view.apply(sections: sections, reduceMotion: reduceMotion, onSelect: onSelect)
+    }
+}
+
+private final class NativeDiscoverSidebarFilterListView: NSScrollView {
+    private let documentContainer = NativeDiscoverSidebarFilterDocumentView()
+    private let stackView = NSStackView()
+    private var sections: [DiscoverSidebarFilterSectionModel] = []
+    private var reduceMotion = false
+    private var onSelect: (String) -> Void = { _ in }
+    private var isLayingOutDocument = false
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: NSView.noIntrinsicMetric)
+    }
+
+    override func layout() {
+        super.layout()
+        layoutDocument()
+    }
+
+    func apply(
+        sections: [DiscoverSidebarFilterSectionModel],
+        reduceMotion: Bool,
+        onSelect: @escaping (String) -> Void
+    ) {
+        self.onSelect = onSelect
+        guard self.sections != sections || self.reduceMotion != reduceMotion else {
+            return
+        }
+        self.sections = sections
+        self.reduceMotion = reduceMotion
+        rebuildRows()
+        needsLayout = true
+    }
+
+    private func setup() {
+        borderType = .noBorder
+        drawsBackground = false
+        autohidesScrollers = true
+        scrollerStyle = .overlay
+        hasVerticalScroller = true
+        hasHorizontalScroller = false
+        documentView = documentContainer
+
+        stackView.translatesAutoresizingMaskIntoConstraints = false
+        stackView.orientation = .vertical
+        stackView.alignment = .width
+        stackView.distribution = .fill
+        stackView.spacing = 18
+        documentContainer.addSubview(stackView)
+
+        NSLayoutConstraint.activate([
+            stackView.leadingAnchor.constraint(equalTo: documentContainer.leadingAnchor),
+            stackView.trailingAnchor.constraint(equalTo: documentContainer.trailingAnchor),
+            stackView.topAnchor.constraint(equalTo: documentContainer.topAnchor),
+            stackView.bottomAnchor.constraint(lessThanOrEqualTo: documentContainer.bottomAnchor)
+        ])
+    }
+
+    private func rebuildRows() {
+        stackView.arrangedSubviews.forEach { view in
+            stackView.removeArrangedSubview(view)
+            view.removeFromSuperview()
+        }
+
+        for (sectionIndex, section) in sections.enumerated() {
+            if sectionIndex > 0 {
+                stackView.addArrangedSubview(makeSeparator())
+            }
+
+            let sectionStack = NSStackView()
+            sectionStack.translatesAutoresizingMaskIntoConstraints = false
+            sectionStack.orientation = .vertical
+            sectionStack.alignment = .width
+            sectionStack.distribution = .fill
+            sectionStack.spacing = 8
+
+            let headerView = NativeDiscoverSidebarSectionHeaderView()
+            headerView.apply(title: section.title, systemImage: section.systemImage)
+            sectionStack.addArrangedSubview(headerView)
+            headerView.widthAnchor.constraint(equalTo: sectionStack.widthAnchor).isActive = true
+
+            for row in section.rows {
+                let rowID = row.id
+                let rowView = NativeSidebarFilterButtonView()
+                rowView.apply(
+                    title: row.title,
+                    detail: row.detail,
+                    selected: row.isSelected,
+                    reduceMotion: reduceMotion,
+                    action: { [weak self] in
+                        self?.onSelect(rowID)
+                    }
+                )
+                sectionStack.addArrangedSubview(rowView)
+                rowView.widthAnchor.constraint(equalTo: sectionStack.widthAnchor).isActive = true
+            }
+
+            stackView.addArrangedSubview(sectionStack)
+            sectionStack.widthAnchor.constraint(equalTo: stackView.widthAnchor).isActive = true
+        }
+    }
+
+    private func layoutDocument() {
+        guard !isLayingOutDocument else {
+            return
+        }
+        let clipSize = contentView.bounds.size
+        guard clipSize.width > 0, clipSize.height > 0 else {
+            return
+        }
+
+        isLayingOutDocument = true
+        defer {
+            isLayingOutDocument = false
+        }
+
+        let targetWidth = max(1, clipSize.width)
+        documentContainer.setFrameSize(NSSize(width: targetWidth, height: max(clipSize.height, documentContainer.frame.height)))
+        documentContainer.layoutSubtreeIfNeeded()
+        let fittingHeight = max(1, stackView.fittingSize.height)
+        let documentSize = NSSize(width: targetWidth, height: max(clipSize.height, fittingHeight))
+
+        if !approximatelyEqual(documentContainer.frame.size, documentSize) {
+            documentContainer.setFrameSize(documentSize)
+        }
+        documentContainer.layoutSubtreeIfNeeded()
+        clampScrollPosition()
+    }
+
+    private func makeSeparator() -> NSBox {
+        let separator = NSBox()
+        separator.boxType = .separator
+        separator.translatesAutoresizingMaskIntoConstraints = false
+        separator.heightAnchor.constraint(equalToConstant: 1).isActive = true
+        return separator
+    }
+
+    private func clampScrollPosition() {
+        let maxY = max(0, documentContainer.bounds.height - contentView.bounds.height)
+        let origin = contentView.bounds.origin
+        let clamped = NSPoint(x: 0, y: min(max(0, origin.y), maxY))
+        if origin != clamped {
+            contentView.setBoundsOrigin(clamped)
+            reflectScrolledClipView(contentView)
+        }
+    }
+
+    private func approximatelyEqual(_ lhs: NSSize, _ rhs: NSSize) -> Bool {
+        abs(lhs.width - rhs.width) < 0.5 && abs(lhs.height - rhs.height) < 0.5
+    }
+}
+
+private final class NativeDiscoverSidebarFilterDocumentView: NSView {
+    override var isFlipped: Bool {
+        true
+    }
+}
+
+private final class NativeDiscoverSidebarSectionHeaderView: NSView {
+    private let iconView = NSImageView()
+    private let titleLabel = NSTextField(labelWithString: "")
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: 22)
+    }
+
+    func apply(title: String, systemImage: String) {
+        let localizedTitle = NSLocalizedString(title, comment: "")
+        titleLabel.stringValue = localizedTitle
+        iconView.image = NSImage(systemSymbolName: systemImage, accessibilityDescription: localizedTitle)
+        setAccessibilityLabel(localizedTitle)
+    }
+
+    private func setup() {
+        translatesAutoresizingMaskIntoConstraints = false
+        setAccessibilityElement(true)
+        setAccessibilityRole(.group)
+
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+        iconView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 14, weight: .semibold)
+        iconView.contentTintColor = .secondaryLabelColor
+        iconView.imageScaling = .scaleProportionallyDown
+
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        titleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+        titleLabel.textColor = .labelColor
+        titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.maximumNumberOfLines = 1
+
+        addSubview(iconView)
+        addSubview(titleLabel)
+
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(greaterThanOrEqualToConstant: 22),
+            iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 1),
+            iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            iconView.widthAnchor.constraint(equalToConstant: NativeSidebarFilterMetrics.iconWidth),
+            iconView.heightAnchor.constraint(equalToConstant: NativeSidebarFilterMetrics.iconWidth),
+            titleLabel.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 7),
+            titleLabel.trailingAnchor.constraint(equalTo: trailingAnchor),
+            titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor)
+        ])
     }
 }
 
