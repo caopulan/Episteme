@@ -2909,9 +2909,11 @@ func runUILayoutSourceChecks() throws {
             && librarySource.contains("searchFocusRequestID: model.searchFocusRequestID")
             && libraryToolbarSource.contains("applyFocusIfNeeded")
             && libraryToolbarSource.contains("makeFirstResponder(toolbarView.searchField)")
-            && discoverSource.contains("@FocusState private var isDiscoverSearchFocused")
-            && discoverSource.contains("@FocusState private var isArxivSearchFocused")
-            && discoverSource.contains(".onChange(of: model.searchFocusRequestID)"),
+            && discoverSource.contains("searchFocusRequestID: model.searchFocusRequestID")
+            && discoverSource.contains("isActiveForFocus: model.route == .discover")
+            && discoverSource.contains("isActiveForFocus: model.route == .search")
+            && discoverSource.contains("applyFocusIfNeeded(to searchField")
+            && discoverSource.contains("searchField.window?.makeFirstResponder(searchField)"),
         "Cmd-F should focus the active page search field across Library, Explore, and Search"
     )
     try check(
@@ -3449,10 +3451,22 @@ func runUILayoutSourceChecks() throws {
             && !discoverSource.contains("discoverReturnPaperID"),
         "Discover should record the current visible paper and restore that scroll position when returning from Reader or other app sections"
     )
-    try check(
-        discoverSource.contains("DatePicker(") && discoverSource.contains(".datePickerStyle(.compact)"),
-        "Discover date range controls should open native date picker popovers instead of relying on typed text fields"
-    )
+    if let datePickerRange = discoverSource.range(of: "private struct CompactDiscoverDatePicker: View"),
+       let datePickerEndRange = discoverSource.range(of: "private enum DiscoverDateStrings", range: datePickerRange.upperBound..<discoverSource.endIndex) {
+        let datePickerSource = String(discoverSource[datePickerRange.lowerBound..<datePickerEndRange.lowerBound])
+        try check(
+            datePickerSource.contains("NativeCompactDiscoverDatePicker(")
+                && discoverSource.contains("private struct NativeCompactDiscoverDatePicker: NSViewRepresentable")
+                && discoverSource.contains("private final class NativeCompactDiscoverDatePickerView: NSDatePicker")
+                && discoverSource.contains("datePickerElements = [.yearMonthDay]")
+                && discoverSource.contains("datePickerStyle = .textFieldAndStepper")
+                && !datePickerSource.contains("\n        DatePicker(")
+                && !datePickerSource.contains(".datePickerStyle(.compact)"),
+            "Discover date range controls should use native AppKit NSDatePicker controls"
+        )
+    } else {
+        throw CheckFailure(description: "Discover compact date picker source should remain inspectable")
+    }
     try check(
         discoverSource.contains("[DiscoverQuickRange.today, .last7Days, .last30Days]"),
         "Discover quick ranges should be limited to Today, Last 7 Days, and Last 30 Days"
@@ -3613,16 +3627,56 @@ func runUILayoutSourceChecks() throws {
        let filterButtonRange = discoverSource.range(of: "private func filterButton", range: searchRowRange.upperBound..<discoverSource.endIndex) {
         let searchRowSource = String(discoverSource[searchRowRange.lowerBound..<filterButtonRange.lowerBound])
         try check(
-            searchRowSource.contains("TextField(\"Keyword, method, author, arXiv ID\", text: $model.discoverKeyword)")
+            searchRowSource.contains("DiscoverSearchField(")
+                && searchRowSource.contains("text: $model.discoverKeyword")
+                && discoverSource.contains("private struct DiscoverSearchField: NSViewRepresentable")
+                && discoverSource.contains("private final class NativeDiscoverSearchFieldView: NSSearchField")
+                && discoverSource.contains("private final class DiscoverSearchFieldCoordinator: NSObject, NSSearchFieldDelegate")
+                && discoverSource.contains("doCommandBy commandSelector")
+                && discoverSource.contains("makeFirstResponder(searchField)")
                 && searchRowSource.contains("title: model.isSearchingDiscover ? \"Searching\" : \"Search\"")
                 && searchRowSource.contains("title: \"Process\"")
                 && searchRowSource.contains(".fixedSize(horizontal: true, vertical: false)")
                 && searchRowSource.contains(".frame(maxWidth: .infinity, minHeight: 34)")
+                && !searchRowSource.contains("TextField(")
+                && !searchRowSource.contains(".textFieldStyle(.roundedBorder)")
+                && !searchRowSource.contains(".focused($isDiscoverSearchFocused)")
                 && discoverSource.contains("VStack(alignment: .leading, spacing: 8) {\n                searchAndActionRow\n\n                FlowLayout"),
             "Discover search, Search, Stop, and Process should share one compact row above the filter controls"
         )
     } else {
         try check(false, "Discover should keep the search action row as a distinct source region for layout checks")
+    }
+    if let yearFieldRange = discoverSource.range(of: "private struct ArxivSearchYearField: View"),
+       let yearFieldEndRange = discoverSource.range(of: "private struct DiscoverRouteLoadingPlaceholder", range: yearFieldRange.upperBound..<discoverSource.endIndex) {
+        let yearFieldSource = String(discoverSource[yearFieldRange.lowerBound..<yearFieldEndRange.lowerBound])
+        try check(
+            yearFieldSource.contains("DiscoverSearchField(")
+                && !yearFieldSource.contains("TextField(")
+                && !yearFieldSource.contains(".textFieldStyle(.roundedBorder)"),
+            "Search year filters should use native AppKit text fields"
+        )
+    } else {
+        throw CheckFailure(description: "Search year filter field source should remain inspectable")
+    }
+    if let arxivSearchRange = discoverSource.range(of: "struct ArxivSearchView: View"),
+       let toolbarRange = discoverSource.range(of: "private var toolbar: some View", range: arxivSearchRange.upperBound..<discoverSource.endIndex),
+       let toolbarEndRange = discoverSource.range(of: "private func toggleSearchSortOrder", range: toolbarRange.upperBound..<discoverSource.endIndex) {
+        let arxivSearchToolbarSource = String(discoverSource[toolbarRange.lowerBound..<toolbarEndRange.lowerBound])
+        try check(
+            arxivSearchToolbarSource.contains("DiscoverSearchField(")
+                && arxivSearchToolbarSource.contains("text: $model.arxivSearchQuery")
+                && arxivSearchToolbarSource.contains("DiscoverSortPopup(")
+                && discoverSource.contains("private struct DiscoverSortPopup: NSViewRepresentable")
+                && discoverSource.contains("private final class NativeDiscoverSortPopupButton: NSPopUpButton")
+                && !arxivSearchToolbarSource.contains("TextField(")
+                && !arxivSearchToolbarSource.contains("Picker(\"Sort\"")
+                && !arxivSearchToolbarSource.contains(".pickerStyle(.menu)")
+                && !arxivSearchToolbarSource.contains(".focused($isArxivSearchFocused)"),
+            "Search toolbar query and sort controls should use native AppKit search field and popup controls"
+        )
+    } else {
+        throw CheckFailure(description: "Search toolbar source should remain inspectable")
     }
 
     try check(

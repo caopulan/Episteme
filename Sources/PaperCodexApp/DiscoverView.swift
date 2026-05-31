@@ -49,7 +49,6 @@ struct DiscoverView: View {
     @State private var visibleDiscoverPaperID: String?
     @State private var isRestoringDiscoverScrollPosition = false
     @State private var discoverScrollPositionCommitTask: Task<Void, Never>?
-    @FocusState private var isDiscoverSearchFocused: Bool
 
     private var papers: [ArxivFeedPaper] {
         var result = model.arxivFeed?.papers ?? []
@@ -193,12 +192,6 @@ struct DiscoverView: View {
                         isShowingProcessSelection = false
                     }
                 )
-            }
-            .onChange(of: model.searchFocusRequestID) { _, _ in
-                guard model.route == .discover else {
-                    return
-                }
-                isDiscoverSearchFocused = true
             }
     }
 
@@ -558,15 +551,16 @@ struct DiscoverView: View {
 
     private var searchAndActionRow: some View {
         HStack(spacing: 8) {
-            TextField("Keyword, method, author, arXiv ID", text: $model.discoverKeyword)
-                .textFieldStyle(.roundedBorder)
-                .font(.paperCodexSystem(size: 14))
+            DiscoverSearchField(
+                text: $model.discoverKeyword,
+                placeholder: "Keyword, method, author, arXiv ID",
+                searchFocusRequestID: model.searchFocusRequestID,
+                isActiveForFocus: model.route == .discover
+            ) {
+                model.startDiscoverSearch()
+            }
                 .frame(minWidth: 260, maxWidth: .infinity)
                 .layoutPriority(1)
-                .focused($isDiscoverSearchFocused)
-                .onSubmit {
-                    model.startDiscoverSearch()
-                }
 
             PaperCodexToolbarButton(
                 title: model.isSearchingDiscover ? "Searching" : "Search",
@@ -656,7 +650,6 @@ struct ArxivSearchView: View {
     @State private var paperPendingSave: ArxivFeedPaper?
     @State private var previewPaper: ArxivFeedPaper?
     @State private var isShowingProcessSelection = false
-    @FocusState private var isArxivSearchFocused: Bool
 
     private var papers: [ArxivFeedPaper] {
         var result = model.arxivSearchFeed?.papers ?? []
@@ -764,12 +757,6 @@ struct ArxivSearchView: View {
                     isShowingProcessSelection = false
                 }
             )
-        }
-        .onChange(of: model.searchFocusRequestID) { _, _ in
-            guard model.route == .search else {
-                return
-            }
-            isArxivSearchFocused = true
         }
     }
 
@@ -898,23 +885,19 @@ struct ArxivSearchView: View {
             }
 
             HStack(spacing: 8) {
-                TextField("all:diffusion AND cat:cs.CV", text: $model.arxivSearchQuery)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.paperCodexSystem(size: 14))
+                DiscoverSearchField(
+                    text: $model.arxivSearchQuery,
+                    placeholder: "all:diffusion AND cat:cs.CV",
+                    searchFocusRequestID: model.searchFocusRequestID,
+                    isActiveForFocus: model.route == .search
+                ) {
+                    model.startArxivSearch()
+                }
                     .frame(minWidth: 280, maxWidth: .infinity)
                     .layoutPriority(1)
-                    .focused($isArxivSearchFocused)
-                    .onSubmit {
-                        model.startArxivSearch()
-                    }
 
-                Picker("Sort", selection: $model.arxivSearchSortRawValue) {
-                    Text("Relevance").tag(ArxivAPISort.relevance.rawValue)
-                    Text("Submitted").tag(ArxivAPISort.submittedDate.rawValue)
-                    Text("Updated").tag(ArxivAPISort.lastUpdatedDate.rawValue)
-                }
-                .pickerStyle(.menu)
-                .frame(width: 116)
+                DiscoverSortPopup(selection: $model.arxivSearchSortRawValue)
+                    .frame(width: 116, height: 28)
 
                 PaperCodexIconButton(
                     title: sortOrderTitle,
@@ -1444,12 +1427,286 @@ private struct ArxivSearchYearField: View {
             Text(title)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
-            TextField(placeholder, text: $text)
-                .textFieldStyle(.roundedBorder)
-                .font(.paperCodexSystem(size: 12))
+            DiscoverSearchField(text: $text, placeholder: placeholder)
                 .frame(width: 70)
         }
         .controlSize(.small)
+    }
+}
+
+private struct DiscoverSearchField: NSViewRepresentable {
+    @Binding var text: String
+    var placeholder: String
+    var searchFocusRequestID: UUID?
+    var isActiveForFocus = false
+    var onSubmit: () -> Void = {}
+
+    func makeCoordinator() -> DiscoverSearchFieldCoordinator {
+        DiscoverSearchFieldCoordinator(self)
+    }
+
+    func makeNSView(context: Context) -> NativeDiscoverSearchFieldView {
+        let searchField = NativeDiscoverSearchFieldView()
+        context.coordinator.parent = self
+        context.coordinator.lastSearchFocusRequestID = searchFocusRequestID
+        searchField.delegate = context.coordinator
+        searchField.apply(text: text, placeholder: placeholder)
+        return searchField
+    }
+
+    func updateNSView(_ searchField: NativeDiscoverSearchFieldView, context: Context) {
+        context.coordinator.parent = self
+        context.coordinator.isUpdatingFromSwiftUI = true
+        searchField.apply(text: text, placeholder: placeholder)
+        context.coordinator.isUpdatingFromSwiftUI = false
+        context.coordinator.applyFocusIfNeeded(to: searchField)
+    }
+}
+
+@MainActor private final class DiscoverSearchFieldCoordinator: NSObject, NSSearchFieldDelegate {
+    var parent: DiscoverSearchField
+    var isUpdatingFromSwiftUI = false
+    var lastSearchFocusRequestID: UUID?
+
+    init(_ parent: DiscoverSearchField) {
+        self.parent = parent
+        super.init()
+    }
+
+    func controlTextDidChange(_ notification: Notification) {
+        guard !isUpdatingFromSwiftUI,
+              let searchField = notification.object as? NSSearchField else {
+            return
+        }
+        parent.text = searchField.stringValue
+    }
+
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        guard commandSelector == #selector(NSResponder.insertNewline(_:)) else {
+            return false
+        }
+        parent.onSubmit()
+        return true
+    }
+
+    func applyFocusIfNeeded(to searchField: NativeDiscoverSearchFieldView) {
+        guard let searchFocusRequestID = parent.searchFocusRequestID,
+              searchFocusRequestID != lastSearchFocusRequestID else {
+            return
+        }
+        lastSearchFocusRequestID = searchFocusRequestID
+        guard parent.isActiveForFocus else {
+            return
+        }
+        searchField.window?.makeFirstResponder(searchField)
+    }
+}
+
+private final class NativeDiscoverSearchFieldView: NSSearchField {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: 28)
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+
+    func apply(text: String, placeholder: String) {
+        let fieldEditorHasMarkedText = (currentEditor() as? NSTextView)?.hasMarkedText() == true
+        if stringValue != text && !fieldEditorHasMarkedText {
+            stringValue = text
+        }
+        placeholderString = placeholder
+        toolTip = placeholder
+        setAccessibilityLabel(placeholder)
+    }
+
+    private func setup() {
+        translatesAutoresizingMaskIntoConstraints = false
+        controlSize = .regular
+        font = .systemFont(ofSize: 14)
+        isBordered = true
+        isBezeled = true
+        focusRingType = .default
+        usesSingleLineMode = true
+        lineBreakMode = .byTruncatingTail
+        sendsSearchStringImmediately = false
+        sendsWholeSearchString = true
+    }
+}
+
+private struct DiscoverSortPopup: NSViewRepresentable {
+    @Binding var selection: String
+
+    private let items: [(title: String, value: String)] = [
+        ("Relevance", ArxivAPISort.relevance.rawValue),
+        ("Submitted", ArxivAPISort.submittedDate.rawValue),
+        ("Updated", ArxivAPISort.lastUpdatedDate.rawValue)
+    ]
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(selection: $selection)
+    }
+
+    func makeNSView(context: Context) -> NativeDiscoverSortPopupButton {
+        let popup = NativeDiscoverSortPopupButton()
+        popup.target = context.coordinator
+        popup.action = #selector(Coordinator.selectionChanged(_:))
+        popup.apply(items: items, selection: selection)
+        return popup
+    }
+
+    func updateNSView(_ popup: NativeDiscoverSortPopupButton, context: Context) {
+        context.coordinator.selection = $selection
+        popup.apply(items: items, selection: selection)
+    }
+
+    @MainActor final class Coordinator: NSObject {
+        var selection: Binding<String>
+
+        init(selection: Binding<String>) {
+            self.selection = selection
+            super.init()
+        }
+
+        @objc func selectionChanged(_ sender: NSPopUpButton) {
+            guard let value = sender.selectedItem?.representedObject as? String else {
+                return
+            }
+            selection.wrappedValue = value
+        }
+    }
+}
+
+private final class NativeDiscoverSortPopupButton: NSPopUpButton {
+    private var itemValues: [String] = []
+
+    init() {
+        super.init(frame: .zero, pullsDown: false)
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: 116, height: 28)
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+
+    func apply(items: [(title: String, value: String)], selection: String) {
+        let values = items.map(\.value)
+        if values != itemValues || numberOfItems != items.count {
+            removeAllItems()
+            for item in items {
+                addItem(withTitle: item.title)
+                lastItem?.representedObject = item.value
+            }
+            itemValues = values
+        }
+
+        if let index = items.firstIndex(where: { $0.value == selection }) {
+            selectItem(at: index)
+        } else if !items.isEmpty {
+            selectItem(at: 0)
+        }
+        setAccessibilityLabel("Sort")
+        setAccessibilityValue(selectedItem?.title ?? "")
+        toolTip = selectedItem?.title
+    }
+
+    private func setup() {
+        translatesAutoresizingMaskIntoConstraints = false
+        controlSize = .regular
+        font = .systemFont(ofSize: 13)
+        focusRingType = .none
+    }
+}
+
+private struct NativeCompactDiscoverDatePicker: NSViewRepresentable {
+    var title: String
+    @Binding var selection: Date
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(selection: $selection)
+    }
+
+    func makeNSView(context: Context) -> NativeCompactDiscoverDatePickerView {
+        let datePicker = NativeCompactDiscoverDatePickerView()
+        datePicker.target = context.coordinator
+        datePicker.action = #selector(Coordinator.dateChanged(_:))
+        datePicker.apply(title: title, date: selection)
+        return datePicker
+    }
+
+    func updateNSView(_ datePicker: NativeCompactDiscoverDatePickerView, context: Context) {
+        context.coordinator.selection = $selection
+        datePicker.apply(title: title, date: selection)
+    }
+
+    @MainActor final class Coordinator: NSObject {
+        var selection: Binding<Date>
+
+        init(selection: Binding<Date>) {
+            self.selection = selection
+            super.init()
+        }
+
+        @objc func dateChanged(_ sender: NSDatePicker) {
+            selection.wrappedValue = sender.dateValue
+        }
+    }
+}
+
+private final class NativeCompactDiscoverDatePickerView: NSDatePicker {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: 118, height: 28)
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+
+    func apply(title: String, date: Date) {
+        if abs(dateValue.timeIntervalSince(date)) > 0.5 {
+            dateValue = date
+        }
+        toolTip = title
+        setAccessibilityLabel(title)
+        setAccessibilityValue(DiscoverDateStrings.string(from: dateValue))
+    }
+
+    private func setup() {
+        translatesAutoresizingMaskIntoConstraints = false
+        datePickerElements = [.yearMonthDay]
+        datePickerStyle = .textFieldAndStepper
+        controlSize = .small
+        font = .monospacedDigitSystemFont(ofSize: 12.5, weight: .medium)
+        isBezeled = true
+        drawsBackground = true
+        focusRingType = .default
     }
 }
 
@@ -1675,10 +1932,7 @@ private struct CompactDiscoverDatePicker: View {
     }
 
     var body: some View {
-        DatePicker(LocalizedStringKey(title), selection: dateBinding, displayedComponents: .date)
-            .datePickerStyle(.compact)
-            .labelsHidden()
-            .font(.paperCodexSystem(size: 12.5, weight: .medium).monospacedDigit())
+        NativeCompactDiscoverDatePicker(title: title, selection: dateBinding)
             .frame(width: 118)
             .help(title)
     }
