@@ -2276,6 +2276,28 @@ func runUILayoutSourceChecks() throws {
     } else {
         throw CheckFailure(description: "Discover quick range button source should remain inspectable")
     }
+    if let discoverMenuRange = discoverSource.range(of: "private struct QuickRangeButtons: View"),
+       let discoverMenuEndRange = discoverSource.range(of: "private struct ArxivCacheProgressStrip", range: discoverMenuRange.upperBound..<discoverSource.endIndex) {
+        let discoverMenuSource = String(discoverSource[discoverMenuRange.lowerBound..<discoverMenuEndRange.lowerBound])
+        try check(
+            discoverMenuSource.contains("DiscoverQuickRangePopup(")
+                && discoverMenuSource.contains("NativeDiscoverMenuButton(")
+                && discoverMenuSource.contains("NativeDiscoverMenuButtonRepresentable(")
+                && discoverMenuSource.contains("private struct NativeDiscoverMenuButtonRepresentable: NSViewRepresentable")
+                && discoverMenuSource.contains("private final class NativeDiscoverMenuButtonView: NSPopUpButton")
+                && discoverMenuSource.contains("super.init(frame: .zero, pullsDown:")
+                && discoverMenuSource.contains("menu?.addItem(.separator())")
+                && discoverMenuSource.contains("selectedItem?.representedObject as? String")
+                && discoverMenuSource.contains("override func mouseDown(with event: NSEvent)")
+                && !discoverMenuSource.contains("\n            Menu {")
+                && !discoverMenuSource.contains("\n        Menu {")
+                && !discoverMenuSource.contains(".menuStyle(.borderlessButton)")
+                && !discoverMenuSource.contains("private struct DateMenuButton: View"),
+            "Discover top toolbar menus should use native AppKit NSPopUpButton menus instead of SwiftUI Menu"
+        )
+    } else {
+        throw CheckFailure(description: "Discover top toolbar menu source should remain inspectable")
+    }
     if let processSheetRange = discoverSource.range(of: "private struct DiscoverProcessActionSheet: View"),
        let processSheetEndRange = discoverSource.range(of: "private struct DiscoverProcessActionRow", range: processSheetRange.upperBound..<discoverSource.endIndex) {
         let processSheetSource = String(discoverSource[processSheetRange.lowerBound..<processSheetEndRange.lowerBound])

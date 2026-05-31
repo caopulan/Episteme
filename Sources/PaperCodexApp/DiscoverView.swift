@@ -1981,20 +1981,7 @@ private struct QuickRangeButtons: View {
             HStack(spacing: 5) {
                 quickButtons
             }
-            Menu {
-                ForEach(ranges) { range in
-                    Button(range.title) {
-                        onSelect(range)
-                    }
-                }
-            } label: {
-                Label("Ranges", systemImage: "calendar.badge.clock")
-                    .font(.paperCodexSystem(size: 12.5, weight: .semibold))
-                    .padding(.horizontal, 10)
-                    .frame(height: 28)
-            }
-            .menuStyle(.borderlessButton)
-            .fixedSize()
+            DiscoverQuickRangePopup(ranges: ranges, onSelect: onSelect)
         }
     }
 
@@ -2015,6 +2002,34 @@ private struct DiscoverQuickRangeButton: View {
         PaperCodexQuickRangeButton(title: range.title) {
             action()
         }
+    }
+}
+
+private struct DiscoverQuickRangePopup: View {
+    var ranges: [DiscoverQuickRange]
+    var onSelect: (DiscoverQuickRange) -> Void
+
+    private var items: [DiscoverMenuItem] {
+        ranges.map { range in
+            DiscoverMenuItem(title: range.title, value: range.rawValue)
+        }
+    }
+
+    var body: some View {
+        NativeDiscoverMenuButton(
+            labelTitle: "Ranges",
+            systemImage: "calendar.badge.clock",
+            items: items,
+            selectedValue: nil,
+            accessibilityLabel: "Date ranges"
+        ) { value in
+            guard let range = ranges.first(where: { $0.rawValue == value }) else {
+                return
+            }
+            onSelect(range)
+        }
+        .frame(width: 118, height: 28)
+        .fixedSize()
     }
 }
 
@@ -2209,6 +2224,218 @@ private struct DiscoverProcessActionRow: View {
     var body: some View {
         DiscoverProcessActionToggleRow(action: action, isSelected: $isSelected)
             .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
+    }
+}
+
+private struct DiscoverMenuItem: Equatable {
+    enum Kind: Equatable {
+        case action
+        case separator
+        case heading
+    }
+
+    var title: String
+    var value: String?
+    var kind: Kind
+
+    init(title: String, value: String) {
+        self.title = title
+        self.value = value
+        self.kind = .action
+    }
+
+    static func separator() -> DiscoverMenuItem {
+        DiscoverMenuItem(title: "", value: nil, kind: .separator)
+    }
+
+    static func heading(_ title: String) -> DiscoverMenuItem {
+        DiscoverMenuItem(title: title, value: nil, kind: .heading)
+    }
+
+    private init(title: String, value: String?, kind: Kind) {
+        self.title = title
+        self.value = value
+        self.kind = kind
+    }
+}
+
+private struct NativeDiscoverMenuButton: View {
+    var labelTitle: String?
+    var systemImage: String?
+    var items: [DiscoverMenuItem]
+    var selectedValue: String?
+    var accessibilityLabel: String
+    var onSelect: (String) -> Void
+
+    var body: some View {
+        NativeDiscoverMenuButtonRepresentable(
+            labelTitle: labelTitle,
+            systemImage: systemImage,
+            items: items,
+            selectedValue: selectedValue,
+            accessibilityLabel: accessibilityLabel,
+            onSelect: onSelect
+        )
+    }
+}
+
+private struct NativeDiscoverMenuButtonRepresentable: NSViewRepresentable {
+    var labelTitle: String?
+    var systemImage: String?
+    var items: [DiscoverMenuItem]
+    var selectedValue: String?
+    var accessibilityLabel: String
+    var onSelect: (String) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onSelect: onSelect, isPullDown: labelTitle != nil)
+    }
+
+    func makeNSView(context: Context) -> NativeDiscoverMenuButtonView {
+        let popup = NativeDiscoverMenuButtonView(pullsDown: labelTitle != nil)
+        popup.target = context.coordinator
+        popup.action = #selector(Coordinator.selectionChanged(_:))
+        popup.apply(
+            labelTitle: labelTitle,
+            systemImage: systemImage,
+            items: items,
+            selectedValue: selectedValue,
+            accessibilityLabel: accessibilityLabel
+        )
+        return popup
+    }
+
+    func updateNSView(_ popup: NativeDiscoverMenuButtonView, context: Context) {
+        context.coordinator.onSelect = onSelect
+        context.coordinator.isPullDown = labelTitle != nil
+        popup.apply(
+            labelTitle: labelTitle,
+            systemImage: systemImage,
+            items: items,
+            selectedValue: selectedValue,
+            accessibilityLabel: accessibilityLabel
+        )
+    }
+
+    @MainActor final class Coordinator: NSObject {
+        var onSelect: (String) -> Void
+        var isPullDown: Bool
+
+        init(onSelect: @escaping (String) -> Void, isPullDown: Bool) {
+            self.onSelect = onSelect
+            self.isPullDown = isPullDown
+            super.init()
+        }
+
+        @objc func selectionChanged(_ sender: NSPopUpButton) {
+            guard let value = sender.selectedItem?.representedObject as? String else {
+                if isPullDown {
+                    sender.selectItem(at: 0)
+                }
+                return
+            }
+            onSelect(value)
+            if isPullDown {
+                sender.selectItem(at: 0)
+            }
+        }
+    }
+}
+
+private final class NativeDiscoverMenuButtonView: NSPopUpButton {
+    private let isPullDownMenu: Bool
+    private var renderedItems: [DiscoverMenuItem] = []
+    private var renderedLabelTitle: String?
+
+    init(pullsDown: Bool) {
+        self.isPullDownMenu = pullsDown
+        super.init(frame: .zero, pullsDown: pullsDown)
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: 28)
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.06
+            animator().alphaValue = 0.72
+        }
+        super.mouseDown(with: event)
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.08
+            animator().alphaValue = 1
+        }
+    }
+
+    func apply(
+        labelTitle: String?,
+        systemImage: String?,
+        items: [DiscoverMenuItem],
+        selectedValue: String?,
+        accessibilityLabel: String
+    ) {
+        if items != renderedItems || labelTitle != renderedLabelTitle || numberOfItems == 0 {
+            removeAllItems()
+            if let labelTitle {
+                addItem(withTitle: labelTitle)
+                lastItem?.image = systemImage.flatMap { NSImage(systemSymbolName: $0, accessibilityDescription: labelTitle) }
+                lastItem?.representedObject = nil
+            }
+            for item in items {
+                switch item.kind {
+                case .separator:
+                    menu?.addItem(.separator())
+                case .heading:
+                    let menuItem = NSMenuItem(title: item.title, action: nil, keyEquivalent: "")
+                    menuItem.isEnabled = false
+                    menu?.addItem(menuItem)
+                case .action:
+                    addItem(withTitle: item.title)
+                    lastItem?.representedObject = item.value
+                }
+            }
+            renderedItems = items
+            renderedLabelTitle = labelTitle
+        }
+
+        for item in itemArray {
+            guard let value = item.representedObject as? String else {
+                item.state = .off
+                continue
+            }
+            item.state = value == selectedValue ? .on : .off
+        }
+
+        if isPullDownMenu {
+            selectItem(at: 0)
+        } else if let selectedValue,
+                  let selectedItem = itemArray.first(where: { $0.representedObject as? String == selectedValue }) {
+            select(selectedItem)
+        } else if let firstSelectable = itemArray.first(where: { $0.representedObject is String }) {
+            select(firstSelectable)
+        }
+        setAccessibilityLabel(accessibilityLabel)
+        setAccessibilityValue(selectedItem?.title ?? labelTitle ?? "")
+        toolTip = accessibilityLabel
+    }
+
+    private func setup() {
+        translatesAutoresizingMaskIntoConstraints = false
+        controlSize = .regular
+        font = .systemFont(ofSize: 12.5, weight: .semibold)
+        focusRingType = .default
+        setContentHuggingPriority(.defaultHigh, for: .horizontal)
+        setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
     }
 }
 
@@ -2668,26 +2895,20 @@ private struct DiscoverCategoryMenu: View {
     var selected: String
     var onSelect: (String) -> Void
 
+    private var items: [DiscoverMenuItem] {
+        categories.map { DiscoverMenuItem(title: $0, value: $0) }
+    }
+
     var body: some View {
-        Menu {
-            ForEach(categories, id: \.self) { category in
-                Button {
-                    onSelect(category)
-                } label: {
-                    if category == selected {
-                        Label(category, systemImage: "checkmark")
-                    } else {
-                        Text(category)
-                    }
-                }
-            }
-        } label: {
-            Label(selected, systemImage: "tray.full")
-                .font(.paperCodexSystem(size: 12.5, weight: .semibold))
-                .padding(.horizontal, 10)
-                .frame(height: 28)
-        }
-        .menuStyle(.borderlessButton)
+        NativeDiscoverMenuButton(
+            labelTitle: nil,
+            systemImage: "tray.full",
+            items: items,
+            selectedValue: selected,
+            accessibilityLabel: "Primary arXiv category",
+            onSelect: onSelect
+        )
+        .frame(minWidth: 82, idealWidth: 94, maxWidth: 130, minHeight: 28, maxHeight: 28)
         .fixedSize()
         .help("Primary arXiv category")
     }
@@ -2713,109 +2934,47 @@ private struct SimilaritySourceMenu: View {
         }
     }
 
-    var body: some View {
-        Menu {
-            Button {
-                selectSources([])
-            } label: {
-                if model.discoverSelectedSimilaritySourceIDs.isEmpty {
-                    Label("Settings default", systemImage: "checkmark")
-                } else {
-                    Text("Settings default")
-                }
-            }
-            if !model.categories.isEmpty {
-                Divider()
-                Section("Folders") {
-                    ForEach(model.categories) { category in
-                        Button {
-                            selectSources(["category:\(category.id)"])
-                        } label: {
-                            if model.discoverSelectedSimilaritySourceIDs == ["category:\(category.id)"] {
-                                Label(category.name, systemImage: "checkmark")
-                            } else {
-                                Text(category.name)
-                            }
-                        }
-                    }
-                }
-            }
-        } label: {
-            Label(selectedTitle, systemImage: "point.3.connected.trianglepath.dotted")
-                .font(.paperCodexSystem(size: 12.5, weight: .semibold))
-                .padding(.horizontal, 10)
-                .frame(height: 28)
+    private var selectedValue: String {
+        if model.discoverSelectedSimilaritySourceIDs.count == 1 {
+            return model.discoverSelectedSimilaritySourceIDs[0]
         }
-        .menuStyle(.borderlessButton)
+        if model.discoverSelectedSimilaritySourceIDs.isEmpty {
+            return ""
+        }
+        return "__selected_sources__"
+    }
+
+    private var items: [DiscoverMenuItem] {
+        var result = [DiscoverMenuItem(title: "Settings default", value: "")]
+        if selectedValue == "__selected_sources__" {
+            result.append(DiscoverMenuItem(title: selectedTitle, value: "__selected_sources__"))
+        }
+        if !model.categories.isEmpty {
+            result.append(.separator())
+            result.append(.heading("Folders"))
+            result += model.categories.map { category in
+                DiscoverMenuItem(title: category.name, value: "category:\(category.id)")
+            }
+        }
+        return result
+    }
+
+    var body: some View {
+        NativeDiscoverMenuButton(
+            labelTitle: nil,
+            systemImage: "point.3.connected.trianglepath.dotted",
+            items: items,
+            selectedValue: selectedValue,
+            accessibilityLabel: "Similarity source"
+        ) { value in
+            if value == "__selected_sources__" {
+                return
+            }
+            selectSources(value.isEmpty ? [] : [value])
+        }
+        .frame(minWidth: 118, idealWidth: 148, maxWidth: 220, minHeight: 28, maxHeight: 28)
         .fixedSize()
         .help("Similarity source")
-    }
-}
-
-private struct DateMenuButton: View {
-    @EnvironmentObject private var model: AppModel
-    @State private var isHovering = false
-
-    var body: some View {
-        Menu {
-            Button {
-                Task {
-                    await model.refreshArxivDates()
-                }
-            } label: {
-                Label(model.isRefreshingArxivDates ? "Refreshing dates" : "Refresh dates", systemImage: "arrow.clockwise")
-            }
-            Divider()
-            ForEach(Array(model.arxivDates.reversed()), id: \.self) { date in
-                Button {
-                    Task {
-                        await model.loadArxivFeed(date: date)
-                    }
-                } label: {
-                    if date == model.selectedArxivDate {
-                        Label(date, systemImage: "checkmark")
-                    } else {
-                        Text(date)
-                    }
-                }
-            }
-        } label: {
-            HStack(spacing: 7) {
-                Image(systemName: model.isRefreshingArxivDates ? "arrow.clockwise.circle" : "calendar")
-                Text(model.selectedArxivDate ?? "Date")
-                    .monospacedDigit()
-                Image(systemName: "chevron.down")
-                    .font(.paperCodexSystem(size: 10, weight: .semibold))
-                    .foregroundStyle(.secondary)
-            }
-            .font(.paperCodexSystem(size: 12.5, weight: .semibold))
-            .foregroundStyle(isHovering ? Color.accentColor : Color.primary.opacity(0.84))
-            .padding(.horizontal, 10)
-            .frame(height: 28)
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(isHovering ? Color.accentColor.opacity(0.11) : Color(nsColor: .controlBackgroundColor))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(isHovering ? Color.accentColor.opacity(0.36) : Color.black.opacity(0.10), lineWidth: 1)
-                    )
-            )
-            .shadow(color: isHovering ? Color.accentColor.opacity(0.14) : .clear, radius: 7, y: 3)
-            .scaleEffect(isHovering ? 1.025 : 1)
-        }
-        .menuStyle(.borderlessButton)
-        .fixedSize()
-        .help("Choose feed date")
-        .simultaneousGesture(TapGesture().onEnded {
-            Task {
-                await model.refreshArxivDates()
-            }
-        })
-        .onHover { hovering in
-            withAnimation(.easeOut(duration: 0.12)) {
-                isHovering = hovering
-            }
-        }
     }
 }
 
