@@ -1354,66 +1354,175 @@ private final class NativeSidebarFilterButtonView: NSButton {
 }
 
 private struct DiscoverFilterChip: View {
-    @State private var isHovering = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var title: String
     var onRemove: () -> Void
 
     var body: some View {
-        Button(action: onRemove) {
-            Label(title, systemImage: "xmark.circle.fill")
-                .font(.caption.weight(.medium))
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-        }
-        .buttonStyle(DiscoverFilterChipStyle(isHovering: isHovering))
+        NativeDiscoverFilterChipButton(title: title, reduceMotion: reduceMotion, action: onRemove)
+            .fixedSize(horizontal: true, vertical: true)
         .help("Remove \(title) filter")
-        .onHover { hovering in
-            withAnimation(PaperCodexMotion.hover) {
-                isHovering = hovering
-            }
+        .accessibilityLabel("Remove \(title) filter")
+    }
+}
+
+private struct NativeDiscoverFilterChipButton: NSViewRepresentable {
+    var title: String
+    var reduceMotion: Bool
+    var action: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(action: action)
+    }
+
+    func makeNSView(context: Context) -> NativeDiscoverFilterChipButtonView {
+        let button = NativeDiscoverFilterChipButtonView()
+        button.target = context.coordinator
+        button.action = #selector(Coordinator.performAction(_:))
+        button.apply(title: title, reduceMotion: reduceMotion)
+        return button
+    }
+
+    func updateNSView(_ button: NativeDiscoverFilterChipButtonView, context: Context) {
+        context.coordinator.action = action
+        button.apply(title: title, reduceMotion: reduceMotion)
+    }
+
+    @MainActor final class Coordinator: NSObject {
+        var action: () -> Void
+
+        init(action: @escaping () -> Void) {
+            self.action = action
+            super.init()
+        }
+
+        @objc func performAction(_ sender: NSButton) {
+            action()
         }
     }
 }
 
-private struct DiscoverFilterChipStyle: ButtonStyle {
-    var isHovering: Bool
+private final class NativeDiscoverFilterChipButtonView: NSButton {
+    private var trackingAreaToken: NSTrackingArea?
+    private var reduceMotion = false
+    private var isHovering = false
+    private var isPressed = false
 
-    func makeBody(configuration: Configuration) -> some View {
-        let isPressed = configuration.isPressed
-        configuration.label
-            .foregroundStyle(Color.accentColor.opacity(isPressed ? 1 : (isHovering ? 0.96 : 0.88)))
-            .background(
-                Capsule()
-                    .fill(backgroundFill(isPressed: isPressed))
-            )
-            .overlay(
-                Capsule()
-                    .stroke(borderColor(isPressed: isPressed), lineWidth: isPressed || isHovering ? 1 : 0)
-            )
-            .shadow(color: shadowColor(isPressed: isPressed), radius: isPressed ? 3 : 5, y: isPressed ? 1 : 2)
-            .scaleEffect(isPressed ? 0.965 : (isHovering ? 1.025 : 1), anchor: .center)
-            .contentShape(Capsule())
-            .animation(PaperCodexMotion.press, value: configuration.isPressed)
-            .animation(PaperCodexMotion.hover, value: isHovering)
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
     }
 
-    private func backgroundFill(isPressed: Bool) -> Color {
-        if isPressed {
-            return Color.accentColor.opacity(0.18)
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override var intrinsicContentSize: NSSize {
+        let textWidth = (title as NSString).size(withAttributes: [.font: font ?? .systemFont(ofSize: 11, weight: .medium)]).width
+        return NSSize(width: ceil(textWidth) + 34, height: 23)
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingAreaToken {
+            removeTrackingArea(trackingAreaToken)
         }
-        return Color.accentColor.opacity(isHovering ? 0.14 : 0.10)
+        let options: NSTrackingArea.Options = [.activeInKeyWindow, .mouseEnteredAndExited, .inVisibleRect]
+        let area = NSTrackingArea(rect: bounds, options: options, owner: self, userInfo: nil)
+        addTrackingArea(area)
+        trackingAreaToken = area
     }
 
-    private func borderColor(isPressed: Bool) -> Color {
-        if isPressed {
-            return Color.accentColor.opacity(0.56)
+    override func mouseEntered(with event: NSEvent) {
+        isHovering = true
+        updateAppearance()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHovering = false
+        isPressed = false
+        updateAppearance()
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        isPressed = true
+        updateAppearance()
+        super.mouseDown(with: event)
+        isPressed = false
+        updateAppearance()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        updateAppearance()
+    }
+
+    func apply(title: String, reduceMotion: Bool) {
+        self.title = title
+        self.reduceMotion = reduceMotion
+        toolTip = "Remove \(title) filter"
+        setAccessibilityLabel("Remove \(title) filter")
+        invalidateIntrinsicContentSize()
+        updateAppearance()
+    }
+
+    private func setup() {
+        translatesAutoresizingMaskIntoConstraints = false
+        wantsLayer = true
+        isBordered = false
+        bezelStyle = .regularSquare
+        setButtonType(.momentaryChange)
+        focusRingType = .none
+        font = .systemFont(ofSize: 11, weight: .medium)
+        alignment = .center
+        imagePosition = .imageLeading
+        imageScaling = .scaleProportionallyDown
+        image = NSImage(systemSymbolName: "xmark.circle.fill", accessibilityDescription: nil)
+        image?.isTemplate = true
+        layer?.cornerRadius = 11.5
+        layer?.masksToBounds = false
+        setContentHuggingPriority(.defaultHigh, for: .horizontal)
+        setContentCompressionResistancePriority(.required, for: .horizontal)
+        updateAppearance()
+    }
+
+    private func updateAppearance() {
+        let accent = NSColor.controlAccentColor
+        let foreground = accent.withAlphaComponent(isPressed ? 1 : (isHovering ? 0.96 : 0.88))
+        attributedTitle = NSAttributedString(
+            string: title,
+            attributes: [
+                .font: font ?? .systemFont(ofSize: 11, weight: .medium),
+                .foregroundColor: foreground
+            ]
+        )
+        contentTintColor = foreground
+        layer?.backgroundColor = accent.withAlphaComponent(isPressed ? 0.18 : (isHovering ? 0.14 : 0.10)).cgColor
+        layer?.borderWidth = isPressed || isHovering ? 1 : 0
+        layer?.borderColor = accent.withAlphaComponent(isPressed ? 0.56 : 0.36).cgColor
+        layer?.shadowColor = accent.cgColor
+        layer?.shadowOpacity = isPressed ? 0.10 : (isHovering ? 0.13 : 0)
+        layer?.shadowRadius = isPressed ? 3 : 5
+        layer?.shadowOffset = CGSize(width: 0, height: isPressed ? -1 : -2)
+
+        let scale: CGFloat
+        if reduceMotion {
+            scale = 1
+        } else if isPressed {
+            scale = 0.965
+        } else {
+            scale = isHovering ? 1.025 : 1
         }
-        return Color.accentColor.opacity(isHovering ? 0.36 : 0)
-    }
-
-    private func shadowColor(isPressed: Bool) -> Color {
-        isPressed || isHovering ? Color.accentColor.opacity(isPressed ? 0.10 : 0.13) : .clear
+        CATransaction.begin()
+        CATransaction.setDisableActions(reduceMotion)
+        CATransaction.setAnimationDuration(reduceMotion ? 0 : (isPressed ? 0.05 : 0.12))
+        layer?.transform = CATransform3DMakeScale(scale, scale, 1)
+        CATransaction.commit()
     }
 }
 
@@ -2103,10 +2212,10 @@ private struct DiscoverProcessActionSheet: View {
 
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 8) {
-                    Button("Select All") {
+                    PaperCodexPanelButton(title: "Select All", systemImage: "checkmark.circle") {
                         selectedActions = Set(DiscoverProcessAction.allCases)
                     }
-                    Button("Clear") {
+                    PaperCodexPanelButton(title: "Clear", systemImage: "xmark.circle") {
                         selectedActions = []
                     }
                     Spacer()
@@ -2141,14 +2250,13 @@ private struct DiscoverProcessActionSheet: View {
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.secondary)
                         Spacer()
-                        Button {
+                        PaperCodexPanelButton(
+                            title: isRefreshingModels ? "Refreshing" : "Refresh Models",
+                            systemImage: "arrow.clockwise",
+                            disabled: isRefreshingModels
+                        ) {
                             onRefreshModels()
-                        } label: {
-                            Label(isRefreshingModels ? "Refreshing" : "Refresh Models", systemImage: "arrow.clockwise")
                         }
-                        .buttonStyle(.borderless)
-                        .controlSize(.small)
-                        .disabled(isRefreshingModels)
                     }
 
                     HStack(spacing: 10) {

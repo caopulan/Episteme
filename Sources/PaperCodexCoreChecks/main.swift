@@ -2230,13 +2230,17 @@ func runUILayoutSourceChecks() throws {
        let filterChipEndRange = discoverSource.range(of: "private struct ArxivSearchYearField", range: filterChipRange.upperBound..<discoverSource.endIndex) {
         let filterChipSource = String(discoverSource[filterChipRange.lowerBound..<filterChipEndRange.lowerBound])
         try check(
-            filterChipSource.contains("@State private var isHovering = false")
-                && filterChipSource.contains(".buttonStyle(DiscoverFilterChipStyle(")
-                && filterChipSource.contains("private struct DiscoverFilterChipStyle: ButtonStyle")
-                && filterChipSource.contains("configuration.isPressed")
-                && filterChipSource.contains("PaperCodexMotion.press")
+            filterChipSource.contains("NativeDiscoverFilterChipButton(")
+                && filterChipSource.contains("private struct NativeDiscoverFilterChipButton: NSViewRepresentable")
+                && filterChipSource.contains("private final class NativeDiscoverFilterChipButtonView: NSButton")
+                && filterChipSource.contains("override func mouseDown(with event: NSEvent)")
+                && filterChipSource.contains("isPressed = true")
+                && filterChipSource.contains("isHovering = true")
+                && filterChipSource.contains("CATransaction.setAnimationDuration")
+                && filterChipSource.contains("contentTintColor = foreground")
+                && !filterChipSource.contains("private struct DiscoverFilterChipStyle: ButtonStyle")
                 && !filterChipSource.contains(".buttonStyle(.plain)"),
-            "Discover and Search active filter chips should provide immediate pressed feedback before list recalculation"
+            "Discover and Search active filter chips should use native AppKit buttons with immediate pressed feedback before list recalculation"
         )
     } else {
         throw CheckFailure(description: "Discover active filter chip source should remain inspectable")
@@ -3592,6 +3596,19 @@ func runUILayoutSourceChecks() throws {
     try check(
         discoverSource.contains("DiscoverProcessActionSheet"),
         "Discover Process Results should open an action sheet before starting processing"
+    )
+    try check(
+        !discoverSource.contains("\n        Button(")
+            && !discoverSource.contains("\n                    Button(")
+            && !discoverSource.contains("\n                        Button {")
+            && !discoverSource.contains("private struct DiscoverFilterChipStyle: ButtonStyle")
+            && discoverSource.contains("NativeDiscoverFilterChipButton(")
+            && discoverSource.contains("private struct NativeDiscoverFilterChipButton: NSViewRepresentable")
+            && discoverSource.contains("private final class NativeDiscoverFilterChipButtonView: NSButton")
+            && discoverSource.contains("PaperCodexPanelButton(title: \"Select All\", systemImage: \"checkmark.circle\")")
+            && discoverSource.contains("PaperCodexPanelButton(title: \"Clear\", systemImage: \"xmark.circle\")")
+            && discoverSource.contains("PaperCodexPanelButton(\n                            title: isRefreshingModels ? \"Refreshing\" : \"Refresh Models\""),
+        "Discover should use AppKit-backed buttons for filter chips and process-sheet actions"
     )
     try check(
         appModelSource.contains("enum DiscoverProcessAction")
