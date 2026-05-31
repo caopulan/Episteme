@@ -422,6 +422,23 @@ final class AppModel: ObservableObject {
         set { libraryStore.libraryDerivedState = newValue }
     }
 
+    func libraryPaperListState(
+        sortRawValue: String,
+        sortAscending: Bool,
+        includeSubfolders: Bool
+    ) -> LibraryPaperListState {
+        libraryStore.paperListState(
+            request: LibraryPaperListRequest(
+                selectedCategoryID: librarySelectedCategoryID,
+                selectedTagID: librarySelectedTagID,
+                searchText: librarySearchText,
+                sortRawValue: sortRawValue,
+                sortAscending: sortAscending,
+                includeSubfolders: includeSubfolders
+            )
+        )
+    }
+
     var selectedLibraryPaper: Paper? {
         get { libraryStore.selectedLibraryPaper }
         set { libraryStore.selectedLibraryPaper = newValue }

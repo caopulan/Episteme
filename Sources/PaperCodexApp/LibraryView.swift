@@ -65,8 +65,16 @@ struct LibraryView: View {
         nonmutating set { model.selectedLibrarySurface = newValue }
     }
 
+    private var currentPaperListState: LibraryPaperListState {
+        model.libraryPaperListState(
+            sortRawValue: librarySortRawValue,
+            sortAscending: librarySortAscending,
+            includeSubfolders: libraryIncludeSubfolders
+        )
+    }
+
     private var filteredPaperIDs: [String] {
-        makePaperListState().paperIDs
+        currentPaperListState.paperIDs
     }
 
     private var activePaperSurfaceFilteredPaperIDs: [String] {
@@ -78,7 +86,7 @@ struct LibraryView: View {
     }
 
     private var sortedPapers: [Paper] {
-        makePaperListState().papers
+        currentPaperListState.papers
     }
 
     private var selectedPaperIDsInOrder: [String] {
@@ -109,47 +117,6 @@ struct LibraryView: View {
                 isSelected: selectedLibrarySurface == .papers && selectedTagID == tag.id
             )
         }
-    }
-
-    private func makePaperListState() -> LibraryPaperListState {
-        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        let derivedState = model.libraryDerivedState
-        var paperIDFilter: Set<String>?
-
-        if let selectedCategoryID {
-            paperIDFilter = derivedState.paperIDsForCategoryFilter(
-                selectedCategoryID,
-                includeDescendants: libraryIncludeSubfolders
-            )
-        }
-
-        if let selectedTagID {
-            let tagPaperIDs = derivedState.paperIDsForTag(selectedTagID)
-            if let existingFilter = paperIDFilter {
-                paperIDFilter = existingFilter.intersection(tagPaperIDs)
-            } else {
-                paperIDFilter = tagPaperIDs
-            }
-        }
-
-        var papers = model.papers
-        if let paperIDFilter {
-            papers = papers.filter { paperIDFilter.contains($0.id) }
-        }
-        if !query.isEmpty {
-            papers = papers.filter { paper in
-                derivedState.matchesSearch(paperID: paper.id, query: query)
-            }
-        }
-
-        let option = LibrarySortOption(rawValue: librarySortRawValue) ?? .addedNewest
-        let sortedPapers = option.sorted(papers, ascending: librarySortAscending)
-        return LibraryPaperListState(
-            papers: sortedPapers,
-            paperIDs: sortedPapers.map(\.id),
-            readablePaperIDs: sortedPapers.filter { !$0.isArxivImportPlaceholder }.map(\.id),
-            hasActiveFilters: selectedCategoryID != nil || selectedTagID != nil || !query.isEmpty
-        )
     }
 
     var body: some View {
@@ -484,7 +451,7 @@ struct LibraryView: View {
     }
 
     private var paperList: some View {
-        let listState = makePaperListState()
+        let listState = currentPaperListState
         return VStack(alignment: .leading, spacing: 16) {
             LibraryNativeToolbarView(
                 searchText: searchTextBinding,
@@ -2857,13 +2824,6 @@ private final class NativeLibraryRootFolderSelectionButtonView: NSButton {
     private static func localized(_ key: String) -> String {
         NSLocalizedString(key, comment: "")
     }
-}
-
-private struct LibraryPaperListState {
-    var papers: [Paper]
-    var paperIDs: [String]
-    var readablePaperIDs: [String]
-    var hasActiveFilters: Bool
 }
 
 private struct LibraryCategoryTreeSnapshot {

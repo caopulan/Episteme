@@ -1043,6 +1043,14 @@ func runUILayoutSourceChecks() throws {
         "library list and inspector panes should use a native AppKit split view instead of SwiftUI HSplitView"
     )
     try check(
+        libraryFeatureStoreSource.contains("func paperListState(")
+            && libraryFeatureStoreSource.contains("cachedPaperListRequest")
+            && appModelSource.contains("func libraryPaperListState(")
+            && librarySource.contains("model.libraryPaperListState(")
+            && !librarySource.contains("private func makePaperListState()"),
+        "library paper filtering and sorting should be cached in LibraryFeatureStore instead of recomputed in the SwiftUI view hot path"
+    )
+    try check(
         librarySource.contains("LibraryRootFolderRow")
             && librarySource.contains("LibraryNativeToolbarView(")
             && librarySource.contains("LibraryPaperListState")
@@ -1054,7 +1062,7 @@ func runUILayoutSourceChecks() throws {
         "library folders should keep search, scope, count, and reading actions in one native inline toolbar without a breadcrumb path"
     )
     if let rootFolderRange = librarySource.range(of: "private struct LibraryRootFolderRow: View"),
-       let rootFolderEndRange = librarySource.range(of: "private struct LibraryPaperListState", range: rootFolderRange.upperBound..<librarySource.endIndex) {
+       let rootFolderEndRange = librarySource.range(of: "private struct LibraryCategoryTreeSnapshot", range: rootFolderRange.upperBound..<librarySource.endIndex) {
         let rootFolderSource = String(librarySource[rootFolderRange.lowerBound..<rootFolderEndRange.lowerBound])
         try check(
             rootFolderSource.contains("LibraryRootFolderSelectionButton(")
@@ -3498,15 +3506,17 @@ func runUILayoutSourceChecks() throws {
             || libraryFeatureStoreSource.contains("@Published var libraryDerivedState"))
             && (appModelSource.contains("PaperLibraryDerivedState.build")
                 || libraryFeatureStoreSource.contains("PaperLibraryDerivedState.build"))
-            && (librarySource.contains("model.libraryDerivedState.matchesSearch")
+            && (libraryFeatureStoreSource.contains("libraryDerivedState.matchesSearch")
+                || librarySource.contains("model.libraryDerivedState.matchesSearch")
                 || librarySource.contains("derivedState.matchesSearch"))
             && librarySource.contains("model.libraryDerivedState.categoryPaperCountsByID")
             && librarySource.contains("model.libraryDerivedState.tagPaperCountsByID")
             && libraryDerivedStateSource.contains("paperIDsByCategoryID")
             && libraryDerivedStateSource.contains("paperIDsForCategoryFilter")
             && libraryDerivedStateSource.contains("paperIDsForTag")
-            && librarySource.contains("makePaperListState"),
-        "library filtering and sidebar counts should use a precomputed derived state instead of recomputing in the view body"
+            && libraryFeatureStoreSource.contains("func paperListState(")
+            && !librarySource.contains("private func makePaperListState()"),
+        "library filtering and sidebar counts should use precomputed derived state and cached feature-store list state instead of recomputing in the view body"
     )
     try check(
         appModelSource.contains("libraryThumbnailRefreshTask")
@@ -3660,8 +3670,9 @@ func runUILayoutSourceChecks() throws {
     try check(
         librarySource.contains("libraryIncludeSubfolders")
             && librarySource.contains("showsFolderScope")
-            && librarySource.contains("paperIDsForCategoryFilter(")
-            && librarySource.contains("includeDescendants: libraryIncludeSubfolders"),
+            && librarySource.contains("includeSubfolders: libraryIncludeSubfolders")
+            && libraryFeatureStoreSource.contains("paperIDsForCategoryFilter(")
+            && libraryFeatureStoreSource.contains("includeDescendants: request.includeSubfolders"),
         "library folder view should toggle between current-folder papers and current-plus-subfolders papers"
     )
     try check(

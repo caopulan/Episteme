@@ -7,20 +7,57 @@ struct LibrarySelection: Equatable {
     var tagID: String?
 }
 
+struct LibraryPaperListRequest: Equatable {
+    var selectedCategoryID: String?
+    var selectedTagID: String?
+    var searchText: String
+    var sortRawValue: String
+    var sortAscending: Bool
+    var includeSubfolders: Bool
+}
+
+struct LibraryPaperListState {
+    static let empty = LibraryPaperListState(
+        papers: [],
+        paperIDs: [],
+        readablePaperIDs: [],
+        hasActiveFilters: false
+    )
+
+    var papers: [Paper]
+    var paperIDs: [String]
+    var readablePaperIDs: [String]
+    var hasActiveFilters: Bool
+}
+
 @MainActor
 final class LibraryFeatureStore: ObservableObject {
-    @Published var papers: [Paper] = []
-    @Published var categories: [PaperCodexCore.Category] = []
-    @Published var tags: [PaperTag] = []
+    @Published var papers: [Paper] = [] {
+        didSet { invalidatePaperListStateCache() }
+    }
+    @Published var categories: [PaperCodexCore.Category] = [] {
+        didSet { invalidatePaperListStateCache() }
+    }
+    @Published var tags: [PaperTag] = [] {
+        didSet { invalidatePaperListStateCache() }
+    }
     @Published var watchedFolders: [WatchedFolder] = []
-    @Published var paperCategoryIDsByID: [String: [String]] = [:]
-    @Published var paperTagsByID: [String: [PaperTag]] = [:]
-    @Published var libraryDerivedState: PaperLibraryDerivedState = .empty
+    @Published var paperCategoryIDsByID: [String: [String]] = [:] {
+        didSet { invalidatePaperListStateCache() }
+    }
+    @Published var paperTagsByID: [String: [PaperTag]] = [:] {
+        didSet { invalidatePaperListStateCache() }
+    }
+    @Published var libraryDerivedState: PaperLibraryDerivedState = .empty {
+        didSet { invalidatePaperListStateCache() }
+    }
     @Published var selectedLibraryPaper: Paper?
     @Published private var selection = LibrarySelection(surface: .papers, categoryID: nil, tagID: nil)
     @Published var librarySearchText = ""
     @Published var paperThumbnailURLsByID: [String: [URL]] = [:]
     @Published var paperNotesByID: [String: [PaperNote]] = [:]
+    private var cachedPaperListRequest: LibraryPaperListRequest?
+    private var cachedPaperListState: LibraryPaperListState?
 
     var selectedLibrarySurface: LibrarySurface {
         get { selection.surface }
@@ -85,5 +122,57 @@ final class LibraryFeatureStore: ObservableObject {
             categoryIDsByPaperID: paperCategoryIDsByID,
             tagsByPaperID: paperTagsByID
         )
+    }
+
+    func paperListState(request: LibraryPaperListRequest) -> LibraryPaperListState {
+        if cachedPaperListRequest == request, let cachedPaperListState {
+            return cachedPaperListState
+        }
+
+        let query = request.searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        var paperIDFilter: Set<String>?
+
+        if let selectedCategoryID = request.selectedCategoryID {
+            paperIDFilter = libraryDerivedState.paperIDsForCategoryFilter(
+                selectedCategoryID,
+                includeDescendants: request.includeSubfolders
+            )
+        }
+
+        if let selectedTagID = request.selectedTagID {
+            let tagPaperIDs = libraryDerivedState.paperIDsForTag(selectedTagID)
+            if let existingFilter = paperIDFilter {
+                paperIDFilter = existingFilter.intersection(tagPaperIDs)
+            } else {
+                paperIDFilter = tagPaperIDs
+            }
+        }
+
+        var visiblePapers = papers
+        if let paperIDFilter {
+            visiblePapers = visiblePapers.filter { paperIDFilter.contains($0.id) }
+        }
+        if !query.isEmpty {
+            visiblePapers = visiblePapers.filter { paper in
+                libraryDerivedState.matchesSearch(paperID: paper.id, query: query)
+            }
+        }
+
+        let option = LibrarySortOption(rawValue: request.sortRawValue) ?? .addedNewest
+        let sortedPapers = option.sorted(visiblePapers, ascending: request.sortAscending)
+        let state = LibraryPaperListState(
+            papers: sortedPapers,
+            paperIDs: sortedPapers.map(\.id),
+            readablePaperIDs: sortedPapers.filter { !$0.isArxivImportPlaceholder }.map(\.id),
+            hasActiveFilters: request.selectedCategoryID != nil || request.selectedTagID != nil || !query.isEmpty
+        )
+        cachedPaperListRequest = request
+        cachedPaperListState = state
+        return state
+    }
+
+    private func invalidatePaperListStateCache() {
+        cachedPaperListRequest = nil
+        cachedPaperListState = nil
     }
 }
