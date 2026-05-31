@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 import PaperCodexCore
 import SwiftUI
 
@@ -606,8 +607,6 @@ private struct SaveToLibraryFlowItem {
 }
 
 private struct SaveToLibraryFolderRow: View {
-    @State private var isHovering = false
-
     var item: SaveToLibraryFolderItem
     var isSelected: Bool
     var isExpanded: Bool
@@ -620,63 +619,41 @@ private struct SaveToLibraryFolderRow: View {
     var body: some View {
         HStack(spacing: 4) {
             if hasChildren {
-                Button(action: onToggleExpanded) {
-                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                        .font(.paperCodexSystem(size: 9, weight: .bold))
-                        .frame(width: 16, height: 24)
-                }
-                .buttonStyle(SaveToLibraryFolderIconButtonStyle(tint: .secondary))
-                .help(isExpanded ? "Collapse" : "Expand")
+                SaveToLibraryFolderIconButton(
+                    title: isExpanded ? "Collapse" : "Expand",
+                    systemImage: isExpanded ? "chevron.down" : "chevron.right",
+                    tint: .secondary,
+                    width: 16,
+                    height: 24,
+                    symbolSize: 9,
+                    action: onToggleExpanded
+                )
             } else {
                 Color.clear
                     .frame(width: 16, height: 24)
             }
 
-            Button(action: onToggleSelected) {
-                HStack(spacing: 8) {
-                    Image(systemName: item.node.isNew ? "folder.badge.plus" : "folder")
-                        .frame(width: 17)
-                        .foregroundStyle(isSelected || item.node.isNew ? Color.accentColor : Color.secondary)
-                    Text(item.node.name)
-                        .font(.paperCodexSystem(size: 12.5, weight: isSelected ? .semibold : .medium))
-                        .lineLimit(1)
-                    if item.node.isNew {
-                        Text("New")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(Color.accentColor)
-                    }
-                    Spacer(minLength: 0)
-                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                        .foregroundStyle(isSelected ? Color.accentColor : Color.secondary.opacity(0.65))
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 7)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(SaveToLibraryFolderRowButtonStyle(isSelected: isSelected, isHovering: isHovering))
+            SaveToLibraryFolderSelectionButton(
+                title: item.node.name,
+                isSelected: isSelected,
+                isNew: item.node.isNew,
+                action: onToggleSelected
+            )
 
-            Button(action: onCreateChild) {
-                Image(systemName: "plus")
-                    .font(.paperCodexSystem(size: 11, weight: .semibold))
-                    .frame(width: 22, height: 22)
-            }
-            .buttonStyle(SaveToLibraryFolderIconButtonStyle(tint: .accentColor))
-            .help("New subfolder")
+            SaveToLibraryFolderIconButton(
+                title: "New subfolder",
+                systemImage: "plus",
+                tint: .accentColor,
+                action: onCreateChild
+            )
 
             if let onRemoveNewCategory {
-                Button(action: onRemoveNewCategory) {
-                    Image(systemName: "trash")
-                        .font(.paperCodexSystem(size: 11, weight: .semibold))
-                        .frame(width: 22, height: 22)
-                }
-                .buttonStyle(SaveToLibraryFolderIconButtonStyle(tint: .red))
-                .help("Remove new folder")
-            }
-        }
-        .onHover { hovering in
-            withAnimation(.easeOut(duration: 0.12)) {
-                isHovering = hovering
+                SaveToLibraryFolderIconButton(
+                    title: "Remove new folder",
+                    systemImage: "trash",
+                    tint: .red,
+                    action: onRemoveNewCategory
+                )
             }
         }
         .padding(.leading, CGFloat(item.depth) * SaveToLibraryLayout.treeIndentWidth)
@@ -691,85 +668,448 @@ private struct SaveToLibraryFolderRow: View {
     }
 }
 
-private struct SaveToLibraryFolderRowButtonStyle: ButtonStyle {
+private struct SaveToLibraryFolderSelectionButton: View {
+    var title: String
     var isSelected: Bool
-    var isHovering: Bool
+    var isNew: Bool
+    var action: () -> Void
 
-    func makeBody(configuration: Configuration) -> some View {
-        let isPressed = configuration.isPressed
-        configuration.label
-            .background(
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(backgroundColor(isPressed: isPressed))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 6)
-                    .stroke(borderColor(isPressed: isPressed), lineWidth: 1)
-            )
-            .shadow(color: shadowColor(isPressed: isPressed), radius: isPressed ? 3 : 5, y: isPressed ? 1 : 2)
-            .scaleEffect(isPressed ? 0.988 : 1, anchor: .center)
-            .animation(PaperCodexMotion.press, value: configuration.isPressed)
-            .animation(PaperCodexMotion.hover, value: isHovering)
-            .animation(PaperCodexMotion.selection, value: isSelected)
-    }
-
-    private func backgroundColor(isPressed: Bool) -> Color {
-        if isSelected {
-            return Color.accentColor.opacity(isPressed ? 0.18 : 0.11)
-        }
-        if isPressed {
-            return Color.accentColor.opacity(0.10)
-        }
-        return isHovering ? Color.primary.opacity(0.045) : Color.clear
-    }
-
-    private func borderColor(isPressed: Bool) -> Color {
-        if isPressed {
-            return Color.accentColor.opacity(0.40)
-        }
-        return isSelected ? Color.accentColor.opacity(0.25) : Color.clear
-    }
-
-    private func shadowColor(isPressed: Bool) -> Color {
-        isPressed ? Color.accentColor.opacity(0.10) : .clear
+    var body: some View {
+        NativeSaveToLibraryFolderSelectionButton(
+            title: title,
+            isSelected: isSelected,
+            isNew: isNew,
+            action: action
+        )
+        .frame(maxWidth: .infinity, minHeight: 30, alignment: .leading)
+        .help(title)
+        .accessibilityLabel(title)
     }
 }
 
-private struct SaveToLibraryFolderIconButtonStyle: ButtonStyle {
+private struct SaveToLibraryFolderIconButton: View {
+    var title: String
+    var systemImage: String
     var tint: Color
+    var width: CGFloat = 22
+    var height: CGFloat = 22
+    var symbolSize: CGFloat = 11
+    var action: () -> Void
 
-    func makeBody(configuration: Configuration) -> some View {
-        let isPressed = configuration.isPressed
-        configuration.label
-            .foregroundStyle(iconColor(isPressed: isPressed))
-            .background(
-                Circle()
-                    .fill(backgroundColor(isPressed: isPressed))
-            )
-            .overlay(
-                Circle()
-                    .stroke(borderColor(isPressed: isPressed), lineWidth: isPressed ? 1 : 0)
-            )
-            .shadow(color: shadowColor(isPressed: isPressed), radius: 3, y: 1)
-            .scaleEffect(isPressed ? 0.88 : 1, anchor: .center)
-            .contentShape(Circle())
-            .animation(PaperCodexMotion.press, value: configuration.isPressed)
+    var body: some View {
+        NativeSaveToLibraryFolderIconButton(
+            title: title,
+            systemImage: systemImage,
+            tint: tint,
+            width: width,
+            height: height,
+            symbolSize: symbolSize,
+            action: action
+        )
+        .frame(width: width, height: height)
+        .help(title)
+        .accessibilityLabel(title)
+    }
+}
+
+private struct NativeSaveToLibraryFolderSelectionButton: NSViewRepresentable {
+    var title: String
+    var isSelected: Bool
+    var isNew: Bool
+    var action: () -> Void
+
+    func makeNSView(context: Context) -> NativeSaveToLibraryFolderSelectionButtonView {
+        let view = NativeSaveToLibraryFolderSelectionButtonView()
+        view.apply(title: title, isSelected: isSelected, isNew: isNew, action: action)
+        return view
     }
 
-    private func iconColor(isPressed: Bool) -> Color {
-        isPressed ? tint : tint.opacity(0.78)
+    func updateNSView(_ view: NativeSaveToLibraryFolderSelectionButtonView, context: Context) {
+        view.apply(title: title, isSelected: isSelected, isNew: isNew, action: action)
+    }
+}
+
+private struct NativeSaveToLibraryFolderIconButton: NSViewRepresentable {
+    var title: String
+    var systemImage: String
+    var tint: Color
+    var width: CGFloat
+    var height: CGFloat
+    var symbolSize: CGFloat
+    var action: () -> Void
+
+    func makeNSView(context: Context) -> NativeSaveToLibraryFolderIconButtonView {
+        let view = NativeSaveToLibraryFolderIconButtonView()
+        view.apply(
+            title: title,
+            systemImage: systemImage,
+            tint: tint,
+            width: width,
+            height: height,
+            symbolSize: symbolSize,
+            action: action
+        )
+        return view
     }
 
-    private func backgroundColor(isPressed: Bool) -> Color {
-        isPressed ? tint.opacity(0.17) : Color.clear
+    func updateNSView(_ view: NativeSaveToLibraryFolderIconButtonView, context: Context) {
+        view.apply(
+            title: title,
+            systemImage: systemImage,
+            tint: tint,
+            width: width,
+            height: height,
+            symbolSize: symbolSize,
+            action: action
+        )
+    }
+}
+
+private final class NativeSaveToLibraryFolderSelectionButtonView: NSButton {
+    private let folderIconView = NSImageView()
+    private let titleLabel = NSTextField(labelWithString: "")
+    private let newBadgeLabel = NSTextField(labelWithString: "")
+    private let checkIconView = NSImageView()
+    private var trackingArea: NSTrackingArea?
+    private var pressHandler: () -> Void = {}
+    private var isSelected = false
+    private var isNew = false
+    private var isHovering = false
+    private var isPressed = false
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
     }
 
-    private func borderColor(isPressed: Bool) -> Color {
-        isPressed ? tint.opacity(0.36) : Color.clear
+    required init?(coder: NSCoder) {
+        nil
     }
 
-    private func shadowColor(isPressed: Bool) -> Color {
-        isPressed ? tint.opacity(0.10) : .clear
+    override var isFlipped: Bool {
+        true
+    }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: 30)
+    }
+
+    func apply(title: String, isSelected: Bool, isNew: Bool, action: @escaping () -> Void) {
+        pressHandler = action
+        self.isSelected = isSelected
+        self.isNew = isNew
+        let localizedTitle = NSLocalizedString(title, comment: "")
+        titleLabel.stringValue = localizedTitle
+        titleLabel.font = .systemFont(ofSize: 12.5, weight: isSelected ? .semibold : .medium)
+        newBadgeLabel.stringValue = isNew ? NSLocalizedString("New", comment: "") : ""
+        folderIconView.image = NSImage(
+            systemSymbolName: isNew ? "folder.badge.plus" : "folder",
+            accessibilityDescription: localizedTitle
+        )
+        checkIconView.image = NSImage(
+            systemSymbolName: isSelected ? "checkmark.circle.fill" : "circle",
+            accessibilityDescription: localizedTitle
+        )
+        toolTip = localizedTitle
+        setAccessibilityLabel(localizedTitle)
+        setAccessibilityValue(isSelected ? NSLocalizedString("Selected", comment: "") : NSLocalizedString("Not selected", comment: ""))
+        updateAppearance()
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea {
+            removeTrackingArea(trackingArea)
+        }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.activeInKeyWindow, .mouseEnteredAndExited, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isHovering = true
+        updateAppearance()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHovering = false
+        updateAppearance()
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        setPressed(true)
+        super.mouseDown(with: event)
+        setPressed(false)
+    }
+
+    private func setup() {
+        translatesAutoresizingMaskIntoConstraints = false
+        title = ""
+        isBordered = false
+        bezelStyle = .regularSquare
+        imagePosition = .noImage
+        focusRingType = .none
+        setButtonType(.momentaryChange)
+        target = self
+        action = #selector(performPress)
+        setAccessibilityElement(true)
+        setAccessibilityRole(.button)
+        wantsLayer = true
+        layer?.cornerRadius = 6
+        layer?.masksToBounds = false
+
+        folderIconView.translatesAutoresizingMaskIntoConstraints = false
+        folderIconView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 13, weight: .medium)
+        folderIconView.imageScaling = .scaleProportionallyDown
+
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.maximumNumberOfLines = 1
+        titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        newBadgeLabel.translatesAutoresizingMaskIntoConstraints = false
+        newBadgeLabel.font = .systemFont(ofSize: 11, weight: .semibold)
+        newBadgeLabel.lineBreakMode = .byTruncatingTail
+        newBadgeLabel.maximumNumberOfLines = 1
+        newBadgeLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        checkIconView.translatesAutoresizingMaskIntoConstraints = false
+        checkIconView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 13, weight: .semibold)
+        checkIconView.imageScaling = .scaleProportionallyDown
+
+        [folderIconView, titleLabel, newBadgeLabel, checkIconView].forEach(addSubview(_:))
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: 30),
+            folderIconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
+            folderIconView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            folderIconView.widthAnchor.constraint(equalToConstant: 17),
+            folderIconView.heightAnchor.constraint(equalToConstant: 17),
+            titleLabel.leadingAnchor.constraint(equalTo: folderIconView.trailingAnchor, constant: 8),
+            titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            newBadgeLabel.leadingAnchor.constraint(equalTo: titleLabel.trailingAnchor, constant: 6),
+            newBadgeLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            newBadgeLabel.trailingAnchor.constraint(lessThanOrEqualTo: checkIconView.leadingAnchor, constant: -8),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: checkIconView.leadingAnchor, constant: -8),
+            checkIconView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            checkIconView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            checkIconView.widthAnchor.constraint(equalToConstant: 15),
+            checkIconView.heightAnchor.constraint(equalToConstant: 15)
+        ])
+        updateAppearance()
+    }
+
+    @objc private func performPress() {
+        pressHandler()
+    }
+
+    private func setPressed(_ pressed: Bool) {
+        isPressed = pressed
+        updateAppearance()
+    }
+
+    private func updateAppearance() {
+        let tint = NSColor.controlAccentColor
+        let background: NSColor
+        let border: NSColor
+        let shadowOpacity: Float
+
+        if isSelected {
+            background = tint.withAlphaComponent(isPressed ? 0.18 : 0.11)
+            border = isPressed ? tint.withAlphaComponent(0.40) : tint.withAlphaComponent(0.25)
+            shadowOpacity = isPressed ? 0.10 : 0
+        } else if isPressed {
+            background = tint.withAlphaComponent(0.10)
+            border = tint.withAlphaComponent(0.40)
+            shadowOpacity = 0.10
+        } else if isHovering {
+            background = .labelColor.withAlphaComponent(0.045)
+            border = .clear
+            shadowOpacity = 0
+        } else {
+            background = .clear
+            border = .clear
+            shadowOpacity = 0
+        }
+
+        titleLabel.textColor = .labelColor
+        newBadgeLabel.textColor = tint
+        folderIconView.contentTintColor = isSelected || isNew ? tint : .secondaryLabelColor
+        checkIconView.contentTintColor = isSelected ? tint : .secondaryLabelColor.withAlphaComponent(0.65)
+        layer?.backgroundColor = background.cgColor
+        layer?.borderWidth = border == .clear ? 0 : 1
+        layer?.borderColor = border.cgColor
+        layer?.shadowColor = tint.cgColor
+        layer?.shadowOpacity = shadowOpacity
+        layer?.shadowRadius = isPressed ? 3 : 5
+        layer?.shadowOffset = CGSize(width: 0, height: isPressed ? -1 : -2)
+
+        CATransaction.begin()
+        CATransaction.setAnimationDuration(isPressed ? 0.05 : 0.12)
+        layer?.transform = CATransform3DMakeScale(isPressed ? 0.988 : 1, isPressed ? 0.988 : 1, 1)
+        CATransaction.commit()
+    }
+}
+
+private final class NativeSaveToLibraryFolderIconButtonView: NSButton {
+    private let iconView = NSImageView()
+    private var widthConstraint: NSLayoutConstraint?
+    private var heightConstraint: NSLayoutConstraint?
+    private var iconWidthConstraint: NSLayoutConstraint?
+    private var iconHeightConstraint: NSLayoutConstraint?
+    private var trackingArea: NSTrackingArea?
+    private var pressHandler: () -> Void = {}
+    private var tintColor = NSColor.controlAccentColor
+    private var isHovering = false
+    private var isPressed = false
+    private var buttonSize = CGSize(width: 22, height: 22)
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override var isFlipped: Bool {
+        true
+    }
+
+    override var intrinsicContentSize: NSSize {
+        buttonSize
+    }
+
+    func apply(
+        title: String,
+        systemImage: String,
+        tint: Color,
+        width: CGFloat,
+        height: CGFloat,
+        symbolSize: CGFloat,
+        action: @escaping () -> Void
+    ) {
+        let localizedTitle = NSLocalizedString(title, comment: "")
+        pressHandler = action
+        tintColor = NSColor(tint)
+        buttonSize = CGSize(width: width, height: height)
+        widthConstraint?.constant = width
+        heightConstraint?.constant = height
+        let iconSide = min(width, height, max(symbolSize + 4, symbolSize))
+        iconWidthConstraint?.constant = iconSide
+        iconHeightConstraint?.constant = iconSide
+        iconView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: symbolSize, weight: .semibold)
+        iconView.image = NSImage(systemSymbolName: systemImage, accessibilityDescription: localizedTitle)
+        toolTip = localizedTitle
+        setAccessibilityLabel(localizedTitle)
+        invalidateIntrinsicContentSize()
+        updateAppearance()
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea {
+            removeTrackingArea(trackingArea)
+        }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.activeInKeyWindow, .mouseEnteredAndExited, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isHovering = true
+        updateAppearance()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHovering = false
+        updateAppearance()
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        setPressed(true)
+        super.mouseDown(with: event)
+        setPressed(false)
+    }
+
+    private func setup() {
+        translatesAutoresizingMaskIntoConstraints = false
+        title = ""
+        isBordered = false
+        bezelStyle = .regularSquare
+        imagePosition = .noImage
+        focusRingType = .none
+        setButtonType(.momentaryChange)
+        target = self
+        action = #selector(performPress)
+        setAccessibilityElement(true)
+        setAccessibilityRole(.button)
+        wantsLayer = true
+        layer?.cornerRadius = 11
+        layer?.masksToBounds = false
+
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+        iconView.imageScaling = .scaleProportionallyDown
+        addSubview(iconView)
+
+        let widthConstraint = widthAnchor.constraint(equalToConstant: buttonSize.width)
+        let heightConstraint = heightAnchor.constraint(equalToConstant: buttonSize.height)
+        let iconWidthConstraint = iconView.widthAnchor.constraint(equalToConstant: 15)
+        let iconHeightConstraint = iconView.heightAnchor.constraint(equalToConstant: 15)
+        self.widthConstraint = widthConstraint
+        self.heightConstraint = heightConstraint
+        self.iconWidthConstraint = iconWidthConstraint
+        self.iconHeightConstraint = iconHeightConstraint
+        NSLayoutConstraint.activate([
+            widthConstraint,
+            heightConstraint,
+            iconView.centerXAnchor.constraint(equalTo: centerXAnchor),
+            iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            iconWidthConstraint,
+            iconHeightConstraint
+        ])
+        updateAppearance()
+    }
+
+    @objc private func performPress() {
+        pressHandler()
+    }
+
+    private func setPressed(_ pressed: Bool) {
+        isPressed = pressed
+        updateAppearance()
+    }
+
+    private func updateAppearance() {
+        let tint = tintColor
+        let foreground = isPressed ? tint : tint.withAlphaComponent(isHovering ? 0.92 : 0.78)
+        let background = isPressed ? tint.withAlphaComponent(0.17) : (isHovering ? tint.withAlphaComponent(0.10) : .clear)
+        let border = isPressed ? tint.withAlphaComponent(0.36) : .clear
+
+        iconView.contentTintColor = foreground
+        layer?.cornerRadius = min(buttonSize.width, buttonSize.height) / 2
+        layer?.backgroundColor = background.cgColor
+        layer?.borderWidth = border == .clear ? 0 : 1
+        layer?.borderColor = border.cgColor
+        layer?.shadowColor = tint.cgColor
+        layer?.shadowOpacity = isPressed ? 0.10 : 0
+        layer?.shadowRadius = 3
+        layer?.shadowOffset = CGSize(width: 0, height: isPressed ? -1 : -1)
+
+        CATransaction.begin()
+        CATransaction.setAnimationDuration(isPressed ? 0.05 : 0.12)
+        layer?.transform = CATransform3DMakeScale(isPressed ? 0.88 : 1, isPressed ? 0.88 : 1, 1)
+        CATransaction.commit()
     }
 }
 

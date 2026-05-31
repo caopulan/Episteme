@@ -2076,15 +2076,24 @@ func runUILayoutSourceChecks() throws {
                 && saveToLibrarySource.contains("title: \"Cancel\"")
                 && saveToLibrarySource.contains("systemImage: \"xmark\"")
                 && !saveToLibrarySource.contains(".buttonStyle(.borderless)")
-                && saveToLibrarySource.contains("private struct SaveToLibraryFolderRowButtonStyle: ButtonStyle")
-                && saveToLibrarySource.contains("private struct SaveToLibraryFolderIconButtonStyle: ButtonStyle")
-                && folderRowSource.contains(".buttonStyle(SaveToLibraryFolderRowButtonStyle(")
-                && folderRowSource.contains(".buttonStyle(SaveToLibraryFolderIconButtonStyle(")
-                && saveToLibrarySource.contains("configuration.isPressed")
-                && saveToLibrarySource.contains("PaperCodexMotion.press")
+                && saveToLibrarySource.contains("private struct SaveToLibraryFolderSelectionButton: View")
+                && saveToLibrarySource.contains("private struct NativeSaveToLibraryFolderSelectionButton: NSViewRepresentable")
+                && saveToLibrarySource.contains("private final class NativeSaveToLibraryFolderSelectionButtonView: NSButton")
+                && saveToLibrarySource.contains("private struct SaveToLibraryFolderIconButton: View")
+                && saveToLibrarySource.contains("private struct NativeSaveToLibraryFolderIconButton: NSViewRepresentable")
+                && saveToLibrarySource.contains("private final class NativeSaveToLibraryFolderIconButtonView: NSButton")
+                && saveToLibrarySource.components(separatedBy: "override func mouseDown(with event: NSEvent)").count - 1 >= 2
+                && saveToLibrarySource.components(separatedBy: "setAccessibilityRole(.button)").count - 1 >= 2
+                && saveToLibrarySource.components(separatedBy: "CATransaction.setAnimationDuration").count - 1 >= 2
+                && folderRowSource.contains("SaveToLibraryFolderSelectionButton(")
+                && folderRowSource.contains("SaveToLibraryFolderIconButton(")
+                && !saveToLibrarySource.contains("private struct SaveToLibraryFolderRowButtonStyle: ButtonStyle")
+                && !saveToLibrarySource.contains("private struct SaveToLibraryFolderIconButtonStyle: ButtonStyle")
+                && !folderRowSource.contains(".buttonStyle(SaveToLibraryFolderRowButtonStyle(")
+                && !folderRowSource.contains(".buttonStyle(SaveToLibraryFolderIconButtonStyle(")
                 && !pathChipSource.contains(".buttonStyle(")
                 && !folderRowSource.contains(".buttonStyle(.plain)"),
-            "save-to-library selected path chips and small creation actions should use native AppKit buttons while folder rows keep immediate feedback"
+            "save-to-library selected path chips, folder rows, and small creation actions should use native AppKit buttons before saving destinations"
         )
     } else {
         throw CheckFailure(description: "save-to-library folder tree button source should remain inspectable")
