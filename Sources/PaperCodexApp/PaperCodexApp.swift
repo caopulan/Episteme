@@ -68,7 +68,7 @@ struct RootView: View {
             routeCacheWarmupTask?.cancel()
             routeCacheWarmupTask = nil
         }
-        .sheet(isPresented: $isShowingSaveToLibrarySheet) {
+        .paperCodexNativeSheet(isPresented: $isShowingSaveToLibrarySheet, title: "Save to Library", minimumSize: CGSize(width: 620, height: 520)) {
             if let paper = model.selectedPaper {
                 SaveToLibrarySheet(
                     paperTitle: paper.title,

@@ -27,7 +27,7 @@ struct ReaderView: View {
         .onChange(of: model.selectedPaper?.id) { _, _ in
             resetPDFSplit()
         }
-        .sheet(isPresented: $isShowingAddPaperToSessionSheet) {
+        .paperCodexNativeSheet(isPresented: $isShowingAddPaperToSessionSheet, title: "Add Paper", minimumSize: CGSize(width: 560, height: 400)) {
             AddPaperToSessionSheet(
                 papers: model.papers.filter { paper in
                     !paper.isArxivImportPlaceholder && !model.currentSessionPapers.contains(where: { $0.id == paper.id })

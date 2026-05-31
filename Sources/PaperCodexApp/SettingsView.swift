@@ -96,10 +96,10 @@ struct SettingsView: View {
             }
             .frame(minWidth: 0)
         }
-        .sheet(item: $editingPrompt) { prompt in
+        .paperCodexNativeSheet(item: $editingPrompt, title: "Edit Prompt", minimumSize: CGSize(width: 640, height: 520)) { prompt in
             quickPromptEditSheet(prompt)
         }
-        .sheet(isPresented: $isEditingCodexSystemPrompt) {
+        .paperCodexNativeSheet(isPresented: $isEditingCodexSystemPrompt, title: "Codex System Prompt", minimumSize: CGSize(width: 680, height: 560)) {
             codexSystemPromptEditSheet
         }
         .onAppear {

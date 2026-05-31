@@ -161,7 +161,7 @@ struct LibraryView: View {
                 scheduleInspectorDetailsAfterSelectionSettles(for: paper)
             }
         }
-        .sheet(isPresented: $isCreatingCategory) {
+        .paperCodexNativeSheet(isPresented: $isCreatingCategory, title: "New Category", minimumSize: CGSize(width: 440, height: 240)) {
             CategoryEditorSheet(
                 categoryItems: flattenedCategoryItems(),
                 name: $newCategoryName,
@@ -177,7 +177,7 @@ struct LibraryView: View {
                 isCreatingCategory = false
             }
         }
-        .sheet(isPresented: $isCreatingTag) {
+        .paperCodexNativeSheet(isPresented: $isCreatingTag, title: "New Tag", minimumSize: CGSize(width: 380, height: 180)) {
             TagEditorSheet(name: $newTagName) { name in
                 model.createTag(name: name)
                 newTagName = ""
@@ -187,13 +187,13 @@ struct LibraryView: View {
                 isCreatingTag = false
             }
         }
-        .sheet(item: $categoryPendingManagement) { category in
+        .paperCodexNativeSheet(item: $categoryPendingManagement, title: "Category", minimumSize: CGSize(width: 440, height: 260)) { category in
             categoryManagementSheet(category)
         }
-        .sheet(item: $tagPendingManagement) { tag in
+        .paperCodexNativeSheet(item: $tagPendingManagement, title: "Tag", minimumSize: CGSize(width: 380, height: 220)) { tag in
             tagManagementSheet(tag)
         }
-        .sheet(isPresented: $isShowingWatchedFolders) {
+        .paperCodexNativeSheet(isPresented: $isShowingWatchedFolders, title: "Watched Folders", minimumSize: CGSize(width: 620, height: 420)) {
             WatchedFoldersSheet {
                 presentWatchedFolderPanel()
             } onClose: {
@@ -203,7 +203,7 @@ struct LibraryView: View {
             }
             .environmentObject(model)
         }
-        .sheet(isPresented: $isShowingArxivImport) {
+        .paperCodexNativeSheet(isPresented: $isShowingArxivImport, title: "Import arXiv", minimumSize: CGSize(width: 620, height: 520)) {
             LibraryArxivImportSheet(
                 categoryItems: flattenedCategoryItems(),
                 initialCategoryID: selectedCategoryID
@@ -212,7 +212,7 @@ struct LibraryView: View {
             }
             .environmentObject(model)
         }
-        .sheet(isPresented: $isShowingBulkCopy) {
+        .paperCodexNativeSheet(isPresented: $isShowingBulkCopy, title: "Copy Papers", minimumSize: CGSize(width: 520, height: 360)) {
             LibraryBulkCopySheet(
                 categoryItems: flattenedCategoryItems(),
                 selectedCount: selectedPaperIDs.count
@@ -229,7 +229,7 @@ struct LibraryView: View {
                 isShowingBulkCopy = false
             }
         }
-        .sheet(isPresented: $isShowingBulkTag) {
+        .paperCodexNativeSheet(isPresented: $isShowingBulkTag, title: "Tag Papers", minimumSize: CGSize(width: 520, height: 360)) {
             LibraryBulkTagSheet(
                 tags: model.tags,
                 selectedCount: selectedPaperIDs.count

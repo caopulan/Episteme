@@ -1445,6 +1445,15 @@ func runUILayoutSourceChecks() throws {
     let nativeFormControlsSource = FileManager.default.fileExists(atPath: nativeFormControlsURL.path) ? try String(contentsOf: nativeFormControlsURL) : ""
     let nativeConfirmationURL = root.appendingPathComponent("Sources/PaperCodexApp/PaperCodexNativeConfirmation.swift")
     let nativeConfirmationSource = FileManager.default.fileExists(atPath: nativeConfirmationURL.path) ? try String(contentsOf: nativeConfirmationURL) : ""
+    let nativeSheetURL = root.appendingPathComponent("Sources/PaperCodexApp/PaperCodexNativeSheet.swift")
+    let nativeSheetSource = FileManager.default.fileExists(atPath: nativeSheetURL.path) ? try String(contentsOf: nativeSheetURL) : ""
+    let appSourceDirectory = root.appendingPathComponent("Sources/PaperCodexApp")
+    let appSwiftSourceFiles = try FileManager.default.contentsOfDirectory(at: appSourceDirectory, includingPropertiesForKeys: nil)
+        .filter { $0.pathExtension == "swift" }
+    let appSourcesWithSwiftUISheet = try appSwiftSourceFiles.compactMap { fileURL -> String? in
+        let source = try String(contentsOf: fileURL)
+        return source.contains(".sheet(") ? fileURL.lastPathComponent : nil
+    }
     let swiftUIFormControlRegex = try NSRegularExpression(pattern: #"\b(TextField|SecureField|TextEditor|Picker|Toggle|Stepper|DatePicker)\("#)
     func hasSwiftUIFormControlUse(_ source: String) -> Bool {
         let range = NSRange(source.startIndex..<source.endIndex, in: source)
@@ -1820,6 +1829,16 @@ func runUILayoutSourceChecks() throws {
             && !librarySource.contains("Button(\"Delete\", role: .destructive)")
             && !settingsViewSource.contains("Button(\"Clear\", role: .destructive)"),
         "destructive confirmation dialogs should be explicit native AppKit NSAlert sheets instead of SwiftUI alert buttons"
+    )
+    try check(
+        nativeSheetSource.contains("struct PaperCodexNativeSheetPresenter")
+            && nativeSheetSource.contains("window.beginSheet(sheetWindow)")
+            && nativeSheetSource.contains("window.endSheet(sheetWindow)")
+            && nativeSheetSource.contains("NSHostingController(rootView:")
+            && nativeSheetSource.contains("extension View")
+            && nativeSheetSource.contains("paperCodexNativeSheet")
+            && appSourcesWithSwiftUISheet.isEmpty,
+        "modal sheets should be presented through the shared AppKit sheet presenter instead of SwiftUI .sheet; remaining files: \(appSourcesWithSwiftUISheet.joined(separator: ", "))"
     )
     try check(
         actionButtonSource.contains("struct PaperCodexToolbarButton")

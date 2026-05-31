@@ -142,7 +142,7 @@ struct DiscoverView: View {
                     .environmentObject(model)
                 }
             }
-            .sheet(item: $paperPendingSave) { paper in
+            .paperCodexNativeSheet(item: $paperPendingSave, title: "Save to Library", minimumSize: CGSize(width: 620, height: 520)) { paper in
                 SaveToLibrarySheet(
                     paperTitle: paper.displayTitle(language: model.globalLanguageMode.discoverLanguageCode),
                     detail: paper.authors.prefix(4).joined(separator: ", "),
@@ -164,7 +164,7 @@ struct DiscoverView: View {
                     }
                 )
             }
-            .sheet(isPresented: $isShowingProcessSelection) {
+            .paperCodexNativeSheet(isPresented: $isShowingProcessSelection, title: "Process Papers", minimumSize: CGSize(width: 520, height: 420)) {
                 DiscoverProcessActionSheet(
                     paperCount: papers.count,
                     availableModelIDs: model.availableCodexModelIDs,
@@ -711,7 +711,7 @@ struct ArxivSearchView: View {
                 .environmentObject(model)
             }
         }
-        .sheet(item: $paperPendingSave) { paper in
+        .paperCodexNativeSheet(item: $paperPendingSave, title: "Save to Library", minimumSize: CGSize(width: 620, height: 520)) { paper in
             SaveToLibrarySheet(
                 paperTitle: paper.displayTitle(language: model.globalLanguageMode.discoverLanguageCode),
                 detail: paper.authors.prefix(4).joined(separator: ", "),
@@ -733,7 +733,7 @@ struct ArxivSearchView: View {
                 }
             )
         }
-        .sheet(isPresented: $isShowingProcessSelection) {
+        .paperCodexNativeSheet(isPresented: $isShowingProcessSelection, title: "Process Papers", minimumSize: CGSize(width: 520, height: 420)) {
             DiscoverProcessActionSheet(
                 paperCount: papers.count,
                 availableModelIDs: model.availableCodexModelIDs,

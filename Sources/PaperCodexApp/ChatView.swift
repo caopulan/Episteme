@@ -28,7 +28,7 @@ struct ChatView: View {
             selectedPanelContent
         }
         .background(Color(nsColor: .controlBackgroundColor))
-        .sheet(item: $sessionPendingRename) { session in
+        .paperCodexNativeSheet(item: $sessionPendingRename, title: "Rename Session", minimumSize: CGSize(width: 380, height: 160)) { session in
             renameSessionSheet(session)
         }
         .task {
