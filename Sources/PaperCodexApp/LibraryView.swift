@@ -2030,8 +2030,6 @@ private struct RecentConversationsContent: View {
 }
 
 private struct RecentConversationRow: View {
-    @State private var isHovering = false
-
     var session: PaperSession
     var papers: [Paper]
     var isSelected: Bool
@@ -2040,28 +2038,14 @@ private struct RecentConversationRow: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 10) {
-            Button(action: onSelect) {
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(spacing: 7) {
-                        Image(systemName: session.paperIDs.count > 1 ? "square.stack.3d.up.fill" : "doc.text")
-                            .foregroundStyle(Color.accentColor)
-                        Text(session.title)
-                            .font(.paperCodexSystem(size: 14, weight: .semibold))
-                            .lineLimit(1)
-                        Spacer(minLength: 0)
-                        Text(Self.relativeFormatter.localizedString(for: session.updatedAt, relativeTo: Date()))
-                            .font(.caption.monospacedDigit())
-                            .foregroundStyle(.tertiary)
-                    }
-                    Text(detailText)
-                        .font(.paperCodexSystem(size: 12.5))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(RecentConversationRowButtonStyle(isSelected: isSelected, isHovering: isHovering))
+            RecentConversationSelectionButton(
+                title: session.title,
+                detail: detailText,
+                timeText: Self.relativeFormatter.localizedString(for: session.updatedAt, relativeTo: Date()),
+                usesStackIcon: session.paperIDs.count > 1,
+                isSelected: isSelected,
+                action: onSelect
+            )
 
             PaperCodexIconButton(title: "Open Session", systemImage: "arrow.forward.circle", tint: .accentColor, action: onOpen)
         }
@@ -2074,11 +2058,6 @@ private struct RecentConversationRow: View {
                 .stroke(isSelected ? Color.accentColor.opacity(0.35) : Color.primary.opacity(0.08), lineWidth: 1)
         )
         .help(session.title)
-        .onHover { hovering in
-            withAnimation(PaperCodexMotion.hover) {
-                isHovering = hovering
-            }
-        }
     }
 
     private var detailText: String {
@@ -2096,49 +2075,262 @@ private struct RecentConversationRow: View {
     }()
 }
 
-private struct RecentConversationRowButtonStyle: ButtonStyle {
+private struct RecentConversationSelectionButton: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var title: String
+    var detail: String
+    var timeText: String
+    var usesStackIcon: Bool
     var isSelected: Bool
-    var isHovering: Bool
+    var action: () -> Void
 
-    func makeBody(configuration: Configuration) -> some View {
-        let isPressed = configuration.isPressed
-        configuration.label
-            .padding(.horizontal, 8)
-            .padding(.vertical, 7)
-            .background(
-                RoundedRectangle(cornerRadius: 7)
-                    .fill(backgroundColor(isPressed: isPressed))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 7)
-                    .stroke(borderColor(isPressed: isPressed), lineWidth: 1)
-            )
-            .shadow(color: shadowColor(isPressed: isPressed), radius: isPressed ? 3 : 5, y: isPressed ? 1 : 2)
-            .scaleEffect(isPressed ? 0.988 : 1, anchor: .center)
-            .animation(PaperCodexMotion.press, value: configuration.isPressed)
-            .animation(PaperCodexMotion.hover, value: isHovering)
-            .animation(PaperCodexMotion.selection, value: isSelected)
+    var body: some View {
+        NativeRecentConversationSelectionButton(
+            title: title,
+            detail: detail,
+            timeText: timeText,
+            usesStackIcon: usesStackIcon,
+            isSelected: isSelected,
+            reduceMotion: reduceMotion,
+            action: action
+        )
+        .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+        .help(title)
+        .accessibilityLabel(title)
+    }
+}
+
+private struct NativeRecentConversationSelectionButton: NSViewRepresentable {
+    var title: String
+    var detail: String
+    var timeText: String
+    var usesStackIcon: Bool
+    var isSelected: Bool
+    var reduceMotion: Bool
+    var action: () -> Void
+
+    func makeNSView(context: Context) -> NativeRecentConversationSelectionButtonView {
+        let view = NativeRecentConversationSelectionButtonView()
+        view.apply(
+            title: title,
+            detail: detail,
+            timeText: timeText,
+            usesStackIcon: usesStackIcon,
+            isSelected: isSelected,
+            reduceMotion: reduceMotion,
+            action: action
+        )
+        return view
     }
 
-    private func backgroundColor(isPressed: Bool) -> Color {
+    func updateNSView(_ view: NativeRecentConversationSelectionButtonView, context: Context) {
+        view.apply(
+            title: title,
+            detail: detail,
+            timeText: timeText,
+            usesStackIcon: usesStackIcon,
+            isSelected: isSelected,
+            reduceMotion: reduceMotion,
+            action: action
+        )
+    }
+}
+
+private final class NativeRecentConversationSelectionButtonView: NSButton {
+    private let iconView = NSImageView()
+    private let titleLabel = NSTextField(labelWithString: "")
+    private let timeLabel = NSTextField(labelWithString: "")
+    private let detailLabel = NSTextField(labelWithString: "")
+    private var trackingArea: NSTrackingArea?
+    private var pressHandler: () -> Void = {}
+    private var isSelected = false
+    private var isHovering = false
+    private var isPressed = false
+    private var reduceMotion = false
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override var isFlipped: Bool {
+        true
+    }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: 52)
+    }
+
+    func apply(
+        title: String,
+        detail: String,
+        timeText: String,
+        usesStackIcon: Bool,
+        isSelected: Bool,
+        reduceMotion: Bool,
+        action: @escaping () -> Void
+    ) {
+        let localizedTitle = NSLocalizedString(title, comment: "")
+        pressHandler = action
+        self.isSelected = isSelected
+        self.reduceMotion = reduceMotion
+        titleLabel.stringValue = localizedTitle
+        detailLabel.stringValue = NSLocalizedString(detail, comment: "")
+        timeLabel.stringValue = NSLocalizedString(timeText, comment: "")
+        iconView.image = NSImage(
+            systemSymbolName: usesStackIcon ? "square.stack.3d.up.fill" : "doc.text",
+            accessibilityDescription: localizedTitle
+        )
+        toolTip = localizedTitle
+        setAccessibilityLabel(localizedTitle)
+        setAccessibilityValue(isSelected ? NSLocalizedString("Selected", comment: "") : NSLocalizedString("Not selected", comment: ""))
+        updateAppearance()
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea {
+            removeTrackingArea(trackingArea)
+        }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.activeInKeyWindow, .mouseEnteredAndExited, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isHovering = true
+        updateAppearance()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHovering = false
+        updateAppearance()
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        setPressed(true)
+        super.mouseDown(with: event)
+        setPressed(false)
+    }
+
+    private func setup() {
+        translatesAutoresizingMaskIntoConstraints = false
+        title = ""
+        isBordered = false
+        bezelStyle = .regularSquare
+        imagePosition = .noImage
+        focusRingType = .none
+        setButtonType(.momentaryChange)
+        target = self
+        action = #selector(performPress)
+        setAccessibilityElement(true)
+        setAccessibilityRole(.button)
+        wantsLayer = true
+        layer?.cornerRadius = 7
+        layer?.masksToBounds = false
+
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+        iconView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 14, weight: .semibold)
+        iconView.imageScaling = .scaleProportionallyDown
+
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        titleLabel.font = .systemFont(ofSize: 14, weight: .semibold)
+        titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.maximumNumberOfLines = 1
+        titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        timeLabel.translatesAutoresizingMaskIntoConstraints = false
+        timeLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+        timeLabel.lineBreakMode = .byTruncatingTail
+        timeLabel.maximumNumberOfLines = 1
+        timeLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        detailLabel.translatesAutoresizingMaskIntoConstraints = false
+        detailLabel.font = .systemFont(ofSize: 12.5, weight: .regular)
+        detailLabel.lineBreakMode = .byTruncatingTail
+        detailLabel.maximumNumberOfLines = 1
+        detailLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        [iconView, titleLabel, timeLabel, detailLabel].forEach(addSubview(_:))
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(greaterThanOrEqualToConstant: 52),
+            iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            iconView.topAnchor.constraint(equalTo: topAnchor, constant: 9),
+            iconView.widthAnchor.constraint(equalToConstant: 17),
+            iconView.heightAnchor.constraint(equalToConstant: 17),
+            titleLabel.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 7),
+            titleLabel.topAnchor.constraint(equalTo: topAnchor, constant: 7),
+            timeLabel.leadingAnchor.constraint(greaterThanOrEqualTo: titleLabel.trailingAnchor, constant: 8),
+            timeLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            timeLabel.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
+            detailLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+            detailLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            detailLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 4),
+            detailLabel.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -7)
+        ])
+        updateAppearance()
+    }
+
+    @objc private func performPress() {
+        pressHandler()
+    }
+
+    private func setPressed(_ pressed: Bool) {
+        isPressed = pressed
+        updateAppearance()
+    }
+
+    private func updateAppearance() {
+        let tint = NSColor.controlAccentColor
+        let background: NSColor
+        let border: NSColor
+        let shadowOpacity: Float
+
         if isSelected {
-            return Color.accentColor.opacity(isPressed ? 0.18 : 0.12)
+            background = tint.withAlphaComponent(isPressed ? 0.18 : 0.12)
+            border = isPressed ? tint.withAlphaComponent(0.40) : tint.withAlphaComponent(0.25)
+            shadowOpacity = isPressed ? 0.10 : 0
+        } else if isPressed {
+            background = tint.withAlphaComponent(0.10)
+            border = tint.withAlphaComponent(0.40)
+            shadowOpacity = 0.10
+        } else if isHovering {
+            background = .labelColor.withAlphaComponent(0.045)
+            border = .clear
+            shadowOpacity = 0
+        } else {
+            background = .clear
+            border = .clear
+            shadowOpacity = 0
         }
-        if isPressed {
-            return Color.accentColor.opacity(0.10)
-        }
-        return isHovering ? Color.primary.opacity(0.045) : Color.clear
-    }
 
-    private func borderColor(isPressed: Bool) -> Color {
-        if isPressed {
-            return Color.accentColor.opacity(0.40)
-        }
-        return isSelected ? Color.accentColor.opacity(0.25) : Color.clear
-    }
+        iconView.contentTintColor = tint
+        titleLabel.textColor = .labelColor
+        detailLabel.textColor = .secondaryLabelColor
+        timeLabel.textColor = .tertiaryLabelColor
+        layer?.backgroundColor = background.cgColor
+        layer?.borderWidth = border == .clear ? 0 : 1
+        layer?.borderColor = border.cgColor
+        layer?.shadowColor = tint.cgColor
+        layer?.shadowOpacity = shadowOpacity
+        layer?.shadowRadius = isPressed ? 3 : 5
+        layer?.shadowOffset = CGSize(width: 0, height: isPressed ? -1 : -2)
 
-    private func shadowColor(isPressed: Bool) -> Color {
-        isPressed ? Color.accentColor.opacity(0.10) : .clear
+        CATransaction.begin()
+        CATransaction.setDisableActions(reduceMotion)
+        CATransaction.setAnimationDuration(reduceMotion ? 0 : (isPressed ? 0.05 : 0.12))
+        layer?.transform = CATransform3DMakeScale(isPressed ? 0.988 : 1, isPressed ? 0.988 : 1, 1)
+        CATransaction.commit()
     }
 }
 

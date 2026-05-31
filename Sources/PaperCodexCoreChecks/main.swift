@@ -2180,14 +2180,19 @@ func runUILayoutSourceChecks() throws {
        let recentRowEndRange = librarySource.range(of: "private struct RecentConversationDetailPanel", range: recentRowRange.upperBound..<librarySource.endIndex) {
         let recentRowSource = String(librarySource[recentRowRange.lowerBound..<recentRowEndRange.lowerBound])
         try check(
-            recentRowSource.contains("private struct RecentConversationRowButtonStyle: ButtonStyle")
-                && recentRowSource.contains(".buttonStyle(RecentConversationRowButtonStyle(")
-                && recentRowSource.contains("configuration.isPressed")
-                && recentRowSource.contains("PaperCodexMotion.press")
+            recentRowSource.contains("RecentConversationSelectionButton(")
+                && recentRowSource.contains("private struct NativeRecentConversationSelectionButton: NSViewRepresentable")
+                && recentRowSource.contains("private final class NativeRecentConversationSelectionButtonView: NSButton")
+                && recentRowSource.contains("override func mouseDown(with event: NSEvent)")
+                && recentRowSource.contains("setAccessibilityRole(.button)")
+                && recentRowSource.contains("CATransaction.setAnimationDuration")
                 && recentRowSource.contains("PaperCodexIconButton(title: \"Open Session\"")
+                && !recentRowSource.contains("@State private var isHovering = false")
+                && !recentRowSource.contains("private struct RecentConversationRowButtonStyle: ButtonStyle")
+                && !recentRowSource.contains(".buttonStyle(RecentConversationRowButtonStyle(")
                 && !recentRowSource.contains(".buttonStyle(.plain)")
                 && !recentRowSource.contains(".buttonStyle(.borderless)"),
-            "recent conversation rows should provide immediate pressed feedback before selecting or opening sessions"
+            "recent conversation rows should use native AppKit row buttons before selecting or opening sessions"
         )
     } else {
         throw CheckFailure(description: "recent conversation row source should remain inspectable")
