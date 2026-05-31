@@ -2827,42 +2827,49 @@ func runUILayoutSourceChecks() throws {
             && !sidebarRowSource.contains(".buttonStyle(.plain)"),
         "secondary sidebar rows should use native AppKit buttons with immediate pressed feedback"
     )
-    if let recentRowRange = librarySource.range(of: "private struct RecentConversationRow: View"),
-       let recentRowEndRange = librarySource.range(of: "private struct RecentConversationDetailPanel", range: recentRowRange.upperBound..<librarySource.endIndex) {
+    if let recentRowRange = librarySource.range(of: "private struct NativeRecentConversationsContent: NSViewRepresentable"),
+       let recentRowEndRange = librarySource.range(of: "private struct NativeRecentConversationDetailPanel: NSViewRepresentable", range: recentRowRange.upperBound..<librarySource.endIndex) {
         let recentRowSource = String(librarySource[recentRowRange.lowerBound..<recentRowEndRange.lowerBound])
         try check(
-            recentRowSource.contains("RecentConversationSelectionButton(")
-                && recentRowSource.contains("private struct NativeRecentConversationSelectionButton: NSViewRepresentable")
+            recentRowSource.contains("private final class NativeRecentConversationRowView: NSView")
+                && recentRowSource.contains("private final class NativeRecentConversationOpenButton: NSButton")
                 && recentRowSource.contains("private final class NativeRecentConversationSelectionButtonView: NSButton")
                 && recentRowSource.contains("override func mouseDown(with event: NSEvent)")
+                && recentRowSource.contains("override func acceptsFirstMouse(for event: NSEvent?) -> Bool")
                 && recentRowSource.contains("setAccessibilityRole(.button)")
                 && recentRowSource.contains("CATransaction.setAnimationDuration")
-                && recentRowSource.contains("PaperCodexIconButton(title: \"Open Session\"")
+                && recentRowSource.contains("stackView.alignment = .width")
+                && recentRowSource.contains("selectionButton.apply(")
+                && recentRowSource.contains("openButton.apply(")
                 && !recentRowSource.contains("@State private var isHovering = false")
+                && !recentRowSource.contains("private struct NativeRecentConversationSelectionButton: NSViewRepresentable")
+                && !recentRowSource.contains("PaperCodexIconButton(title: \"Open Session\"")
                 && !recentRowSource.contains("private struct RecentConversationRowButtonStyle: ButtonStyle")
                 && !recentRowSource.contains(".buttonStyle(RecentConversationRowButtonStyle(")
                 && !recentRowSource.contains(".buttonStyle(.plain)")
                 && !recentRowSource.contains(".buttonStyle(.borderless)"),
-            "recent conversation rows should use native AppKit row buttons before selecting or opening sessions"
+            "recent conversation rows should render and respond through native AppKit row buttons before selecting or opening sessions"
         )
     } else {
         throw CheckFailure(description: "recent conversation row source should remain inspectable")
     }
-    if let recentDetailRange = librarySource.range(of: "private struct RecentConversationDetailPanel: View"),
+    if let recentDetailRange = librarySource.range(of: "private final class NativeRecentConversationDetailView: NSView"),
        let recentDetailEndRange = librarySource.range(of: "private struct BulkLibraryActionBar", range: recentDetailRange.upperBound..<librarySource.endIndex) {
         let recentDetailSource = String(librarySource[recentDetailRange.lowerBound..<recentDetailEndRange.lowerBound])
         try check(
-            actionButtonSource.contains("var fillsWidth = false")
-                && actionButtonSource.contains("private final class NativePaperCodexPanelButtonView: NSButton")
-                && recentDetailSource.contains("PaperCodexPanelButton(\n                            title: \"Open Session\"")
-                && recentDetailSource.contains("systemImage: \"arrow.forward.circle\"")
-                && recentDetailSource.contains("kind: .primary")
-                && recentDetailSource.contains("fillsWidth: true")
+            recentDetailSource.contains("private final class NativeRecentConversationPrimaryActionButton: NSButton")
+                && recentDetailSource.contains("NativeRecentConversationPrimaryActionButton()")
+                && recentDetailSource.contains("NativeRecentConversationPaperRowView")
+                && recentDetailSource.contains("makePapersSection")
+                && recentDetailSource.contains("bezelStyle = .rounded")
+                && recentDetailSource.contains("setAccessibilityRole(.button)")
+                && recentDetailSource.contains("stackView.alignment = .width")
                 && !recentDetailSource.contains("@State private var isOpenButtonHovering = false")
+                && !recentDetailSource.contains("PaperCodexPanelButton(")
                 && !recentDetailSource.contains("private struct RecentConversationDetailOpenButtonStyle: ButtonStyle")
                 && !recentDetailSource.contains(".buttonStyle(RecentConversationDetailOpenButtonStyle(")
                 && !recentDetailSource.contains(".buttonStyle(.borderedProminent)"),
-            "recent conversation detail Open Session should use the shared native AppKit panel button before opening the reader"
+            "recent conversation detail should render its papers and Open Session action inside the native AppKit detail view"
         )
     } else {
         throw CheckFailure(description: "recent conversation detail source should remain inspectable")
@@ -3960,6 +3967,28 @@ func runUILayoutSourceChecks() throws {
             && librarySource.contains("readablePaperIDs"),
         "library should expose recent conversations and open multi-paper sessions from selections or folders"
     )
+    if let recentContentRange = librarySource.range(of: "private struct NativeRecentConversationsContent: NSViewRepresentable"),
+       let recentDetailRange = librarySource.range(of: "private struct NativeRecentConversationDetailPanel: NSViewRepresentable", range: recentContentRange.upperBound..<librarySource.endIndex) {
+        let recentContentSource = String(librarySource[recentContentRange.lowerBound..<recentDetailRange.lowerBound])
+        try check(
+            librarySource.contains("NativeRecentConversationsContent(")
+                && librarySource.contains("NativeRecentConversationDetailPanel(")
+                && recentContentSource.contains("NativeRecentConversationsContainerView")
+                && recentContentSource.contains("NativeRecentConversationRowView")
+                && recentContentSource.contains("NativeRecentConversationOpenButton")
+                && recentContentSource.contains("NSScrollView")
+                && recentContentSource.contains("NSStackView")
+                && recentContentSource.contains("NativeRecentConversationSelectionButtonView")
+                && !librarySource.contains("private struct RecentConversationsContent: View")
+                && !librarySource.contains("private struct RecentConversationRow: View")
+                && !librarySource.contains("private struct RecentConversationSelectionButton: View")
+                && !librarySource.contains("PaperCodexNativeScrollView {\n                    LazyVStack(spacing: 8)")
+                && !librarySource.contains("ForEach(sessions)"),
+            "recent conversations list should render as a single native AppKit scroll/list surface instead of SwiftUI LazyVStack rows"
+        )
+    } else {
+        throw CheckFailure(description: "native recent conversations list source should remain inspectable")
+    }
     if let sidebarRange = appShellSource.range(of: "struct PrimaryNavigationSection"),
        let paperListRange = librarySource.range(of: "private var paperList: some View"),
        let recentNavRange = appShellSource.range(of: "title: \"Recent Conversations\""),
@@ -3977,8 +4006,11 @@ func runUILayoutSourceChecks() throws {
         appModelSource.contains("enum LibrarySurface")
             && appModelSource.contains("case recentConversations")
             && librarySource.contains("LibrarySurface")
-            && librarySource.contains("RecentConversationsContent")
-            && librarySource.contains("RecentConversationDetailPanel"),
+            && librarySource.contains("NativeRecentConversationsContent")
+            && librarySource.contains("NativeRecentConversationDetailPanel")
+            && librarySource.contains("NativeRecentConversationDetailView")
+            && !librarySource.contains("private struct RecentConversationDetailPanel: View")
+            && !librarySource.contains("ForEach(papers)"),
         "recent conversations should render session content in the main library panes instead of embedding session rows in the sidebar"
     )
     try check(

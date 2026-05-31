@@ -432,7 +432,7 @@ struct LibraryView: View {
         case .papers:
             paperList
         case .recentConversations:
-            RecentConversationsContent(
+            NativeRecentConversationsContent(
                 sessions: model.recentSessions,
                 papersBySessionID: model.recentSessionPapersByID,
                 selectedSessionID: Binding(
@@ -452,7 +452,7 @@ struct LibraryView: View {
         case .papers:
             inspector
         case .recentConversations:
-            RecentConversationDetailPanel(
+            NativeRecentConversationDetailPanel(
                 session: selectedRecentSession,
                 papers: selectedRecentSession.map { model.papersForSession($0) } ?? [],
                 onOpen: { session in
@@ -3142,85 +3142,166 @@ private struct SidebarEmptyText: View {
     }
 }
 
-private struct RecentConversationsContent: View {
+private struct NativeRecentConversationsContent: NSViewRepresentable {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var sessions: [PaperSession]
     var papersBySessionID: [String: [Paper]]
     @Binding var selectedSessionID: String?
     var onOpen: (PaperSession) -> Void
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack(spacing: 12) {
-                Text("Recent Conversations")
-                    .font(.paperCodexSystem(size: 28, weight: .semibold))
-                Spacer()
-            }
+    func makeNSView(context: Context) -> NativeRecentConversationsContainerView {
+        let view = NativeRecentConversationsContainerView()
+        view.apply(
+            sessions: sessions,
+            papersBySessionID: papersBySessionID,
+            selectedSessionID: selectedSessionID,
+            reduceMotion: reduceMotion,
+            onSelect: { selectedSessionID = $0 },
+            onOpen: onOpen
+        )
+        return view
+    }
 
-            if sessions.isEmpty {
-                PaperCodexNativeEmptyState(title: "No Conversations", systemImage: "text.bubble")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                PaperCodexNativeScrollView {
-                    LazyVStack(spacing: 8) {
-                        ForEach(sessions) { session in
-                            RecentConversationRow(
-                                session: session,
-                                papers: papersBySessionID[session.id, default: []],
-                                isSelected: selectedSessionID == session.id,
-                                onSelect: {
-                                    selectedSessionID = session.id
-                                },
-                                onOpen: {
-                                    onOpen(session)
-                                }
-                            )
-                        }
-                    }
-                    .padding(.vertical, 4)
-                }
-            }
-        }
-        .padding(24)
+    func updateNSView(_ view: NativeRecentConversationsContainerView, context: Context) {
+        view.apply(
+            sessions: sessions,
+            papersBySessionID: papersBySessionID,
+            selectedSessionID: selectedSessionID,
+            reduceMotion: reduceMotion,
+            onSelect: { selectedSessionID = $0 },
+            onOpen: onOpen
+        )
     }
 }
 
-private struct RecentConversationRow: View {
-    var session: PaperSession
-    var papers: [Paper]
+private struct RecentConversationRowModel: Equatable, Identifiable {
+    var id: String
+    var title: String
+    var detail: String
+    var timeText: String
+    var usesStackIcon: Bool
     var isSelected: Bool
-    var onSelect: () -> Void
-    var onOpen: () -> Void
+}
 
-    var body: some View {
-        HStack(alignment: .center, spacing: 10) {
-            RecentConversationSelectionButton(
-                title: session.title,
-                detail: detailText,
-                timeText: Self.relativeFormatter.localizedString(for: session.updatedAt, relativeTo: Date()),
-                usesStackIcon: session.paperIDs.count > 1,
-                isSelected: isSelected,
-                action: onSelect
-            )
+private final class NativeRecentConversationsContainerView: NSView {
+    private let titleLabel = NSTextField(labelWithString: "Recent Conversations")
+    private let scrollView = NSScrollView()
+    private let stackView = NSStackView()
+    private let emptyStateView = NativeLibraryEmptyStateView(title: "No Conversations", systemImage: "text.bubble")
+    private var rowViewsByID: [String: NativeRecentConversationRowView] = [:]
 
-            PaperCodexIconButton(title: "Open Session", systemImage: "arrow.forward.circle", tint: .accentColor, action: onOpen)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(isSelected ? Color.accentColor.opacity(0.08) : Color(nsColor: .controlBackgroundColor))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(isSelected ? Color.accentColor.opacity(0.35) : Color.primary.opacity(0.08), lineWidth: 1)
-        )
-        .help(session.title)
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
     }
 
-    private var detailText: String {
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: NSView.noIntrinsicMetric)
+    }
+
+    func apply(
+        sessions: [PaperSession],
+        papersBySessionID: [String: [Paper]],
+        selectedSessionID: String?,
+        reduceMotion: Bool,
+        onSelect: @escaping (String) -> Void,
+        onOpen: @escaping (PaperSession) -> Void
+    ) {
+        let rows = sessions.map { session in
+            RecentConversationRowModel(
+                id: session.id,
+                title: session.title,
+                detail: Self.detailText(for: session, papers: papersBySessionID[session.id, default: []]),
+                timeText: Self.relativeFormatter.localizedString(for: session.updatedAt, relativeTo: Date()),
+                usesStackIcon: session.paperIDs.count > 1,
+                isSelected: selectedSessionID == session.id
+            )
+        }
+        emptyStateView.isHidden = !sessions.isEmpty
+        scrollView.isHidden = sessions.isEmpty
+
+        var reusableRows = rowViewsByID
+        rowViewsByID.removeAll(keepingCapacity: true)
+        stackView.arrangedSubviews.forEach { view in
+            stackView.removeArrangedSubview(view)
+            view.removeFromSuperview()
+        }
+        for (index, session) in sessions.enumerated() {
+            let row = rows[index]
+            let rowView = reusableRows.removeValue(forKey: row.id) ?? NativeRecentConversationRowView()
+            rowView.apply(
+                row: row,
+                reduceMotion: reduceMotion,
+                onSelect: { onSelect(session.id) },
+                onOpen: { onOpen(session) }
+            )
+            stackView.addArrangedSubview(rowView)
+            rowViewsByID[row.id] = rowView
+        }
+    }
+
+    private func setup() {
+        translatesAutoresizingMaskIntoConstraints = false
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
+
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        titleLabel.font = .systemFont(ofSize: 28, weight: .semibold)
+        titleLabel.textColor = .labelColor
+        titleLabel.maximumNumberOfLines = 1
+        titleLabel.lineBreakMode = .byTruncatingTail
+
+        stackView.translatesAutoresizingMaskIntoConstraints = false
+        stackView.orientation = .vertical
+        stackView.alignment = .width
+        stackView.distribution = .fill
+        stackView.spacing = 8
+        stackView.edgeInsets = NSEdgeInsets(top: 4, left: 0, bottom: 4, right: 0)
+
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.drawsBackground = false
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = false
+        scrollView.autohidesScrollers = true
+        scrollView.borderType = .noBorder
+        scrollView.documentView = stackView
+
+        emptyStateView.translatesAutoresizingMaskIntoConstraints = false
+
+        [titleLabel, scrollView, emptyStateView].forEach(addSubview(_:))
+        NSLayoutConstraint.activate([
+            titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 24),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -24),
+            titleLabel.topAnchor.constraint(equalTo: topAnchor, constant: 24),
+
+            scrollView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 24),
+            scrollView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -24),
+            scrollView.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 16),
+            scrollView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -24),
+
+            stackView.leadingAnchor.constraint(equalTo: scrollView.contentView.leadingAnchor),
+            stackView.trailingAnchor.constraint(equalTo: scrollView.contentView.trailingAnchor),
+            stackView.topAnchor.constraint(equalTo: scrollView.contentView.topAnchor),
+            stackView.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor),
+
+            emptyStateView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 24),
+            emptyStateView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -24),
+            emptyStateView.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 16),
+            emptyStateView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -24)
+        ])
+    }
+
+    private static func detailText(for session: PaperSession, papers: [Paper]) -> String {
         guard session.paperIDs.count > 1 else {
             return papers.first?.title ?? "Single paper"
         }
         let firstTitle = papers.first?.title ?? "Multiple papers"
-        return "\(session.paperIDs.count) papers · \(firstTitle)"
+        return "\(session.paperIDs.count) papers - \(firstTitle)"
     }
 
     private static let relativeFormatter: RelativeDateTimeFormatter = {
@@ -3230,65 +3311,149 @@ private struct RecentConversationRow: View {
     }()
 }
 
-private struct RecentConversationSelectionButton: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+private final class NativeRecentConversationRowView: NSView {
+    private let selectionButton = NativeRecentConversationSelectionButtonView()
+    private let openButton = NativeRecentConversationOpenButton()
 
-    var title: String
-    var detail: String
-    var timeText: String
-    var usesStackIcon: Bool
-    var isSelected: Bool
-    var action: () -> Void
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
+    }
 
-    var body: some View {
-        NativeRecentConversationSelectionButton(
-            title: title,
-            detail: detail,
-            timeText: timeText,
-            usesStackIcon: usesStackIcon,
-            isSelected: isSelected,
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: 72)
+    }
+
+    func apply(
+        row: RecentConversationRowModel,
+        reduceMotion: Bool,
+        onSelect: @escaping () -> Void,
+        onOpen: @escaping () -> Void
+    ) {
+        selectionButton.apply(
+            title: row.title,
+            detail: row.detail,
+            timeText: row.timeText,
+            usesStackIcon: row.usesStackIcon,
+            isSelected: row.isSelected,
             reduceMotion: reduceMotion,
-            action: action
+            action: onSelect
         )
-        .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
-        .help(title)
-        .accessibilityLabel(title)
+        openButton.apply(title: row.title, onPress: onOpen)
+    }
+
+    private func setup() {
+        translatesAutoresizingMaskIntoConstraints = false
+        wantsLayer = true
+        layer?.cornerRadius = 8
+        layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
+        layer?.borderWidth = 1
+        layer?.borderColor = NSColor.labelColor.withAlphaComponent(0.08).cgColor
+
+        selectionButton.translatesAutoresizingMaskIntoConstraints = false
+        openButton.translatesAutoresizingMaskIntoConstraints = false
+        [selectionButton, openButton].forEach(addSubview(_:))
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(greaterThanOrEqualToConstant: 72),
+            selectionButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            selectionButton.topAnchor.constraint(equalTo: topAnchor, constant: 10),
+            selectionButton.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -10),
+            openButton.leadingAnchor.constraint(equalTo: selectionButton.trailingAnchor, constant: 10),
+            openButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            openButton.centerYAnchor.constraint(equalTo: centerYAnchor)
+        ])
     }
 }
 
-private struct NativeRecentConversationSelectionButton: NSViewRepresentable {
-    var title: String
-    var detail: String
-    var timeText: String
-    var usesStackIcon: Bool
-    var isSelected: Bool
-    var reduceMotion: Bool
-    var action: () -> Void
+private final class NativeRecentConversationOpenButton: NSButton {
+    private var onPress: () -> Void = {}
 
-    func makeNSView(context: Context) -> NativeRecentConversationSelectionButtonView {
-        let view = NativeRecentConversationSelectionButtonView()
-        view.apply(
-            title: title,
-            detail: detail,
-            timeText: timeText,
-            usesStackIcon: usesStackIcon,
-            isSelected: isSelected,
-            reduceMotion: reduceMotion,
-            action: action
-        )
-        return view
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
     }
 
-    func updateNSView(_ view: NativeRecentConversationSelectionButtonView, context: Context) {
-        view.apply(
-            title: title,
-            detail: detail,
-            timeText: timeText,
-            usesStackIcon: usesStackIcon,
-            isSelected: isSelected,
-            reduceMotion: reduceMotion,
-            action: action
-        )
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+
+    func apply(title: String, onPress: @escaping () -> Void) {
+        self.onPress = onPress
+        image = NSImage(systemSymbolName: "arrow.forward.circle", accessibilityDescription: "Open Session")
+        setAccessibilityLabel("Open Session")
+        toolTip = "Open \(title)"
+    }
+
+    private func setup() {
+        translatesAutoresizingMaskIntoConstraints = false
+        isBordered = false
+        bezelStyle = .regularSquare
+        imagePosition = .imageOnly
+        target = self
+        action = #selector(performPress(_:))
+        focusRingType = .none
+        contentTintColor = .controlAccentColor
+        setButtonType(.momentaryChange)
+        setAccessibilityRole(.button)
+        NSLayoutConstraint.activate([
+            widthAnchor.constraint(equalToConstant: 28),
+            heightAnchor.constraint(equalToConstant: 28)
+        ])
+    }
+
+    @objc private func performPress(_ sender: NSButton) {
+        onPress()
+    }
+}
+
+private final class NativeLibraryEmptyStateView: NSView {
+    private let stackView = NSStackView()
+    private let iconView = NSImageView()
+    private let titleLabel: NSTextField
+
+    init(title: String, systemImage: String) {
+        titleLabel = NSTextField(labelWithString: title)
+        super.init(frame: .zero)
+        iconView.image = NSImage(systemSymbolName: systemImage, accessibilityDescription: title)
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    private func setup() {
+        translatesAutoresizingMaskIntoConstraints = false
+        stackView.translatesAutoresizingMaskIntoConstraints = false
+        stackView.orientation = .vertical
+        stackView.alignment = .centerX
+        stackView.spacing = 10
+
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+        iconView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 28, weight: .regular)
+        iconView.contentTintColor = .tertiaryLabelColor
+        iconView.imageScaling = .scaleProportionallyDown
+
+        titleLabel.font = .systemFont(ofSize: 15, weight: .semibold)
+        titleLabel.textColor = .secondaryLabelColor
+
+        stackView.addArrangedSubview(iconView)
+        stackView.addArrangedSubview(titleLabel)
+        addSubview(stackView)
+        NSLayoutConstraint.activate([
+            stackView.centerXAnchor.constraint(equalTo: centerXAnchor),
+            stackView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            iconView.widthAnchor.constraint(equalToConstant: 34),
+            iconView.heightAnchor.constraint(equalToConstant: 34)
+        ])
     }
 }
 
@@ -3376,6 +3541,10 @@ private final class NativeRecentConversationSelectionButtonView: NSButton {
         setPressed(true)
         super.mouseDown(with: event)
         setPressed(false)
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
     }
 
     private func setup() {
@@ -3489,80 +3658,205 @@ private final class NativeRecentConversationSelectionButtonView: NSButton {
     }
 }
 
-private struct RecentConversationDetailPanel: View {
+private struct NativeRecentConversationDetailPanel: NSViewRepresentable {
     var session: PaperSession?
     var papers: [Paper]
     var onOpen: (PaperSession) -> Void
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Conversation Details")
-                .font(.paperCodexSystem(size: 20, weight: .semibold))
+    func makeNSView(context: Context) -> NativeRecentConversationDetailView {
+        let view = NativeRecentConversationDetailView()
+        view.apply(session: session, papers: papers, onOpen: onOpen)
+        return view
+    }
 
-            if let session {
-                PaperCodexNativeScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
-                        VStack(alignment: .leading, spacing: 7) {
-                            HStack(alignment: .top, spacing: 8) {
-                                Image(systemName: session.paperIDs.count > 1 ? "square.stack.3d.up.fill" : "doc.text")
-                                    .foregroundStyle(Color.accentColor)
-                                Text(session.title)
-                                    .font(.headline)
-                                    .lineLimit(3)
-                            }
-                            Text("\(session.paperIDs.count) paper\(session.paperIDs.count == 1 ? "" : "s")")
-                                .foregroundStyle(.secondary)
-                            Text(Self.relativeFormatter.localizedString(for: session.updatedAt, relativeTo: Date()))
-                                .font(.caption.monospacedDigit())
-                                .foregroundStyle(.tertiary)
-                        }
+    func updateNSView(_ view: NativeRecentConversationDetailView, context: Context) {
+        view.apply(session: session, papers: papers, onOpen: onOpen)
+    }
+}
 
-                        PaperCodexPanelButton(
-                            title: "Open Session",
-                            systemImage: "arrow.forward.circle",
-                            kind: .primary,
-                            fillsWidth: true
-                        ) {
-                            onOpen(session)
-                        }
+private final class NativeRecentConversationDetailView: NSView {
+    private let titleLabel = NSTextField(labelWithString: "Conversation Details")
+    private let scrollView = NSScrollView()
+    private let stackView = NSStackView()
+    private let emptyStateView = NativeLibraryEmptyStateView(title: "Select Conversation", systemImage: "text.bubble")
+    private let openButton = NativeRecentConversationPrimaryActionButton()
+    private var onOpen: (PaperSession) -> Void = { _ in }
+    private var currentSession: PaperSession?
 
-                        Divider()
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
+    }
 
-                        VStack(alignment: .leading, spacing: 10) {
-                            Label("Papers", systemImage: "doc.on.doc")
-                                .font(.headline)
-                            if papers.isEmpty {
-                                SidebarEmptyText("No papers")
-                            } else {
-                                ForEach(papers) { paper in
-                                    HStack(alignment: .top, spacing: 8) {
-                                        Image(systemName: "doc.text")
-                                            .foregroundStyle(.secondary)
-                                        VStack(alignment: .leading, spacing: 3) {
-                                            Text(paper.title)
-                                                .font(.paperCodexSystem(size: 13, weight: .semibold))
-                                                .lineLimit(2)
-                                            Text(paper.authors.isEmpty ? "Authors not set" : paper.authors.joined(separator: ", "))
-                                                .font(.caption)
-                                                .foregroundStyle(.secondary)
-                                                .lineLimit(1)
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    .padding(.trailing, 4)
-                }
-            } else {
-                PaperCodexNativeEmptyState(title: "Select Conversation", systemImage: "text.bubble")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
+    required init?(coder: NSCoder) {
+        nil
+    }
 
-            Spacer(minLength: 0)
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: NSView.noIntrinsicMetric)
+    }
+
+    func apply(session: PaperSession?, papers: [Paper], onOpen: @escaping (PaperSession) -> Void) {
+        currentSession = session
+        self.onOpen = onOpen
+        stackView.arrangedSubviews.forEach { view in
+            stackView.removeArrangedSubview(view)
+            view.removeFromSuperview()
         }
-        .padding(22)
-        .background(Color(nsColor: .controlBackgroundColor))
+        guard let session else {
+            scrollView.isHidden = true
+            emptyStateView.isHidden = false
+            return
+        }
+        emptyStateView.isHidden = true
+        scrollView.isHidden = false
+
+        stackView.addArrangedSubview(makeSessionSummary(session))
+        openButton.apply(title: "Open Session") { [weak self] in
+            guard let session = self?.currentSession else {
+                return
+            }
+            self?.onOpen(session)
+        }
+        stackView.addArrangedSubview(openButton)
+        stackView.addArrangedSubview(makeSeparator())
+        stackView.addArrangedSubview(makePapersSection(papers))
+    }
+
+    private func setup() {
+        translatesAutoresizingMaskIntoConstraints = false
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
+
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        titleLabel.font = .systemFont(ofSize: 20, weight: .semibold)
+        titleLabel.textColor = .labelColor
+
+        stackView.translatesAutoresizingMaskIntoConstraints = false
+        stackView.orientation = .vertical
+        stackView.alignment = .width
+        stackView.distribution = .fill
+        stackView.spacing = 16
+        stackView.edgeInsets = NSEdgeInsets(top: 0, left: 0, bottom: 8, right: 4)
+
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.drawsBackground = false
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = false
+        scrollView.autohidesScrollers = true
+        scrollView.borderType = .noBorder
+        scrollView.documentView = stackView
+
+        emptyStateView.translatesAutoresizingMaskIntoConstraints = false
+
+        [titleLabel, scrollView, emptyStateView].forEach(addSubview(_:))
+        NSLayoutConstraint.activate([
+            titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 22),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -22),
+            titleLabel.topAnchor.constraint(equalTo: topAnchor, constant: 22),
+
+            scrollView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 22),
+            scrollView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -22),
+            scrollView.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 16),
+            scrollView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -22),
+
+            stackView.leadingAnchor.constraint(equalTo: scrollView.contentView.leadingAnchor),
+            stackView.trailingAnchor.constraint(equalTo: scrollView.contentView.trailingAnchor),
+            stackView.topAnchor.constraint(equalTo: scrollView.contentView.topAnchor),
+            stackView.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor),
+
+            emptyStateView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 22),
+            emptyStateView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -22),
+            emptyStateView.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 16),
+            emptyStateView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -22)
+        ])
+    }
+
+    private func makeSessionSummary(_ session: PaperSession) -> NSView {
+        let stack = NSStackView()
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.orientation = .vertical
+        stack.alignment = .width
+        stack.spacing = 7
+
+        let header = NSStackView()
+        header.orientation = .horizontal
+        header.alignment = .top
+        header.spacing = 8
+
+        let icon = NSImageView()
+        icon.translatesAutoresizingMaskIntoConstraints = false
+        icon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 14, weight: .semibold)
+        icon.contentTintColor = .controlAccentColor
+        icon.image = NSImage(
+            systemSymbolName: session.paperIDs.count > 1 ? "square.stack.3d.up.fill" : "doc.text",
+            accessibilityDescription: session.title
+        )
+        let title = nativeLabel(session.title, font: .systemFont(ofSize: 15, weight: .semibold), color: .labelColor, lines: 3)
+        header.addArrangedSubview(icon)
+        header.addArrangedSubview(title)
+        stack.addArrangedSubview(header)
+        stack.addArrangedSubview(nativeLabel("\(session.paperIDs.count) paper\(session.paperIDs.count == 1 ? "" : "s")", font: .systemFont(ofSize: 13, weight: .regular), color: .secondaryLabelColor, lines: 1))
+        stack.addArrangedSubview(nativeLabel(Self.relativeFormatter.localizedString(for: session.updatedAt, relativeTo: Date()), font: .monospacedDigitSystemFont(ofSize: 11, weight: .regular), color: .tertiaryLabelColor, lines: 1))
+        NSLayoutConstraint.activate([
+            icon.widthAnchor.constraint(equalToConstant: 17),
+            icon.heightAnchor.constraint(equalToConstant: 17)
+        ])
+        return stack
+    }
+
+    private func makePapersSection(_ papers: [Paper]) -> NSView {
+        let stack = NSStackView()
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.orientation = .vertical
+        stack.alignment = .width
+        stack.spacing = 10
+        stack.addArrangedSubview(makeSectionHeader(title: "Papers", systemImage: "doc.on.doc"))
+        if papers.isEmpty {
+            stack.addArrangedSubview(nativeLabel("No papers", font: .systemFont(ofSize: 13, weight: .regular), color: .secondaryLabelColor, lines: 1))
+        } else {
+            for paper in papers {
+                stack.addArrangedSubview(NativeRecentConversationPaperRowView(paper: paper))
+            }
+        }
+        return stack
+    }
+
+    private func makeSectionHeader(title: String, systemImage: String) -> NSView {
+        let row = NSStackView()
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 7
+        let icon = NSImageView()
+        icon.translatesAutoresizingMaskIntoConstraints = false
+        icon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 13, weight: .semibold)
+        icon.contentTintColor = .controlAccentColor
+        icon.image = NSImage(systemSymbolName: systemImage, accessibilityDescription: title)
+        row.addArrangedSubview(icon)
+        row.addArrangedSubview(nativeLabel(title, font: .systemFont(ofSize: 14, weight: .semibold), color: .labelColor, lines: 1))
+        NSLayoutConstraint.activate([
+            icon.widthAnchor.constraint(equalToConstant: 16),
+            icon.heightAnchor.constraint(equalToConstant: 16)
+        ])
+        return row
+    }
+
+    private func makeSeparator() -> NSBox {
+        let separator = NSBox()
+        separator.boxType = .separator
+        separator.translatesAutoresizingMaskIntoConstraints = false
+        separator.heightAnchor.constraint(equalToConstant: 1).isActive = true
+        return separator
+    }
+
+    private func nativeLabel(_ text: String, font: NSFont, color: NSColor, lines: Int) -> NSTextField {
+        let label = NSTextField(labelWithString: text)
+        label.font = font
+        label.textColor = color
+        label.maximumNumberOfLines = lines
+        label.lineBreakMode = .byWordWrapping
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        return label
     }
 
     private static let relativeFormatter: RelativeDateTimeFormatter = {
@@ -3570,6 +3864,101 @@ private struct RecentConversationDetailPanel: View {
         formatter.unitsStyle = .short
         return formatter
     }()
+}
+
+private final class NativeRecentConversationPaperRowView: NSView {
+    init(paper: Paper) {
+        super.init(frame: .zero)
+        setup(paper: paper)
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    private func setup(paper: Paper) {
+        translatesAutoresizingMaskIntoConstraints = false
+        let row = NSStackView()
+        row.translatesAutoresizingMaskIntoConstraints = false
+        row.orientation = .horizontal
+        row.alignment = .top
+        row.spacing = 8
+
+        let icon = NSImageView()
+        icon.translatesAutoresizingMaskIntoConstraints = false
+        icon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 13, weight: .regular)
+        icon.contentTintColor = .secondaryLabelColor
+        icon.image = NSImage(systemSymbolName: "doc.text", accessibilityDescription: paper.title)
+
+        let textStack = NSStackView()
+        textStack.orientation = .vertical
+        textStack.alignment = .leading
+        textStack.spacing = 3
+        textStack.addArrangedSubview(label(paper.title, font: .systemFont(ofSize: 13, weight: .semibold), color: .labelColor, lines: 2))
+        textStack.addArrangedSubview(label(paper.authors.isEmpty ? "Authors not set" : paper.authors.joined(separator: ", "), font: .systemFont(ofSize: 11.5, weight: .regular), color: .secondaryLabelColor, lines: 1))
+
+        row.addArrangedSubview(icon)
+        row.addArrangedSubview(textStack)
+        addSubview(row)
+        NSLayoutConstraint.activate([
+            row.leadingAnchor.constraint(equalTo: leadingAnchor),
+            row.trailingAnchor.constraint(equalTo: trailingAnchor),
+            row.topAnchor.constraint(equalTo: topAnchor),
+            row.bottomAnchor.constraint(equalTo: bottomAnchor),
+            icon.widthAnchor.constraint(equalToConstant: 16),
+            icon.heightAnchor.constraint(equalToConstant: 16)
+        ])
+    }
+
+    private func label(_ text: String, font: NSFont, color: NSColor, lines: Int) -> NSTextField {
+        let label = NSTextField(labelWithString: text)
+        label.font = font
+        label.textColor = color
+        label.maximumNumberOfLines = lines
+        label.lineBreakMode = .byWordWrapping
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        return label
+    }
+}
+
+private final class NativeRecentConversationPrimaryActionButton: NSButton {
+    private var onPress: () -> Void = {}
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+
+    func apply(title: String, onPress: @escaping () -> Void) {
+        self.title = title
+        self.onPress = onPress
+        image = NSImage(systemSymbolName: "arrow.forward.circle", accessibilityDescription: title)
+        setAccessibilityLabel(title)
+    }
+
+    private func setup() {
+        translatesAutoresizingMaskIntoConstraints = false
+        target = self
+        action = #selector(performPress(_:))
+        bezelStyle = .rounded
+        controlSize = .regular
+        imagePosition = .imageLeading
+        font = .systemFont(ofSize: 13, weight: .semibold)
+        setButtonType(.momentaryPushIn)
+        setAccessibilityRole(.button)
+    }
+
+    @objc private func performPress(_ sender: NSButton) {
+        onPress()
+    }
 }
 
 private struct BulkLibraryActionBar: View {
