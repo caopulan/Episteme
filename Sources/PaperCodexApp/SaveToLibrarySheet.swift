@@ -125,49 +125,31 @@ struct SaveToLibrarySheet: View {
                 }
             }
 
-            PaperCodexNativeScrollView {
-                VStack(alignment: .leading, spacing: 6) {
-                    if activeNewCategoryParentID == saveToLibraryRootDraftParentID {
-                        newCategoryInlineRow(parentID: nil, depth: 0, connectorContinuations: [])
-                    }
-
-                    if visibleFolderItems.isEmpty && activeNewCategoryParentID == nil {
+            Group {
+                if visibleFolderItems.isEmpty && activeNewCategoryParentID == nil {
+                    HStack(spacing: 8) {
+                        Image(systemName: "folder")
+                            .foregroundStyle(.secondary)
                         Text("No folders yet")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                            .padding(12)
-                    } else {
-                        ForEach(visibleFolderItems) { item in
-                            SaveToLibraryFolderRow(
-                                item: item,
-                                isSelected: isSelected(item.node.id),
-                                isExpanded: !collapsedCategoryIDs.contains(item.node.id),
-                                hasChildren: hasChildren(item.node.id),
-                                onToggleExpanded: {
-                                    toggleCollapsed(item.node.id)
-                                },
-                                onToggleSelected: {
-                                    toggleSelection(item.node.id)
-                                },
-                                onCreateChild: {
-                                    beginNewCategory(parentID: item.node.id)
-                                },
-                                onRemoveNewCategory: item.node.isNew ? {
-                                    removeNewCategory(item.node.id)
-                                } : nil
-                            )
-                            if activeNewCategoryParentID == item.node.id {
-                                newCategoryInlineRow(
-                                    parentID: item.node.id,
-                                    depth: item.depth + 1,
-                                    connectorContinuations: item.connectorContinuations + [hasChildren(item.node.id)]
-                                )
-                            }
-                        }
+                        Spacer()
                     }
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color(nsColor: .textBackgroundColor))
+                } else {
+                    NativeSaveToLibraryFolderPicker(
+                        rows: folderPickerRows,
+                        draftName: $newCategoryName,
+                        onToggleExpanded: toggleCollapsed,
+                        onToggleSelected: toggleSelection,
+                        onCreateChild: beginNewCategory,
+                        onRemoveNewCategory: removeNewCategory,
+                        onCommitDraft: commitNewCategory,
+                        onCancelDraft: cancelNewCategory
+                    )
                 }
-                .padding(10)
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .frame(maxHeight: 260)
             .background(Color(nsColor: .textBackgroundColor))
@@ -176,41 +158,6 @@ struct SaveToLibrarySheet: View {
                     .stroke(Color.black.opacity(0.08), lineWidth: 1)
             )
             .clipShape(RoundedRectangle(cornerRadius: 8))
-        }
-    }
-
-    private func newCategoryInlineRow(parentID: String?, depth: Int, connectorContinuations: [Bool]) -> some View {
-        HStack(spacing: 8) {
-            Color.clear
-                .frame(width: SaveToLibraryLayout.chevronWidth, height: 24)
-            Image(systemName: "folder.badge.plus")
-                .frame(width: SaveToLibraryLayout.folderIconWidth)
-                .foregroundStyle(Color.accentColor)
-            PaperCodexNativeTextField(text: $newCategoryName, placeholder: "New folder")
-                .frame(height: 30)
-            PaperCodexIconButton(
-                title: "Add Folder",
-                systemImage: "checkmark",
-                tint: .accentColor,
-                disabled: trimmedNewCategoryName.isEmpty
-            ) {
-                commitNewCategory(parentID: parentID)
-            }
-            PaperCodexIconButton(title: "Cancel", systemImage: "xmark") {
-                cancelNewCategory()
-            }
-        }
-        .padding(.leading, CGFloat(depth) * SaveToLibraryLayout.treeIndentWidth)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 6)
-        .background(Color.accentColor.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: 7))
-        .background(alignment: .leading) {
-            SaveToLibraryTreeConnector(
-                depth: depth,
-                connectorContinuations: connectorContinuations
-            )
-            .allowsHitTesting(false)
         }
     }
 
@@ -244,6 +191,34 @@ struct SaveToLibrarySheet: View {
 
     private var visibleFolderItems: [SaveToLibraryFolderItem] {
         folderItems(parentID: nil, respectingCollapse: true)
+    }
+
+    private var folderPickerRows: [SaveToLibraryFolderPickerRowModel] {
+        var rows: [SaveToLibraryFolderPickerRowModel] = []
+        if activeNewCategoryParentID == saveToLibraryRootDraftParentID {
+            rows.append(.draft(parentID: nil, depth: 0, connectorContinuations: []))
+        }
+        for item in visibleFolderItems {
+            rows.append(
+                .folder(
+                    item: item,
+                    isSelected: isSelected(item.node.id),
+                    isExpanded: !collapsedCategoryIDs.contains(item.node.id),
+                    hasChildren: hasChildren(item.node.id),
+                    canRemoveNewCategory: item.node.isNew
+                )
+            )
+            if activeNewCategoryParentID == item.node.id {
+                rows.append(
+                    .draft(
+                        parentID: item.node.id,
+                        depth: item.depth + 1,
+                        connectorContinuations: item.connectorContinuations + [hasChildren(item.node.id)]
+                    )
+                )
+            }
+        }
+        return rows
     }
 
     private var allFolderItems: [SaveToLibraryFolderItem] {
@@ -493,6 +468,655 @@ private struct SaveToLibrarySelectedFolderSummary: Identifiable {
     var path: String
 }
 
+private struct SaveToLibraryFolderPickerRowModel: Identifiable, Equatable {
+    enum Kind: Equatable {
+        case folder
+        case draft
+    }
+
+    var id: String
+    var kind: Kind
+    var parentID: String?
+    var categoryID: String?
+    var title: String
+    var depth: Int
+    var connectorContinuations: [Bool]
+    var isSelected: Bool
+    var isExpanded: Bool
+    var hasChildren: Bool
+    var isNew: Bool
+    var canRemoveNewCategory: Bool
+
+    static func folder(
+        item: SaveToLibraryFolderItem,
+        isSelected: Bool,
+        isExpanded: Bool,
+        hasChildren: Bool,
+        canRemoveNewCategory: Bool
+    ) -> SaveToLibraryFolderPickerRowModel {
+        SaveToLibraryFolderPickerRowModel(
+            id: "folder-\(item.node.id)",
+            kind: .folder,
+            parentID: item.node.parentID,
+            categoryID: item.node.id,
+            title: item.node.name,
+            depth: item.depth,
+            connectorContinuations: item.connectorContinuations,
+            isSelected: isSelected,
+            isExpanded: isExpanded,
+            hasChildren: hasChildren,
+            isNew: item.node.isNew,
+            canRemoveNewCategory: canRemoveNewCategory
+        )
+    }
+
+    static func draft(parentID: String?, depth: Int, connectorContinuations: [Bool]) -> SaveToLibraryFolderPickerRowModel {
+        SaveToLibraryFolderPickerRowModel(
+            id: "draft-\(parentID ?? "root")",
+            kind: .draft,
+            parentID: parentID,
+            categoryID: nil,
+            title: "New folder",
+            depth: depth,
+            connectorContinuations: connectorContinuations,
+            isSelected: false,
+            isExpanded: false,
+            hasChildren: false,
+            isNew: true,
+            canRemoveNewCategory: false
+        )
+    }
+}
+
+private struct NativeSaveToLibraryFolderPicker: NSViewRepresentable {
+    var rows: [SaveToLibraryFolderPickerRowModel]
+    @Binding var draftName: String
+    var onToggleExpanded: (String) -> Void
+    var onToggleSelected: (String) -> Void
+    var onCreateChild: (String?) -> Void
+    var onRemoveNewCategory: (String) -> Void
+    var onCommitDraft: (String?) -> Void
+    var onCancelDraft: () -> Void
+
+    func makeNSView(context: Context) -> NativeSaveToLibraryFolderPickerView {
+        let view = NativeSaveToLibraryFolderPickerView()
+        view.apply(
+            rows: rows,
+            draftName: draftName,
+            onDraftNameChange: { draftName = $0 },
+            onToggleExpanded: onToggleExpanded,
+            onToggleSelected: onToggleSelected,
+            onCreateChild: onCreateChild,
+            onRemoveNewCategory: onRemoveNewCategory,
+            onCommitDraft: onCommitDraft,
+            onCancelDraft: onCancelDraft
+        )
+        return view
+    }
+
+    func updateNSView(_ view: NativeSaveToLibraryFolderPickerView, context: Context) {
+        view.apply(
+            rows: rows,
+            draftName: draftName,
+            onDraftNameChange: { draftName = $0 },
+            onToggleExpanded: onToggleExpanded,
+            onToggleSelected: onToggleSelected,
+            onCreateChild: onCreateChild,
+            onRemoveNewCategory: onRemoveNewCategory,
+            onCommitDraft: onCommitDraft,
+            onCancelDraft: onCancelDraft
+        )
+    }
+}
+
+private final class NativeSaveToLibraryFolderPickerView: NSScrollView {
+    private let tableView = NativeSaveToLibraryFolderPickerTableView()
+    private let controller = NativeSaveToLibraryFolderPickerController()
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: NSView.noIntrinsicMetric)
+    }
+
+    func apply(
+        rows: [SaveToLibraryFolderPickerRowModel],
+        draftName: String,
+        onDraftNameChange: @escaping (String) -> Void,
+        onToggleExpanded: @escaping (String) -> Void,
+        onToggleSelected: @escaping (String) -> Void,
+        onCreateChild: @escaping (String?) -> Void,
+        onRemoveNewCategory: @escaping (String) -> Void,
+        onCommitDraft: @escaping (String?) -> Void,
+        onCancelDraft: @escaping () -> Void
+    ) {
+        let shouldReload = controller.apply(
+            rows: rows,
+            draftName: draftName,
+            onDraftNameChange: onDraftNameChange,
+            onToggleExpanded: onToggleExpanded,
+            onToggleSelected: onToggleSelected,
+            onCreateChild: onCreateChild,
+            onRemoveNewCategory: onRemoveNewCategory,
+            onCommitDraft: onCommitDraft,
+            onCancelDraft: onCancelDraft
+        )
+        if shouldReload {
+            tableView.reloadData()
+            if let draftIndex = rows.firstIndex(where: { $0.kind == .draft }) {
+                tableView.scrollRowToVisible(draftIndex)
+            }
+        }
+        fitColumnToVisibleWidth()
+    }
+
+    override func layout() {
+        super.layout()
+        fitColumnToVisibleWidth()
+    }
+
+    private func setup() {
+        translatesAutoresizingMaskIntoConstraints = false
+        drawsBackground = false
+        hasVerticalScroller = true
+        hasHorizontalScroller = false
+        autohidesScrollers = true
+        borderType = .noBorder
+        scrollerStyle = .overlay
+
+        let column = NSTableColumn(identifier: NativeSaveToLibraryFolderPickerController.columnIdentifier)
+        column.resizingMask = .autoresizingMask
+        tableView.addTableColumn(column)
+        tableView.headerView = nil
+        tableView.backgroundColor = .clear
+        tableView.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
+        tableView.autoresizingMask = [.width]
+        tableView.usesAlternatingRowBackgroundColors = false
+        tableView.selectionHighlightStyle = .none
+        tableView.allowsEmptySelection = true
+        tableView.allowsMultipleSelection = false
+        tableView.intercellSpacing = NSSize(width: 0, height: 6)
+        tableView.style = .plain
+        tableView.dataSource = controller
+        tableView.delegate = controller
+        controller.attach(tableView: tableView)
+
+        documentView = tableView
+    }
+
+    private func fitColumnToVisibleWidth() {
+        guard let column = tableView.tableColumns.first else {
+            return
+        }
+        let visibleWidth = contentView.bounds.width
+        guard visibleWidth > 0 else {
+            return
+        }
+        if abs(tableView.frame.width - visibleWidth) > 0.5 {
+            tableView.frame.size.width = visibleWidth
+        }
+        if abs(column.width - visibleWidth) > 0.5 {
+            column.width = visibleWidth
+        }
+    }
+}
+
+private final class NativeSaveToLibraryFolderPickerTableView: NSTableView {
+    override var acceptsFirstResponder: Bool {
+        true
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(self)
+        super.mouseDown(with: event)
+    }
+}
+
+@MainActor private final class NativeSaveToLibraryFolderPickerController: NSObject, NSTableViewDataSource, NSTableViewDelegate {
+    static let columnIdentifier = NSUserInterfaceItemIdentifier("save-to-library-folder")
+
+    private static let folderCellIdentifier = NSUserInterfaceItemIdentifier("SaveToLibraryFolderCell")
+    private static let draftCellIdentifier = NSUserInterfaceItemIdentifier("SaveToLibraryFolderDraftCell")
+
+    private weak var tableView: NSTableView?
+    private var rows: [SaveToLibraryFolderPickerRowModel] = []
+    private var draftName = ""
+    private var onDraftNameChange: (String) -> Void = { _ in }
+    private var onToggleExpanded: (String) -> Void = { _ in }
+    private var onToggleSelected: (String) -> Void = { _ in }
+    private var onCreateChild: (String?) -> Void = { _ in }
+    private var onRemoveNewCategory: (String) -> Void = { _ in }
+    private var onCommitDraft: (String?) -> Void = { _ in }
+    private var onCancelDraft: () -> Void = {}
+
+    func attach(tableView: NSTableView) {
+        self.tableView = tableView
+    }
+
+    @discardableResult
+    func apply(
+        rows: [SaveToLibraryFolderPickerRowModel],
+        draftName: String,
+        onDraftNameChange: @escaping (String) -> Void,
+        onToggleExpanded: @escaping (String) -> Void,
+        onToggleSelected: @escaping (String) -> Void,
+        onCreateChild: @escaping (String?) -> Void,
+        onRemoveNewCategory: @escaping (String) -> Void,
+        onCommitDraft: @escaping (String?) -> Void,
+        onCancelDraft: @escaping () -> Void
+    ) -> Bool {
+        let shouldReload = rows != self.rows
+        self.rows = rows
+        self.draftName = draftName
+        self.onDraftNameChange = onDraftNameChange
+        self.onToggleExpanded = onToggleExpanded
+        self.onToggleSelected = onToggleSelected
+        self.onCreateChild = onCreateChild
+        self.onRemoveNewCategory = onRemoveNewCategory
+        self.onCommitDraft = onCommitDraft
+        self.onCancelDraft = onCancelDraft
+        return shouldReload
+    }
+
+    func numberOfRows(in tableView: NSTableView) -> Int {
+        rows.count
+    }
+
+    func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
+        guard rows.indices.contains(row) else {
+            return SaveToLibraryLayout.treeConnectorHeight
+        }
+        return rows[row].kind == .draft ? 46 : SaveToLibraryLayout.treeConnectorHeight
+    }
+
+    func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool {
+        false
+    }
+
+    func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
+        let rowView = NativeSaveToLibraryFolderPickerRowView()
+        rowView.isEmphasized = false
+        return rowView
+    }
+
+    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        guard rows.indices.contains(row) else {
+            return nil
+        }
+        let rowModel = rows[row]
+        switch rowModel.kind {
+        case .folder:
+            let cell = (tableView.makeView(withIdentifier: Self.folderCellIdentifier, owner: self) as? NativeSaveToLibraryFolderRowCellView)
+                ?? NativeSaveToLibraryFolderRowCellView(identifier: Self.folderCellIdentifier)
+            cell.configure(
+                row: rowModel,
+                onToggleExpanded: onToggleExpanded,
+                onToggleSelected: onToggleSelected,
+                onCreateChild: onCreateChild,
+                onRemoveNewCategory: onRemoveNewCategory
+            )
+            return cell
+        case .draft:
+            let cell = (tableView.makeView(withIdentifier: Self.draftCellIdentifier, owner: self) as? NativeSaveToLibraryFolderDraftCellView)
+                ?? NativeSaveToLibraryFolderDraftCellView(identifier: Self.draftCellIdentifier)
+            cell.configure(
+                row: rowModel,
+                draftName: draftName,
+                onDraftNameChange: onDraftNameChange,
+                onCommitDraft: onCommitDraft,
+                onCancelDraft: onCancelDraft
+            )
+            return cell
+        }
+    }
+}
+
+private final class NativeSaveToLibraryFolderPickerRowView: NSTableRowView {
+    override func drawSelection(in dirtyRect: NSRect) {}
+
+    override var isEmphasized: Bool {
+        get { false }
+        set {}
+    }
+}
+
+private final class NativeSaveToLibraryFolderRowCellView: NSTableCellView {
+    private let connectorView = NativeSaveToLibraryTreeConnectorView()
+    private let expandButton = NativeSaveToLibraryFolderIconButtonView()
+    private let selectionButton = NativeSaveToLibraryFolderSelectionButtonView()
+    private let createButton = NativeSaveToLibraryFolderIconButtonView()
+    private let removeButton = NativeSaveToLibraryFolderIconButtonView()
+    private var contentLeadingConstraint: NSLayoutConstraint?
+
+    init(identifier: NSUserInterfaceItemIdentifier) {
+        super.init(frame: .zero)
+        self.identifier = identifier
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    func configure(
+        row: SaveToLibraryFolderPickerRowModel,
+        onToggleExpanded: @escaping (String) -> Void,
+        onToggleSelected: @escaping (String) -> Void,
+        onCreateChild: @escaping (String?) -> Void,
+        onRemoveNewCategory: @escaping (String) -> Void
+    ) {
+        connectorView.apply(depth: row.depth, connectorContinuations: row.connectorContinuations)
+        contentLeadingConstraint?.constant = CGFloat(row.depth) * SaveToLibraryLayout.treeIndentWidth
+
+        if row.hasChildren, let categoryID = row.categoryID {
+            expandButton.isHidden = false
+            expandButton.apply(
+                title: row.isExpanded ? "Collapse" : "Expand",
+                systemImage: row.isExpanded ? "chevron.down" : "chevron.right",
+                tint: .secondary,
+                width: SaveToLibraryLayout.chevronWidth,
+                height: 24,
+                symbolSize: 9,
+                action: { onToggleExpanded(categoryID) }
+            )
+        } else {
+            expandButton.isHidden = true
+            expandButton.apply(
+                title: "",
+                systemImage: "chevron.right",
+                tint: .secondary,
+                width: SaveToLibraryLayout.chevronWidth,
+                height: 24,
+                symbolSize: 9,
+                action: {}
+            )
+        }
+
+        if let categoryID = row.categoryID {
+            selectionButton.apply(
+                title: row.title,
+                isSelected: row.isSelected,
+                isNew: row.isNew,
+                action: { onToggleSelected(categoryID) }
+            )
+            createButton.apply(
+                title: "New subfolder",
+                systemImage: "plus",
+                tint: .accentColor,
+                width: 22,
+                height: 22,
+                symbolSize: 11,
+                action: { onCreateChild(categoryID) }
+            )
+            removeButton.isHidden = !row.canRemoveNewCategory
+            removeButton.apply(
+                title: row.canRemoveNewCategory ? "Remove new folder" : "",
+                systemImage: "trash",
+                tint: .red,
+                width: row.canRemoveNewCategory ? 22 : 0,
+                height: 22,
+                symbolSize: 11,
+                action: row.canRemoveNewCategory ? { onRemoveNewCategory(categoryID) } : {}
+            )
+        }
+    }
+
+    private func setup() {
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.clear.cgColor
+
+        connectorView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(connectorView)
+
+        [expandButton, selectionButton, createButton, removeButton].forEach { view in
+            view.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(view)
+        }
+
+        let leading = expandButton.leadingAnchor.constraint(equalTo: leadingAnchor)
+        contentLeadingConstraint = leading
+        NSLayoutConstraint.activate([
+            connectorView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            connectorView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            connectorView.topAnchor.constraint(equalTo: topAnchor),
+            connectorView.bottomAnchor.constraint(equalTo: bottomAnchor),
+
+            leading,
+            expandButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+
+            selectionButton.leadingAnchor.constraint(equalTo: expandButton.trailingAnchor, constant: SaveToLibraryLayout.chevronFolderSpacing),
+            selectionButton.trailingAnchor.constraint(equalTo: createButton.leadingAnchor, constant: -4),
+            selectionButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+
+            createButton.trailingAnchor.constraint(equalTo: removeButton.leadingAnchor, constant: -4),
+            createButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+
+            removeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
+            removeButton.centerYAnchor.constraint(equalTo: centerYAnchor)
+        ])
+    }
+}
+
+private final class NativeSaveToLibraryFolderDraftCellView: NSTableCellView, NSTextFieldDelegate {
+    private let connectorView = NativeSaveToLibraryTreeConnectorView()
+    private let cardView = NSView()
+    private let chevronSpacer = NSView()
+    private let iconView = NSImageView()
+    private let nameField = NSTextField()
+    private let addButton = NativeSaveToLibraryFolderIconButtonView()
+    private let cancelButton = NativeSaveToLibraryFolderIconButtonView()
+    private var cardLeadingConstraint: NSLayoutConstraint?
+    private var parentID: String?
+    private var onDraftNameChange: (String) -> Void = { _ in }
+    private var onCommitDraft: (String?) -> Void = { _ in }
+
+    init(identifier: NSUserInterfaceItemIdentifier) {
+        super.init(frame: .zero)
+        self.identifier = identifier
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    func configure(
+        row: SaveToLibraryFolderPickerRowModel,
+        draftName: String,
+        onDraftNameChange: @escaping (String) -> Void,
+        onCommitDraft: @escaping (String?) -> Void,
+        onCancelDraft: @escaping () -> Void
+    ) {
+        parentID = row.parentID
+        self.onDraftNameChange = onDraftNameChange
+        self.onCommitDraft = onCommitDraft
+        connectorView.apply(depth: row.depth, connectorContinuations: row.connectorContinuations)
+        cardLeadingConstraint?.constant = CGFloat(row.depth) * SaveToLibraryLayout.treeIndentWidth
+        if nameField.stringValue != draftName,
+           window?.firstResponder !== nameField.currentEditor() {
+            nameField.stringValue = draftName
+        }
+        updateCommitEnabled()
+        addButton.apply(
+            title: "Add Folder",
+            systemImage: "checkmark",
+            tint: .accentColor,
+            width: 24,
+            height: 24,
+            symbolSize: 12,
+            action: { [weak self] in self?.commitDraft() }
+        )
+        cancelButton.apply(
+            title: "Cancel",
+            systemImage: "xmark",
+            tint: .secondary,
+            width: 24,
+            height: 24,
+            symbolSize: 12,
+            action: onCancelDraft
+        )
+        DispatchQueue.main.async { [weak self] in
+            guard let self,
+                  self.window?.firstResponder !== self.nameField.currentEditor(),
+                  self.nameField.stringValue.isEmpty else {
+                return
+            }
+            self.window?.makeFirstResponder(self.nameField)
+        }
+    }
+
+    func controlTextDidChange(_ obj: Notification) {
+        onDraftNameChange(nameField.stringValue)
+        updateCommitEnabled()
+    }
+
+    private func setup() {
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.clear.cgColor
+
+        connectorView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(connectorView)
+
+        cardView.translatesAutoresizingMaskIntoConstraints = false
+        cardView.wantsLayer = true
+        cardView.layer?.cornerRadius = 7
+        cardView.layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.08).cgColor
+        addSubview(cardView)
+
+        chevronSpacer.translatesAutoresizingMaskIntoConstraints = false
+        cardView.addSubview(chevronSpacer)
+
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+        iconView.image = NSImage(systemSymbolName: "folder.badge.plus", accessibilityDescription: "New folder")
+        iconView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 14, weight: .semibold)
+        iconView.contentTintColor = .controlAccentColor
+        iconView.imageScaling = .scaleProportionallyDown
+        cardView.addSubview(iconView)
+
+        nameField.translatesAutoresizingMaskIntoConstraints = false
+        nameField.placeholderString = "New folder"
+        nameField.font = .systemFont(ofSize: 12.5, weight: .medium)
+        nameField.delegate = self
+        nameField.target = self
+        nameField.action = #selector(commitDraft)
+        cardView.addSubview(nameField)
+
+        addButton.translatesAutoresizingMaskIntoConstraints = false
+        cardView.addSubview(addButton)
+
+        cancelButton.translatesAutoresizingMaskIntoConstraints = false
+        cardView.addSubview(cancelButton)
+
+        let cardLeading = cardView.leadingAnchor.constraint(equalTo: leadingAnchor)
+        cardLeadingConstraint = cardLeading
+        NSLayoutConstraint.activate([
+            connectorView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            connectorView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            connectorView.topAnchor.constraint(equalTo: topAnchor),
+            connectorView.bottomAnchor.constraint(equalTo: bottomAnchor),
+
+            cardLeading,
+            cardView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
+            cardView.topAnchor.constraint(equalTo: topAnchor, constant: 4),
+            cardView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -4),
+
+            chevronSpacer.leadingAnchor.constraint(equalTo: cardView.leadingAnchor, constant: 8),
+            chevronSpacer.centerYAnchor.constraint(equalTo: cardView.centerYAnchor),
+            chevronSpacer.widthAnchor.constraint(equalToConstant: SaveToLibraryLayout.chevronWidth),
+            chevronSpacer.heightAnchor.constraint(equalToConstant: 24),
+
+            iconView.leadingAnchor.constraint(equalTo: chevronSpacer.trailingAnchor, constant: SaveToLibraryLayout.chevronFolderSpacing),
+            iconView.centerYAnchor.constraint(equalTo: cardView.centerYAnchor),
+            iconView.widthAnchor.constraint(equalToConstant: SaveToLibraryLayout.folderIconWidth),
+            iconView.heightAnchor.constraint(equalToConstant: SaveToLibraryLayout.folderIconWidth),
+
+            nameField.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 8),
+            nameField.trailingAnchor.constraint(equalTo: addButton.leadingAnchor, constant: -8),
+            nameField.centerYAnchor.constraint(equalTo: cardView.centerYAnchor),
+            nameField.heightAnchor.constraint(equalToConstant: 28),
+
+            addButton.trailingAnchor.constraint(equalTo: cancelButton.leadingAnchor, constant: -4),
+            addButton.centerYAnchor.constraint(equalTo: cardView.centerYAnchor),
+
+            cancelButton.trailingAnchor.constraint(equalTo: cardView.trailingAnchor, constant: -8),
+            cancelButton.centerYAnchor.constraint(equalTo: cardView.centerYAnchor)
+        ])
+    }
+
+    @objc private func commitDraft() {
+        guard !nameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return
+        }
+        onCommitDraft(parentID)
+    }
+
+    private func updateCommitEnabled() {
+        addButton.isEnabled = !nameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+}
+
+private final class NativeSaveToLibraryTreeConnectorView: NSView {
+    private var depth = 0
+    private var connectorContinuations: [Bool] = []
+
+    override var isFlipped: Bool {
+        true
+    }
+
+    func apply(depth: Int, connectorContinuations: [Bool]) {
+        guard self.depth != depth || self.connectorContinuations != connectorContinuations else {
+            return
+        }
+        self.depth = depth
+        self.connectorContinuations = connectorContinuations
+        needsDisplay = true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        guard depth > 0, !connectorContinuations.isEmpty else {
+            return
+        }
+        let path = NSBezierPath()
+        path.lineWidth = SaveToLibraryLayout.treeConnectorLineWidth
+        path.lineCapStyle = .butt
+        path.lineJoinStyle = .round
+        path.setLineDash([], count: 0, phase: 0)
+
+        let rect = bounds
+        let midY = rect.midY
+        let currentIconX = SaveToLibraryLayout.folderIconCenterX(depth: depth)
+        let currentTargetX = currentIconX - SaveToLibraryLayout.treeConnectorTargetInset
+        let parentIconX = SaveToLibraryLayout.folderIconCenterX(depth: depth - 1)
+        let currentBranchContinues = connectorContinuations.indices.contains(depth - 1)
+            ? connectorContinuations[depth - 1]
+            : false
+
+        if depth > 1 {
+            for level in 0..<(depth - 1) where connectorContinuations.indices.contains(level) && connectorContinuations[level] {
+                let ancestorIconX = SaveToLibraryLayout.folderIconCenterX(depth: level)
+                path.move(to: CGPoint(x: ancestorIconX, y: rect.minY))
+                path.line(to: CGPoint(x: ancestorIconX, y: rect.maxY))
+            }
+        }
+
+        path.move(to: CGPoint(x: parentIconX, y: rect.minY))
+        path.line(to: CGPoint(x: parentIconX, y: currentBranchContinues ? rect.maxY : midY))
+        path.move(to: CGPoint(x: parentIconX, y: midY))
+        path.line(to: CGPoint(x: currentTargetX, y: midY))
+
+        NSColor.labelColor.withAlphaComponent(SaveToLibraryLayout.treeConnectorOpacity).setStroke()
+        path.stroke()
+    }
+}
+
 private struct SaveToLibraryDestinationHeader: View {
     var folders: [SaveToLibrarySelectedFolderSummary]
     var onRemove: (String) -> Void
@@ -604,165 +1228,6 @@ private struct SaveToLibraryFlowItem {
     var index: Int
     var origin: CGPoint
     var size: CGSize
-}
-
-private struct SaveToLibraryFolderRow: View {
-    var item: SaveToLibraryFolderItem
-    var isSelected: Bool
-    var isExpanded: Bool
-    var hasChildren: Bool
-    var onToggleExpanded: () -> Void
-    var onToggleSelected: () -> Void
-    var onCreateChild: () -> Void
-    var onRemoveNewCategory: (() -> Void)?
-
-    var body: some View {
-        HStack(spacing: 4) {
-            if hasChildren {
-                SaveToLibraryFolderIconButton(
-                    title: isExpanded ? "Collapse" : "Expand",
-                    systemImage: isExpanded ? "chevron.down" : "chevron.right",
-                    tint: .secondary,
-                    width: 16,
-                    height: 24,
-                    symbolSize: 9,
-                    action: onToggleExpanded
-                )
-            } else {
-                Color.clear
-                    .frame(width: 16, height: 24)
-            }
-
-            SaveToLibraryFolderSelectionButton(
-                title: item.node.name,
-                isSelected: isSelected,
-                isNew: item.node.isNew,
-                action: onToggleSelected
-            )
-
-            SaveToLibraryFolderIconButton(
-                title: "New subfolder",
-                systemImage: "plus",
-                tint: .accentColor,
-                action: onCreateChild
-            )
-
-            if let onRemoveNewCategory {
-                SaveToLibraryFolderIconButton(
-                    title: "Remove new folder",
-                    systemImage: "trash",
-                    tint: .red,
-                    action: onRemoveNewCategory
-                )
-            }
-        }
-        .padding(.leading, CGFloat(item.depth) * SaveToLibraryLayout.treeIndentWidth)
-        .frame(minHeight: SaveToLibraryLayout.treeConnectorHeight)
-        .background(alignment: .leading) {
-            SaveToLibraryTreeConnector(
-                depth: item.depth,
-                connectorContinuations: item.connectorContinuations
-            )
-            .allowsHitTesting(false)
-        }
-    }
-}
-
-private struct SaveToLibraryFolderSelectionButton: View {
-    var title: String
-    var isSelected: Bool
-    var isNew: Bool
-    var action: () -> Void
-
-    var body: some View {
-        NativeSaveToLibraryFolderSelectionButton(
-            title: title,
-            isSelected: isSelected,
-            isNew: isNew,
-            action: action
-        )
-        .frame(maxWidth: .infinity, minHeight: 30, alignment: .leading)
-        .help(title)
-        .accessibilityLabel(title)
-    }
-}
-
-private struct SaveToLibraryFolderIconButton: View {
-    var title: String
-    var systemImage: String
-    var tint: Color
-    var width: CGFloat = 22
-    var height: CGFloat = 22
-    var symbolSize: CGFloat = 11
-    var action: () -> Void
-
-    var body: some View {
-        NativeSaveToLibraryFolderIconButton(
-            title: title,
-            systemImage: systemImage,
-            tint: tint,
-            width: width,
-            height: height,
-            symbolSize: symbolSize,
-            action: action
-        )
-        .frame(width: width, height: height)
-        .help(title)
-        .accessibilityLabel(title)
-    }
-}
-
-private struct NativeSaveToLibraryFolderSelectionButton: NSViewRepresentable {
-    var title: String
-    var isSelected: Bool
-    var isNew: Bool
-    var action: () -> Void
-
-    func makeNSView(context: Context) -> NativeSaveToLibraryFolderSelectionButtonView {
-        let view = NativeSaveToLibraryFolderSelectionButtonView()
-        view.apply(title: title, isSelected: isSelected, isNew: isNew, action: action)
-        return view
-    }
-
-    func updateNSView(_ view: NativeSaveToLibraryFolderSelectionButtonView, context: Context) {
-        view.apply(title: title, isSelected: isSelected, isNew: isNew, action: action)
-    }
-}
-
-private struct NativeSaveToLibraryFolderIconButton: NSViewRepresentable {
-    var title: String
-    var systemImage: String
-    var tint: Color
-    var width: CGFloat
-    var height: CGFloat
-    var symbolSize: CGFloat
-    var action: () -> Void
-
-    func makeNSView(context: Context) -> NativeSaveToLibraryFolderIconButtonView {
-        let view = NativeSaveToLibraryFolderIconButtonView()
-        view.apply(
-            title: title,
-            systemImage: systemImage,
-            tint: tint,
-            width: width,
-            height: height,
-            symbolSize: symbolSize,
-            action: action
-        )
-        return view
-    }
-
-    func updateNSView(_ view: NativeSaveToLibraryFolderIconButtonView, context: Context) {
-        view.apply(
-            title: title,
-            systemImage: systemImage,
-            tint: tint,
-            width: width,
-            height: height,
-            symbolSize: symbolSize,
-            action: action
-        )
-    }
 }
 
 private final class NativeSaveToLibraryFolderSelectionButtonView: NSButton {
@@ -1110,64 +1575,5 @@ private final class NativeSaveToLibraryFolderIconButtonView: NSButton {
         CATransaction.setAnimationDuration(isPressed ? 0.05 : 0.12)
         layer?.transform = CATransform3DMakeScale(isPressed ? 0.88 : 1, isPressed ? 0.88 : 1, 1)
         CATransaction.commit()
-    }
-}
-
-private struct SaveToLibraryTreeConnector: View {
-    var depth: Int
-    var connectorContinuations: [Bool]
-
-    var body: some View {
-        if depth == 0 || connectorContinuations.isEmpty {
-            Color.clear
-                .frame(height: SaveToLibraryLayout.treeConnectorHeight)
-        } else {
-            SaveToLibraryTreeConnectorLevel(
-                depth: depth,
-                connectorContinuations: connectorContinuations
-            )
-            .stroke(
-                Color.primary.opacity(SaveToLibraryLayout.treeConnectorOpacity),
-                style: StrokeStyle(
-                    lineWidth: SaveToLibraryLayout.treeConnectorLineWidth,
-                    lineCap: .butt,
-                    lineJoin: .round
-                )
-            )
-            .frame(
-                width: SaveToLibraryLayout.folderIconCenterX(depth: depth) + 1,
-                height: SaveToLibraryLayout.treeConnectorHeight
-            )
-        }
-    }
-}
-
-private struct SaveToLibraryTreeConnectorLevel: Shape {
-    var depth: Int
-    var connectorContinuations: [Bool]
-
-    func path(in rect: CGRect) -> Path {
-        Path { path in
-            let midY = rect.midY
-            let currentIconX = SaveToLibraryLayout.folderIconCenterX(depth: depth)
-            let currentTargetX = currentIconX - SaveToLibraryLayout.treeConnectorTargetInset
-            let parentIconX = SaveToLibraryLayout.folderIconCenterX(depth: depth - 1)
-            let currentBranchContinues = connectorContinuations.indices.contains(depth - 1)
-                ? connectorContinuations[depth - 1]
-                : false
-
-            if depth > 1 {
-                for level in 0..<(depth - 1) where connectorContinuations.indices.contains(level) && connectorContinuations[level] {
-                    let ancestorIconX = SaveToLibraryLayout.folderIconCenterX(depth: level)
-                    path.move(to: CGPoint(x: ancestorIconX, y: rect.minY))
-                    path.addLine(to: CGPoint(x: ancestorIconX, y: rect.maxY))
-                }
-            }
-
-            path.move(to: CGPoint(x: parentIconX, y: rect.minY))
-            path.addLine(to: CGPoint(x: parentIconX, y: currentBranchContinues ? rect.maxY : midY))
-            path.move(to: CGPoint(x: parentIconX, y: midY))
-            path.addLine(to: CGPoint(x: currentTargetX, y: midY))
-        }
     }
 }

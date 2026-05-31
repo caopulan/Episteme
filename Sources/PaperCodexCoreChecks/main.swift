@@ -1768,22 +1768,28 @@ func runUILayoutSourceChecks() throws {
     )
     try check(
         saveToLibrarySource.contains("SaveToLibraryNewCategory")
-            && saveToLibrarySource.contains("SaveToLibraryFolderRow")
+            && saveToLibrarySource.contains("NativeSaveToLibraryFolderPicker(")
+            && saveToLibrarySource.contains("SaveToLibraryFolderPickerRowModel")
+            && saveToLibrarySource.contains("private final class NativeSaveToLibraryFolderPickerView: NSScrollView")
+            && saveToLibrarySource.contains("private final class NativeSaveToLibraryFolderPickerTableView: NSTableView")
+            && saveToLibrarySource.contains("private final class NativeSaveToLibraryFolderPickerController: NSObject, NSTableViewDataSource, NSTableViewDelegate")
+            && saveToLibrarySource.contains("private final class NativeSaveToLibraryFolderRowCellView: NSTableCellView")
             && saveToLibrarySource.contains("collapsedCategoryIDs")
             && saveToLibrarySource.contains("activeNewCategoryParentID")
-            && saveToLibrarySource.contains("newCategories: selectedNewCategoriesInOrder"),
-        "save-to-library should use an expandable folder tree with selectable folders and in-tree folder creation"
+            && saveToLibrarySource.contains("newCategories: selectedNewCategoriesInOrder")
+            && !saveToLibrarySource.contains("ForEach(visibleFolderItems)")
+            && !saveToLibrarySource.contains("SaveToLibraryFolderRow("),
+        "save-to-library should use a reusable native AppKit folder tree with selectable folders and in-tree folder creation"
     )
     try check(
-        saveToLibrarySource.contains("SaveToLibraryTreeConnector")
-            && saveToLibrarySource.contains("SaveToLibraryTreeConnectorLevel")
+        saveToLibrarySource.contains("NativeSaveToLibraryTreeConnectorView")
             && saveToLibrarySource.contains("connectorContinuations")
             && saveToLibrarySource.contains("treeConnectorHeight: CGFloat = 34")
             && saveToLibrarySource.contains("treeIndentWidth")
             && saveToLibrarySource.contains("folderIconCenterX")
             && saveToLibrarySource.contains("treeConnectorTargetInset")
-            && saveToLibrarySource.contains("Color.primary.opacity(SaveToLibraryLayout.treeConnectorOpacity)")
-            && saveToLibrarySource.contains("lineCap: .butt")
+            && saveToLibrarySource.contains("NSBezierPath")
+            && saveToLibrarySource.contains("setLineDash")
             && saveToLibrarySource.contains("currentTargetX")
             && !saveToLibrarySource.contains("SaveToLibraryDepthGuide"),
         "save-to-library folder picker should use the same continuous, lightweight folder-tree connectors as the library sidebar"
@@ -1911,7 +1917,7 @@ func runUILayoutSourceChecks() throws {
             && nativeFormControlsSource.contains("NSTextView")
             && nativeFormControlsSource.contains("NSScrollView")
             && chatSource.contains("PaperCodexNativeTextField(")
-            && saveToLibrarySource.contains("PaperCodexNativeTextField(")
+            && (saveToLibrarySource.contains("PaperCodexNativeTextField(") || saveToLibrarySource.contains("private let nameField = NSTextField()"))
             && readerViewSource.contains("PaperCodexNativeTextField(")
             && (librarySource.contains("PaperCodexNativeTextField(") || librarySource.contains("private let noteTitleField = NSTextField()"))
             && (librarySource.contains("PaperCodexNativeTextEditor(") || librarySource.contains("private let noteBodyTextView = NSTextView()"))
@@ -2732,10 +2738,10 @@ func runUILayoutSourceChecks() throws {
     }
     if let pathChipRange = saveToLibrarySource.range(of: "private struct SaveToLibraryFolderPathChip: View"),
        let pathChipEndRange = saveToLibrarySource.range(of: "private struct SaveToLibraryFlowLayout", range: pathChipRange.upperBound..<saveToLibrarySource.endIndex),
-       let folderRowRange = saveToLibrarySource.range(of: "private struct SaveToLibraryFolderRow: View"),
-       let folderRowEndRange = saveToLibrarySource.range(of: "private struct SaveToLibraryTreeConnector", range: folderRowRange.upperBound..<saveToLibrarySource.endIndex) {
+       let folderTreeRange = saveToLibrarySource.range(of: "private struct NativeSaveToLibraryFolderPicker: NSViewRepresentable"),
+       let folderTreeEndRange = saveToLibrarySource.range(of: "private struct SaveToLibraryDestinationHeader", range: folderTreeRange.upperBound..<saveToLibrarySource.endIndex) {
         let pathChipSource = String(saveToLibrarySource[pathChipRange.lowerBound..<pathChipEndRange.lowerBound])
-        let folderRowSource = String(saveToLibrarySource[folderRowRange.lowerBound..<folderRowEndRange.lowerBound])
+        let folderTreeSource = String(saveToLibrarySource[folderTreeRange.lowerBound..<folderTreeEndRange.lowerBound])
         try check(
             actionButtonSource.contains("struct PaperCodexPathChipButton: View")
                 && actionButtonSource.contains("private struct NativePaperCodexPathChipButton: NSViewRepresentable")
@@ -2751,23 +2757,22 @@ func runUILayoutSourceChecks() throws {
                 && saveToLibrarySource.contains("title: \"Cancel\"")
                 && saveToLibrarySource.contains("systemImage: \"xmark\"")
                 && !saveToLibrarySource.contains(".buttonStyle(.borderless)")
-                && saveToLibrarySource.contains("private struct SaveToLibraryFolderSelectionButton: View")
-                && saveToLibrarySource.contains("private struct NativeSaveToLibraryFolderSelectionButton: NSViewRepresentable")
+                && saveToLibrarySource.contains("private final class NativeSaveToLibraryFolderPickerTableView: NSTableView")
+                && saveToLibrarySource.contains("private final class NativeSaveToLibraryFolderRowCellView: NSTableCellView")
+                && saveToLibrarySource.contains("private final class NativeSaveToLibraryFolderDraftCellView: NSTableCellView")
                 && saveToLibrarySource.contains("private final class NativeSaveToLibraryFolderSelectionButtonView: NSButton")
-                && saveToLibrarySource.contains("private struct SaveToLibraryFolderIconButton: View")
-                && saveToLibrarySource.contains("private struct NativeSaveToLibraryFolderIconButton: NSViewRepresentable")
                 && saveToLibrarySource.contains("private final class NativeSaveToLibraryFolderIconButtonView: NSButton")
                 && saveToLibrarySource.components(separatedBy: "override func mouseDown(with event: NSEvent)").count - 1 >= 2
                 && saveToLibrarySource.components(separatedBy: "setAccessibilityRole(.button)").count - 1 >= 2
                 && saveToLibrarySource.components(separatedBy: "CATransaction.setAnimationDuration").count - 1 >= 2
-                && folderRowSource.contains("SaveToLibraryFolderSelectionButton(")
-                && folderRowSource.contains("SaveToLibraryFolderIconButton(")
+                && folderTreeSource.contains("NativeSaveToLibraryFolderSelectionButtonView()")
+                && folderTreeSource.contains("NativeSaveToLibraryFolderIconButtonView()")
                 && !saveToLibrarySource.contains("private struct SaveToLibraryFolderRowButtonStyle: ButtonStyle")
                 && !saveToLibrarySource.contains("private struct SaveToLibraryFolderIconButtonStyle: ButtonStyle")
-                && !folderRowSource.contains(".buttonStyle(SaveToLibraryFolderRowButtonStyle(")
-                && !folderRowSource.contains(".buttonStyle(SaveToLibraryFolderIconButtonStyle(")
+                && !folderTreeSource.contains(".buttonStyle(SaveToLibraryFolderRowButtonStyle(")
+                && !folderTreeSource.contains(".buttonStyle(SaveToLibraryFolderIconButtonStyle(")
                 && !pathChipSource.contains(".buttonStyle(")
-                && !folderRowSource.contains(".buttonStyle(.plain)"),
+                && !folderTreeSource.contains(".buttonStyle(.plain)"),
             "save-to-library selected path chips, folder rows, and small creation actions should use native AppKit buttons before saving destinations"
         )
     } else {
