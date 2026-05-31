@@ -187,8 +187,8 @@ private struct RouteTransitionPlaceholder: View {
             VStack(alignment: .leading, spacing: 12) {
                 Text(title)
                     .font(.paperCodexSystem(size: 28, weight: .semibold))
-                ProgressView()
-                    .controlSize(.small)
+                PaperCodexNativeSpinner()
+                    .frame(width: 16, height: 16)
             }
             .padding(28)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

@@ -73,7 +73,7 @@ struct ReaderView: View {
                     pdfContent(for: paper)
                 }
             } else {
-                ContentUnavailableView("No Paper Selected", systemImage: "doc.text")
+                PaperCodexNativeEmptyState(title: "No Paper Selected", systemImage: "doc.text")
             }
         }
         .background(Color(nsColor: .textBackgroundColor))
@@ -250,8 +250,8 @@ private struct PDFSplitPreparingView: View {
 
     var body: some View {
         VStack(spacing: 8) {
-            ProgressView()
-                .controlSize(.small)
+            PaperCodexNativeSpinner()
+                .frame(width: 16, height: 16)
             Text(LocalizedStringKey(target == nil ? "Preparing split view" : "Preparing link preview"))
                 .font(.caption.weight(.medium))
                 .foregroundStyle(.secondary)
@@ -287,7 +287,7 @@ private struct AddPaperToSessionSheet: View {
             PaperCodexNativeTextField(text: $query, placeholder: "Search library")
                 .frame(height: 30)
             if filteredPapers.isEmpty {
-                ContentUnavailableView("No Papers", systemImage: "doc.text.magnifyingglass")
+                PaperCodexNativeEmptyState(title: "No Papers", systemImage: "doc.text.magnifyingglass")
                     .frame(width: 520, height: 220)
             } else {
                 ScrollView {

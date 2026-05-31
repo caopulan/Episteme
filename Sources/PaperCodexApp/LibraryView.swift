@@ -485,7 +485,7 @@ struct LibraryView: View {
             .frame(maxWidth: .infinity, minHeight: 36, idealHeight: 36, maxHeight: 36)
 
             if listState.papers.isEmpty {
-                ContentUnavailableView("No Papers", systemImage: "doc.text.magnifyingglass")
+                PaperCodexNativeEmptyState(title: "No Papers", systemImage: "doc.text.magnifyingglass")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 let paperTableRows = paperTableRows(for: listState.papers)
@@ -632,7 +632,7 @@ struct LibraryView: View {
                     .padding(.trailing, 4)
                 }
             } else {
-                ContentUnavailableView("Select Paper", systemImage: "sidebar.right")
+                PaperCodexNativeEmptyState(title: "Select Paper", systemImage: "sidebar.right")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
 
@@ -1368,17 +1368,19 @@ private struct WatchedFoldersSheet: View {
             }
 
             if model.watchedFolders.isEmpty {
-                ContentUnavailableView("No Folders", systemImage: "folder")
+                PaperCodexNativeEmptyState(title: "No Folders", systemImage: "folder")
                     .frame(width: 520, height: 220)
             } else {
-                List {
-                    ForEach(model.watchedFolders) { folder in
-                        WatchedFolderRow(folder: folder) {
-                            onRemove(folder)
+                ScrollView {
+                    LazyVStack(spacing: 6) {
+                        ForEach(model.watchedFolders) { folder in
+                            WatchedFolderRow(folder: folder) {
+                                onRemove(folder)
+                            }
                         }
                     }
+                    .padding(.vertical, 4)
                 }
-                .listStyle(.inset)
                 .frame(width: 560, height: 260)
             }
 
@@ -2400,7 +2402,7 @@ private struct RecentConversationsContent: View {
             }
 
             if sessions.isEmpty {
-                ContentUnavailableView("No Conversations", systemImage: "text.bubble")
+                PaperCodexNativeEmptyState(title: "No Conversations", systemImage: "text.bubble")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
@@ -2798,7 +2800,7 @@ private struct RecentConversationDetailPanel: View {
                     .padding(.trailing, 4)
                 }
             } else {
-                ContentUnavailableView("Select Conversation", systemImage: "text.bubble")
+                PaperCodexNativeEmptyState(title: "Select Conversation", systemImage: "text.bubble")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
 
@@ -2931,7 +2933,7 @@ private struct LibraryBulkTagSheet: View {
             Text("\(selectedCount) selected papers")
                 .foregroundStyle(.secondary)
             if tags.isEmpty {
-                ContentUnavailableView("No Tags", systemImage: "tag")
+                PaperCodexNativeEmptyState(title: "No Tags", systemImage: "tag")
                     .frame(width: 380, height: 120)
             } else {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 126), spacing: 8)], alignment: .leading, spacing: 8) {

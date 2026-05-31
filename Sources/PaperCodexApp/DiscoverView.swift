@@ -318,7 +318,7 @@ struct DiscoverView: View {
                     detail: "Preparing cached papers and previews"
                 )
             } else if visiblePapers.isEmpty {
-                ContentUnavailableView("No Papers", systemImage: "doc.text.magnifyingglass")
+                PaperCodexNativeEmptyState(title: "No Papers", systemImage: "doc.text.magnifyingglass")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 GeometryReader { proxy in
@@ -834,7 +834,7 @@ struct ArxivSearchView: View {
                     detail: "Results will appear in this space"
                 )
             } else if papers.isEmpty {
-                ContentUnavailableView("No Papers", systemImage: "doc.text.magnifyingglass")
+                PaperCodexNativeEmptyState(title: "No Papers", systemImage: "doc.text.magnifyingglass")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 GeometryReader { proxy in
@@ -1831,8 +1831,8 @@ private struct DiscoverRouteLoadingPlaceholder: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     HStack(spacing: 8) {
-                        ProgressView()
-                            .controlSize(.small)
+                        PaperCodexNativeSpinner()
+                            .frame(width: 16, height: 16)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(LocalizedStringKey(title))
                                 .font(.paperCodexSystem(size: 13, weight: .semibold))
@@ -3092,11 +3092,10 @@ private struct ArxivCacheProgressStrip: View {
     var body: some View {
         HStack(spacing: 10) {
             if let fraction = progress.fraction {
-                ProgressView(value: fraction)
+                PaperCodexNativeProgressBar(value: fraction)
                     .frame(width: 150)
             } else {
-                ProgressView()
-                    .controlSize(.small)
+                PaperCodexNativeProgressBar(value: nil)
                     .frame(width: 150)
             }
             VStack(alignment: .leading, spacing: 2) {
@@ -3259,7 +3258,7 @@ private struct ArxivPaperCard: View {
     private var actionGroup: some View {
         HStack(spacing: 8) {
             if isBusy {
-                ProgressView(value: downloadProgress)
+                PaperCodexNativeProgressBar(value: downloadProgress)
                     .frame(width: 78)
             }
             if inLibrary {
@@ -3737,8 +3736,8 @@ private struct ArxivPreviewImage: View {
                 LocalCachedImage(url: url, contentMode: .fill) {
                     ZStack {
                         Color(nsColor: .separatorColor).opacity(0.22)
-                        ProgressView()
-                            .controlSize(.small)
+                        PaperCodexNativeSpinner()
+                            .frame(width: 16, height: 16)
                     }
                     .aspectRatio(4.7, contentMode: .fit)
                 }
@@ -3785,9 +3784,8 @@ private struct ArxivImagePreviewOverlay: View {
                 .shadow(color: .black.opacity(0.45), radius: 24, y: 16)
                 .padding(24)
             } else {
-                ProgressView()
-                    .controlSize(.large)
-                    .tint(.white)
+                PaperCodexNativeSpinner(controlSize: .large, tintColor: .white)
+                    .frame(width: 28, height: 28)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

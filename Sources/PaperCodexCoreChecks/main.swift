@@ -1447,12 +1447,23 @@ func runUILayoutSourceChecks() throws {
     let nativeConfirmationSource = FileManager.default.fileExists(atPath: nativeConfirmationURL.path) ? try String(contentsOf: nativeConfirmationURL) : ""
     let nativeSheetURL = root.appendingPathComponent("Sources/PaperCodexApp/PaperCodexNativeSheet.swift")
     let nativeSheetSource = FileManager.default.fileExists(atPath: nativeSheetURL.path) ? try String(contentsOf: nativeSheetURL) : ""
+    let nativeStatusViewsURL = root.appendingPathComponent("Sources/PaperCodexApp/PaperCodexNativeStatusViews.swift")
+    let nativeStatusViewsSource = FileManager.default.fileExists(atPath: nativeStatusViewsURL.path) ? try String(contentsOf: nativeStatusViewsURL) : ""
     let appSourceDirectory = root.appendingPathComponent("Sources/PaperCodexApp")
     let appSwiftSourceFiles = try FileManager.default.contentsOfDirectory(at: appSourceDirectory, includingPropertiesForKeys: nil)
         .filter { $0.pathExtension == "swift" }
     let appSourcesWithSwiftUISheet = try appSwiftSourceFiles.compactMap { fileURL -> String? in
         let source = try String(contentsOf: fileURL)
         return source.contains(".sheet(") ? fileURL.lastPathComponent : nil
+    }
+    let swiftUIListRegex = try NSRegularExpression(pattern: #"(?m)\bList\s*\{"#)
+    let appSourcesWithSwiftUIStatusViews = try appSwiftSourceFiles.compactMap { fileURL -> String? in
+        let source = try String(contentsOf: fileURL)
+        let range = NSRange(source.startIndex..<source.endIndex, in: source)
+        let hasSwiftUIStatusView = source.contains("ContentUnavailableView")
+            || source.contains("ProgressView(")
+            || swiftUIListRegex.firstMatch(in: source, range: range) != nil
+        return hasSwiftUIStatusView ? fileURL.lastPathComponent : nil
     }
     let swiftUIFormControlRegex = try NSRegularExpression(pattern: #"\b(TextField|SecureField|TextEditor|Picker|Toggle|Stepper|DatePicker)\("#)
     func hasSwiftUIFormControlUse(_ source: String) -> Bool {
@@ -1839,6 +1850,19 @@ func runUILayoutSourceChecks() throws {
             && nativeSheetSource.contains("paperCodexNativeSheet")
             && appSourcesWithSwiftUISheet.isEmpty,
         "modal sheets should be presented through the shared AppKit sheet presenter instead of SwiftUI .sheet; remaining files: \(appSourcesWithSwiftUISheet.joined(separator: ", "))"
+    )
+    try check(
+        nativeStatusViewsSource.contains("struct PaperCodexNativeEmptyState")
+            && nativeStatusViewsSource.contains("struct PaperCodexNativeSpinner")
+            && nativeStatusViewsSource.contains("struct PaperCodexNativeProgressBar")
+            && nativeStatusViewsSource.contains("NSProgressIndicator")
+            && nativeStatusViewsSource.contains("NSTextField(labelWithString:")
+            && nativeStatusViewsSource.contains("NSImage(systemSymbolName:")
+            && chatSource.contains("PaperCodexNativeEmptyState(")
+            && discoverSource.contains("PaperCodexNativeProgressBar(")
+            && interactionFeedbackSource.contains("PaperCodexNativeSpinner(")
+            && appSourcesWithSwiftUIStatusViews.isEmpty,
+        "empty states, loading indicators, and remaining lists should use shared AppKit status views instead of SwiftUI ContentUnavailableView/ProgressView/List; remaining files: \(appSourcesWithSwiftUIStatusViews.joined(separator: ", "))"
     )
     try check(
         actionButtonSource.contains("struct PaperCodexToolbarButton")

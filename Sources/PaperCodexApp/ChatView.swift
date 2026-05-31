@@ -78,10 +78,10 @@ struct ChatView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
                         if model.messages.isEmpty && visibleActiveCodexRun == nil {
-                            ContentUnavailableView(
-                                "No Messages",
+                            PaperCodexNativeEmptyState(
+                                title: "No Messages",
                                 systemImage: "text.bubble",
-                                description: Text("Select text in the PDF, then ask \(model.selectedChatRuntimeDisplayName) in this session. The selected source appears as a quoted reply.")
+                                message: "Select text in the PDF, then ask \(model.selectedChatRuntimeDisplayName) in this session. The selected source appears as a quoted reply."
                             )
                             .padding(.top, 80)
                         } else {
@@ -358,7 +358,7 @@ private struct SessionNotesPanel: View {
                     model.loadPaperNotes(for: paper)
                 }
             } else {
-                ContentUnavailableView("No Paper Selected", systemImage: "doc.text")
+                PaperCodexNativeEmptyState(title: "No Paper Selected", systemImage: "doc.text")
             }
         }
         .onChange(of: model.selectedPaper?.id) { _, _ in
@@ -562,8 +562,8 @@ private struct CodexRunBubble: View {
         HStack {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 8) {
-                    ProgressView()
-                        .controlSize(.small)
+                    PaperCodexNativeSpinner()
+                        .frame(width: 16, height: 16)
                     Text("Agent")
                         .font(.caption.weight(.semibold))
                     Text("Running")

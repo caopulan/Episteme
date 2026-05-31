@@ -219,8 +219,8 @@ struct GlobalOperationStatusView: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            ProgressView()
-                .controlSize(.small)
+            PaperCodexNativeSpinner()
+                .frame(width: 16, height: 16)
             Image(systemName: status.systemImage)
                 .foregroundStyle(status.tint)
             VStack(alignment: .leading, spacing: 2) {
