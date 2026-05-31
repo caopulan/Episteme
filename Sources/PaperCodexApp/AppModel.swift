@@ -2639,13 +2639,10 @@ final class AppModel: ObservableObject {
     }
 
     func suggestedCategoryIDsForDiscoverSave() -> [String] {
-        normalizedSimilaritySourceIDs(discoverSelectedSimilaritySourceIDs).compactMap { sourceID in
-            guard sourceID.hasPrefix("category:") else {
-                return nil
-            }
-            let categoryID = String(sourceID.dropFirst("category:".count))
-            return categories.contains(where: { $0.id == categoryID }) ? categoryID : nil
-        }
+        DiscoverSaveCategorySuggestion.categoryIDs(
+            fromExplicitSimilaritySourceIDs: normalizedSimilaritySourceIDs(discoverSelectedSimilaritySourceIDs),
+            existingCategoryIDs: Set(categories.map(\.id))
+        )
     }
 
     func addArxivPaperToLibrary(

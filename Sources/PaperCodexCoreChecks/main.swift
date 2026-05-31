@@ -3181,6 +3181,11 @@ func runUILayoutSourceChecks() throws {
         discoverSource.contains("paper.displayTitle(language: model.globalLanguageMode.discoverLanguageCode)"),
         "Discover save sheet should use the configured global language"
     )
+    try check(
+        appModelSource.contains("func suggestedCategoryIDsForDiscoverSave() -> [String]")
+            && appModelSource.contains("DiscoverSaveCategorySuggestion.categoryIDs("),
+        "Discover save sheet should derive initial folders from the bounded core suggestion rule"
+    )
     let rootViewSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/PaperCodexApp.swift"))
     let typographySource = (try? String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/Typography.swift"))) ?? ""
     let sidebarSplitSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/SidebarSplitLayout.swift"))
@@ -7034,6 +7039,29 @@ func runLocalDiscoverEngineChecks() throws {
     )
     try check(queryA.normalized == queryB.normalized, "discover query normalization should ignore whitespace and duplicate order")
     try check(queryA.cacheKey == queryB.cacheKey, "discover query cache key should be stable for equivalent queries")
+    let manyLibraryCategoryIDs = Set((1...63).map { "folder-\($0)" })
+    let defaultSimilaritySources = manyLibraryCategoryIDs.sorted().map { "category:\($0)" }
+    try check(
+        DiscoverSaveCategorySuggestion.categoryIDs(
+            fromExplicitSimilaritySourceIDs: defaultSimilaritySources,
+            existingCategoryIDs: manyLibraryCategoryIDs
+        ).isEmpty,
+        "Discover save preselection should ignore bulk/default similarity folders instead of opening with dozens selected"
+    )
+    try check(
+        DiscoverSaveCategorySuggestion.categoryIDs(
+            fromExplicitSimilaritySourceIDs: ["category:folder-7"],
+            existingCategoryIDs: manyLibraryCategoryIDs
+        ) == ["folder-7"],
+        "Discover save preselection should keep one explicit folder similarity source"
+    )
+    try check(
+        DiscoverSaveCategorySuggestion.categoryIDs(
+            fromExplicitSimilaritySourceIDs: ["tag:diffusion"],
+            existingCategoryIDs: manyLibraryCategoryIDs
+        ).isEmpty,
+        "Discover save preselection should not treat tag similarity sources as library destinations"
+    )
 
     func cachedDiscoverPaper(id: String, listDate: String, categories: [String], title: String) -> ArxivFeedPaper {
         ArxivFeedPaper(
