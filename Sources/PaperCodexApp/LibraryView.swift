@@ -69,6 +69,10 @@ struct LibraryView: View {
         makePaperListState().paperIDs
     }
 
+    private var activePaperSurfaceFilteredPaperIDs: [String] {
+        selectedLibrarySurface == .papers ? filteredPaperIDs : []
+    }
+
     private var sidebarCategories: [PaperCodexCore.Category] {
         model.categories
     }
@@ -154,7 +158,7 @@ struct LibraryView: View {
         } content: {
             contentPane
         }
-        .onChange(of: filteredPaperIDs) { _, _ in
+        .onChange(of: activePaperSurfaceFilteredPaperIDs) { _, _ in
             prunePaperSelection()
         }
         .onChange(of: model.recentSessions.map(\.id)) { _, _ in
@@ -267,6 +271,16 @@ struct LibraryView: View {
 
             Divider()
 
+            sidebarContext
+        }
+        .paperCodexSidebarChromePadding()
+        .background(Color(nsColor: .controlBackgroundColor))
+    }
+
+    @ViewBuilder
+    private var sidebarContext: some View {
+        switch selectedLibrarySurface {
+        case .papers:
             Label("Library Context", systemImage: "books.vertical")
                 .font(.headline)
                 .foregroundStyle(.secondary)
@@ -275,9 +289,16 @@ struct LibraryView: View {
                 sidebarLists
             }
             .frame(maxHeight: .infinity, alignment: .top)
+        case .recentConversations:
+            NativeRecentConversationsSidebarContext(
+                conversationCount: model.recentSessions.count,
+                selectedTitle: selectedRecentSession?.title,
+                onOpenLibrary: {
+                    selectRootLibrary()
+                }
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
-        .paperCodexSidebarChromePadding()
-        .background(Color(nsColor: .controlBackgroundColor))
     }
 
     private var sidebarLists: some View {
@@ -3139,6 +3160,167 @@ private struct SidebarEmptyText: View {
         Text(LocalizedStringKey(text))
             .foregroundStyle(.secondary)
             .padding(.vertical, 5)
+    }
+}
+
+private struct NativeRecentConversationsSidebarContext: NSViewRepresentable {
+    var conversationCount: Int
+    var selectedTitle: String?
+    var onOpenLibrary: () -> Void
+
+    func makeNSView(context: Context) -> NativeRecentConversationsSidebarContextView {
+        let view = NativeRecentConversationsSidebarContextView()
+        view.apply(
+            conversationCount: conversationCount,
+            selectedTitle: selectedTitle,
+            onOpenLibrary: onOpenLibrary
+        )
+        return view
+    }
+
+    func updateNSView(_ view: NativeRecentConversationsSidebarContextView, context: Context) {
+        view.apply(
+            conversationCount: conversationCount,
+            selectedTitle: selectedTitle,
+            onOpenLibrary: onOpenLibrary
+        )
+    }
+}
+
+private final class NativeRecentConversationsSidebarContextView: NSView {
+    private let stackView = NSStackView()
+    private let headerRow = NSStackView()
+    private let iconView = NSImageView()
+    private let titleLabel = NSTextField(labelWithString: "Recent Context")
+    private let countLabel = NSTextField(labelWithString: "")
+    private let selectedHeaderLabel = NSTextField(labelWithString: "Selected")
+    private let selectedTitleLabel = NSTextField(labelWithString: "")
+    private let actionButton = NativeRecentConversationsSidebarActionButton()
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: NSView.noIntrinsicMetric)
+    }
+
+    func apply(
+        conversationCount: Int,
+        selectedTitle: String?,
+        onOpenLibrary: @escaping () -> Void
+    ) {
+        countLabel.stringValue = "\(conversationCount) conversation\(conversationCount == 1 ? "" : "s")"
+        selectedTitleLabel.stringValue = selectedTitle ?? "No conversation selected"
+        actionButton.apply(title: "Show Library", onPress: onOpenLibrary)
+    }
+
+    private func setup() {
+        translatesAutoresizingMaskIntoConstraints = false
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
+
+        stackView.translatesAutoresizingMaskIntoConstraints = false
+        stackView.orientation = .vertical
+        stackView.alignment = .width
+        stackView.distribution = .fill
+        stackView.spacing = 12
+
+        headerRow.translatesAutoresizingMaskIntoConstraints = false
+        headerRow.orientation = .horizontal
+        headerRow.alignment = .centerY
+        headerRow.spacing = 8
+
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+        iconView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
+        iconView.contentTintColor = .secondaryLabelColor
+        iconView.image = NSImage(systemSymbolName: "clock.arrow.circlepath", accessibilityDescription: "Recent Context")
+
+        titleLabel.font = .systemFont(ofSize: 15, weight: .semibold)
+        titleLabel.textColor = .secondaryLabelColor
+
+        countLabel.font = .systemFont(ofSize: 13, weight: .regular)
+        countLabel.textColor = .secondaryLabelColor
+
+        selectedHeaderLabel.font = .systemFont(ofSize: 11, weight: .semibold)
+        selectedHeaderLabel.textColor = .tertiaryLabelColor
+
+        selectedTitleLabel.font = .systemFont(ofSize: 13, weight: .regular)
+        selectedTitleLabel.textColor = .labelColor
+        selectedTitleLabel.maximumNumberOfLines = 4
+        selectedTitleLabel.lineBreakMode = .byWordWrapping
+        selectedTitleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        headerRow.addArrangedSubview(iconView)
+        headerRow.addArrangedSubview(titleLabel)
+        stackView.addArrangedSubview(headerRow)
+        stackView.addArrangedSubview(countLabel)
+        stackView.addArrangedSubview(makeSeparator())
+        stackView.addArrangedSubview(selectedHeaderLabel)
+        stackView.addArrangedSubview(selectedTitleLabel)
+        stackView.addArrangedSubview(actionButton)
+        addSubview(stackView)
+
+        NSLayoutConstraint.activate([
+            stackView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            stackView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            stackView.topAnchor.constraint(equalTo: topAnchor),
+            iconView.widthAnchor.constraint(equalToConstant: 18),
+            iconView.heightAnchor.constraint(equalToConstant: 18)
+        ])
+    }
+
+    private func makeSeparator() -> NSBox {
+        let separator = NSBox()
+        separator.boxType = .separator
+        separator.translatesAutoresizingMaskIntoConstraints = false
+        separator.heightAnchor.constraint(equalToConstant: 1).isActive = true
+        return separator
+    }
+}
+
+private final class NativeRecentConversationsSidebarActionButton: NSButton {
+    private var onPress: () -> Void = {}
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+
+    func apply(title: String, onPress: @escaping () -> Void) {
+        self.title = title
+        self.onPress = onPress
+        image = NSImage(systemSymbolName: "books.vertical", accessibilityDescription: title)
+        setAccessibilityLabel(title)
+    }
+
+    private func setup() {
+        translatesAutoresizingMaskIntoConstraints = false
+        target = self
+        action = #selector(performPress(_:))
+        bezelStyle = .rounded
+        controlSize = .regular
+        imagePosition = .imageLeading
+        font = .systemFont(ofSize: 13, weight: .semibold)
+        setButtonType(.momentaryPushIn)
+        setAccessibilityRole(.button)
+    }
+
+    @objc private func performPress(_ sender: NSButton) {
+        onPress()
     }
 }
 

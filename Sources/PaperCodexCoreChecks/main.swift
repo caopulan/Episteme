@@ -1119,6 +1119,28 @@ func runUILayoutSourceChecks() throws {
             librarySource.contains("sidebarLists"),
         "library sidebar category and tag lists should live inside a native AppKit scroll view"
     )
+    if let sidebarContextRange = librarySource.range(of: "private var sidebarContext: some View"),
+       let sidebarContextEndRange = librarySource.range(of: "private var sidebarLists: some View", range: sidebarContextRange.upperBound..<librarySource.endIndex) {
+        let sidebarContextSource = String(librarySource[sidebarContextRange.lowerBound..<sidebarContextEndRange.lowerBound])
+        try check(
+            librarySource.contains(".onChange(of: activePaperSurfaceFilteredPaperIDs)")
+                && librarySource.contains("private var activePaperSurfaceFilteredPaperIDs: [String]")
+                && librarySource.contains("selectedLibrarySurface == .papers ? filteredPaperIDs : []")
+                && sidebarContextSource.contains("switch selectedLibrarySurface")
+                && sidebarContextSource.contains("case .papers:")
+                && sidebarContextSource.contains("PaperCodexNativeScrollView {")
+                && sidebarContextSource.contains("sidebarLists")
+                && sidebarContextSource.contains("case .recentConversations:")
+                && sidebarContextSource.contains("NativeRecentConversationsSidebarContext(")
+                && !sidebarContextSource.contains("case .recentConversations:\n            PaperCodexNativeScrollView")
+                && librarySource.contains("private struct NativeRecentConversationsSidebarContext: NSViewRepresentable")
+                && librarySource.contains("private final class NativeRecentConversationsSidebarContextView: NSView")
+                && librarySource.contains("private final class NativeRecentConversationsSidebarActionButton: NSButton"),
+            "recent conversations should not keep the heavyweight library folder/tag context or paper filter derivation mounted while browsing sessions"
+        )
+    } else {
+        throw CheckFailure(description: "library sidebar context source should remain inspectable")
+    }
     if let tagSectionRange = librarySource.range(of: "private var tagSidebarSection: some View"),
        let tagSectionEndRange = librarySource.range(of: "private var contentPane: some View", range: tagSectionRange.upperBound..<librarySource.endIndex) {
         let tagSectionSource = String(librarySource[tagSectionRange.lowerBound..<tagSectionEndRange.lowerBound])
@@ -4350,7 +4372,9 @@ func runUILayoutSourceChecks() throws {
         "arXiv ID extraction should reuse compiled regular expressions instead of compiling during every sort comparison"
     )
     try check(
-        librarySource.contains(".onChange(of: filteredPaperIDs)")
+        librarySource.contains(".onChange(of: activePaperSurfaceFilteredPaperIDs)")
+            && librarySource.contains("private var activePaperSurfaceFilteredPaperIDs: [String]")
+            && librarySource.contains("selectedLibrarySurface == .papers ? filteredPaperIDs : []")
             && !librarySource.contains(".onChange(of: sortedPapers.map")
             && librarySource.contains("let arxivIDsByPaperID")
             && librarySource.contains("arxivIDComesBefore(left, right, ascending: ascending, arxivIDsByPaperID: arxivIDsByPaperID)"),
