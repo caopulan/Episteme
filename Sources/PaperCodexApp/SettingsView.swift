@@ -727,15 +727,9 @@ struct SettingsView: View {
 
     private var storageRules: some View {
         settingsSection(title: "Saved Paper Organization", systemImage: "folder.badge.gearshape") {
-            Picker("Folder rule", selection: Binding(
-                get: { model.arxivSaveOrganization },
-                set: { model.setArxivSaveOrganization($0) }
-            )) {
-                ForEach(ArxivSaveOrganization.allCases) { option in
-                    Text(LocalizedStringKey(option.title)).tag(option)
-                }
+            SettingsSaveOrganizationRadioGroup(selection: model.arxivSaveOrganization) { organization in
+                model.setArxivSaveOrganization(organization)
             }
-            .pickerStyle(.radioGroup)
 
             pathRow(label: "Library root", value: model.paperLibraryRootPath)
         }
@@ -1303,6 +1297,202 @@ private struct SettingsMCPModePopup: View {
 private struct NativeSettingsPopupItem: Equatable {
     var id: String
     var title: String
+}
+
+private struct SettingsSaveOrganizationRadioGroup: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var selection: ArxivSaveOrganization
+    var onSelect: (ArxivSaveOrganization) -> Void
+
+    var body: some View {
+        NativeSettingsRadioGroup(
+            accessibilityLabel: "Folder rule",
+            items: ArxivSaveOrganization.allCases.map { option in
+                NativeSettingsRadioItem(id: option.rawValue, title: NSLocalizedString(option.title, comment: ""))
+            },
+            selectedItemID: selection.rawValue,
+            reduceMotion: reduceMotion
+        ) { id in
+            if let organization = ArxivSaveOrganization(rawValue: id) {
+                onSelect(organization)
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 104, alignment: .leading)
+        .help("Folder rule")
+    }
+}
+
+private struct NativeSettingsRadioItem: Equatable {
+    var id: String
+    var title: String
+}
+
+private struct NativeSettingsRadioGroup: NSViewRepresentable {
+    var accessibilityLabel: String
+    var items: [NativeSettingsRadioItem]
+    var selectedItemID: String
+    var reduceMotion: Bool
+    var action: (String) -> Void
+
+    func makeNSView(context: Context) -> NativeSettingsRadioGroupView {
+        let view = NativeSettingsRadioGroupView()
+        view.apply(
+            accessibilityLabel: accessibilityLabel,
+            items: items,
+            selectedItemID: selectedItemID,
+            reduceMotion: reduceMotion,
+            action: action
+        )
+        return view
+    }
+
+    func updateNSView(_ view: NativeSettingsRadioGroupView, context: Context) {
+        view.apply(
+            accessibilityLabel: accessibilityLabel,
+            items: items,
+            selectedItemID: selectedItemID,
+            reduceMotion: reduceMotion,
+            action: action
+        )
+    }
+}
+
+private final class NativeSettingsRadioGroupView: NSView {
+    private let stackView = NSStackView()
+    private var radioButtons: [NativeSettingsRadioButton] = []
+    private var radioItems: [NativeSettingsRadioItem] = []
+    private var selectedItemID = ""
+    private var reduceMotion = false
+    private var selectionHandler: (String) -> Void = { _ in }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override var isFlipped: Bool {
+        true
+    }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: CGFloat(max(radioItems.count, 1) * 26))
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+
+    func apply(
+        accessibilityLabel: String,
+        items: [NativeSettingsRadioItem],
+        selectedItemID: String,
+        reduceMotion: Bool,
+        action: @escaping (String) -> Void
+    ) {
+        self.radioItems = items
+        self.selectedItemID = selectedItemID
+        self.reduceMotion = reduceMotion
+        selectionHandler = action
+        setAccessibilityLabel(accessibilityLabel)
+        setAccessibilityValue(items.first { $0.id == selectedItemID }?.title ?? "")
+        rebuildButtonsIfNeeded(items: items)
+        updateSelection()
+        invalidateIntrinsicContentSize()
+    }
+
+    private func setup() {
+        translatesAutoresizingMaskIntoConstraints = false
+        setAccessibilityElement(true)
+        setAccessibilityRole(.radioGroup)
+        wantsLayer = true
+
+        stackView.translatesAutoresizingMaskIntoConstraints = false
+        stackView.orientation = .vertical
+        stackView.alignment = .leading
+        stackView.spacing = 2
+        addSubview(stackView)
+
+        NSLayoutConstraint.activate([
+            stackView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            stackView.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
+            stackView.topAnchor.constraint(equalTo: topAnchor),
+            stackView.bottomAnchor.constraint(equalTo: bottomAnchor)
+        ])
+    }
+
+    private func rebuildButtonsIfNeeded(items: [NativeSettingsRadioItem]) {
+        guard items != radioButtons.map({ NativeSettingsRadioItem(id: $0.identifier?.rawValue ?? "", title: $0.title) }) else {
+            return
+        }
+        for button in radioButtons {
+            stackView.removeArrangedSubview(button)
+            button.removeFromSuperview()
+        }
+        radioButtons = items.enumerated().map { index, item in
+            let button = NativeSettingsRadioButton(title: item.title, target: self, action: #selector(radioChanged))
+            button.identifier = NSUserInterfaceItemIdentifier(item.id)
+            button.tag = index
+            button.setButtonType(.radio)
+            button.isBordered = false
+            button.controlSize = .regular
+            button.font = .systemFont(ofSize: 13, weight: .regular)
+            button.setAccessibilityLabel(item.title)
+            button.setAccessibilityRole(.radioButton)
+            button.toolTip = item.title
+            stackView.addArrangedSubview(button)
+            return button
+        }
+    }
+
+    private func updateSelection() {
+        for button in radioButtons {
+            let isSelected = button.identifier?.rawValue == selectedItemID
+            button.state = isSelected ? .on : .off
+            button.setAccessibilityValue(isSelected ? NSLocalizedString("Selected", comment: "") : NSLocalizedString("Not selected", comment: ""))
+        }
+    }
+
+    @objc private func radioChanged(_ sender: NSButton) {
+        guard sender.tag >= 0, sender.tag < radioItems.count else {
+            return
+        }
+        let id = radioItems[sender.tag].id
+        selectedItemID = id
+        setAccessibilityValue(radioItems[sender.tag].title)
+        updateSelection()
+        selectionHandler(id)
+        pulse()
+    }
+
+    private func pulse() {
+        CATransaction.begin()
+        CATransaction.setDisableActions(reduceMotion)
+        CATransaction.setAnimationDuration(reduceMotion ? 0 : 0.06)
+        layer?.transform = CATransform3DMakeScale(reduceMotion ? 1 : 0.992, reduceMotion ? 1 : 0.992, 1)
+        CATransaction.commit()
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self else {
+                return
+            }
+            CATransaction.begin()
+            CATransaction.setDisableActions(self.reduceMotion)
+            CATransaction.setAnimationDuration(self.reduceMotion ? 0 : 0.10)
+            self.layer?.transform = CATransform3DIdentity
+            CATransaction.commit()
+        }
+    }
+}
+
+private final class NativeSettingsRadioButton: NSButton {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
 }
 
 private struct NativeSettingsPopupButton: NSViewRepresentable {

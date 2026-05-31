@@ -2006,6 +2006,24 @@ func runUILayoutSourceChecks() throws {
     } else {
         throw CheckFailure(description: "settings service and runtime sections source should remain inspectable")
     }
+    if let storageRulesRange = settingsViewSource.range(of: "private var storageRules: some View"),
+       let storageRulesEndRange = settingsViewSource.range(of: "private var cacheControls: some View", range: storageRulesRange.upperBound..<settingsViewSource.endIndex) {
+        let storageRulesSource = String(settingsViewSource[storageRulesRange.lowerBound..<storageRulesEndRange.lowerBound])
+        try check(
+            storageRulesSource.contains("SettingsSaveOrganizationRadioGroup(")
+                && settingsViewSource.contains("private struct SettingsSaveOrganizationRadioGroup: View")
+                && settingsViewSource.contains("private struct NativeSettingsRadioGroup: NSViewRepresentable")
+                && settingsViewSource.contains("private final class NativeSettingsRadioGroupView: NSView")
+                && settingsViewSource.contains("button.setButtonType(.radio)")
+                && settingsViewSource.contains("button.setAccessibilityRole(.radioButton)")
+                && settingsViewSource.contains("selectedItemID")
+                && !storageRulesSource.contains("\n            Picker(")
+                && !storageRulesSource.contains(".pickerStyle(.radioGroup)"),
+            "Settings saved-paper organization should use a native AppKit radio group"
+        )
+    } else {
+        throw CheckFailure(description: "settings storage rules section source should remain inspectable")
+    }
     try check(
         chatSource.contains("Bundle.main.resourceURL")
             && chatSource.contains("loadHTMLString(html, baseURL: htmlBaseURL)"),
