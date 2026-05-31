@@ -453,14 +453,12 @@ struct SettingsView: View {
 
     private var codexMCPSettings: some View {
         settingsSection(title: "Episteme MCP", systemImage: "point.3.connected.trianglepath.dotted") {
-            Toggle(
-                "Enable for in-app Codex",
-                isOn: Binding(
-                    get: { model.inAppCodexMCPEnabled },
-                    set: { model.setInAppCodexMCPEnabled($0) }
-                )
-            )
-            .toggleStyle(.checkbox)
+            SettingsCheckboxToggle(
+                title: "Enable for in-app Codex",
+                isOn: model.inAppCodexMCPEnabled
+            ) { isOn in
+                model.setInAppCodexMCPEnabled(isOn)
+            }
 
             HStack {
                 Text(model.inAppCodexMCPStatusText)
@@ -499,25 +497,21 @@ struct SettingsView: View {
     private var agentRuntimeSettings: some View {
         settingsSection(title: "Agent Runtimes", systemImage: "terminal") {
             HStack(spacing: 12) {
-                Picker("Chat", selection: Binding(
-                    get: { model.selectedChatRuntimeID },
-                    set: { model.setSelectedChatRuntimeID($0) }
-                )) {
-                    ForEach(model.agentRuntimeProfiles) { profile in
-                        Text(profile.displayName).tag(profile.id)
-                    }
+                SettingsRuntimePopup(
+                    title: "Chat",
+                    profiles: model.agentRuntimeProfiles,
+                    selectedID: model.selectedChatRuntimeID
+                ) { runtimeID in
+                    model.setSelectedChatRuntimeID(runtimeID)
                 }
-                .pickerStyle(.menu)
 
-                Picker("Explore", selection: Binding(
-                    get: { model.selectedEnrichmentRuntimeID },
-                    set: { model.setSelectedEnrichmentRuntimeID($0) }
-                )) {
-                    ForEach(model.agentRuntimeProfiles) { profile in
-                        Text(profile.displayName).tag(profile.id)
-                    }
+                SettingsRuntimePopup(
+                    title: "Explore",
+                    profiles: model.agentRuntimeProfiles,
+                    selectedID: model.selectedEnrichmentRuntimeID
+                ) { runtimeID in
+                    model.setSelectedEnrichmentRuntimeID(runtimeID)
                 }
-                .pickerStyle(.menu)
 
                 Spacer()
 
@@ -548,15 +542,14 @@ struct SettingsView: View {
         let diagnostic = model.agentRuntimeDiagnostic(for: profile.id)
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
-                Toggle(
-                    profile.displayName,
-                    isOn: Binding(
-                        get: { model.isAgentRuntimeEnabled(profile.id) },
-                        set: { model.setAgentRuntimeEnabled(profile.id, enabled: $0) }
-                    )
-                )
-                .toggleStyle(.checkbox)
-                .font(.paperCodexSystem(size: 13, weight: .semibold))
+                SettingsCheckboxToggle(
+                    title: profile.displayName,
+                    isOn: model.isAgentRuntimeEnabled(profile.id),
+                    fontWeight: .semibold
+                ) { isOn in
+                    model.setAgentRuntimeEnabled(profile.id, enabled: isOn)
+                }
+                .frame(width: 190, alignment: .leading)
 
                 Text(diagnostic?.title ?? "Not checked")
                     .font(.caption.monospacedDigit())
@@ -607,15 +600,9 @@ struct SettingsView: View {
                 .textFieldStyle(.roundedBorder)
                 .frame(maxWidth: 220)
 
-                Picker("MCP", selection: Binding(
-                    get: { model.agentRuntimeMCPMode(for: profile.id) },
-                    set: { model.setAgentRuntimeMCPMode($0, for: profile.id) }
-                )) {
-                    ForEach(AgentRuntimeMCPMode.allCases, id: \.self) { mode in
-                        Text(mode.settingsTitle).tag(mode)
-                    }
+                SettingsMCPModePopup(selection: model.agentRuntimeMCPMode(for: profile.id)) { mode in
+                    model.setAgentRuntimeMCPMode(mode, for: profile.id)
                 }
-                .pickerStyle(.menu)
 
                 Spacer()
 
@@ -629,8 +616,12 @@ struct SettingsView: View {
 
     private var embeddingProviderSettings: some View {
         settingsSection(title: "Embedding Provider", systemImage: "point.3.connected.trianglepath.dotted") {
-            Toggle("Enable embedding similarity", isOn: $draftEmbeddingEnabled)
-                .toggleStyle(.checkbox)
+            SettingsCheckboxToggle(
+                title: "Enable embedding similarity",
+                isOn: draftEmbeddingEnabled
+            ) { isOn in
+                draftEmbeddingEnabled = isOn
+            }
             TextField("Base URL", text: $draftEmbeddingBaseURL)
                 .textFieldStyle(.roundedBorder)
             SecureField("API key (leave blank to keep saved)", text: $draftEmbeddingAPIKey)
@@ -1262,6 +1253,53 @@ private struct SettingsReasoningEffortPopup: View {
     }
 }
 
+private struct SettingsRuntimePopup: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var title: String
+    var profiles: [AgentRuntimeProfile]
+    var selectedID: String
+    var onSelect: (String) -> Void
+
+    var body: some View {
+        NativeSettingsPopupButton(
+            accessibilityLabel: title,
+            items: profiles.map { profile in
+                NativeSettingsPopupItem(id: profile.id, title: profile.displayName)
+            },
+            selectedID: selectedID,
+            reduceMotion: reduceMotion,
+            action: onSelect
+        )
+        .frame(width: 150, height: 28, alignment: .leading)
+        .help(title)
+    }
+}
+
+private struct SettingsMCPModePopup: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var selection: AgentRuntimeMCPMode
+    var onSelect: (AgentRuntimeMCPMode) -> Void
+
+    var body: some View {
+        NativeSettingsPopupButton(
+            accessibilityLabel: "MCP",
+            items: AgentRuntimeMCPMode.allCases.map { mode in
+                NativeSettingsPopupItem(id: mode.rawValue, title: mode.settingsTitle)
+            },
+            selectedID: selection.rawValue,
+            reduceMotion: reduceMotion
+        ) { id in
+            if let mode = AgentRuntimeMCPMode(rawValue: id) {
+                onSelect(mode)
+            }
+        }
+        .frame(width: 150, height: 28, alignment: .leading)
+        .help("MCP")
+    }
+}
+
 private struct NativeSettingsPopupItem: Equatable {
     var id: String
     var title: String
@@ -1738,12 +1776,14 @@ private struct SettingsCheckboxToggle: View {
 
     var title: String
     var isOn: Bool
+    var fontWeight: NSFont.Weight = .regular
     var action: (Bool) -> Void
 
     var body: some View {
         NativeSettingsCheckboxToggle(
             title: title,
             isOn: isOn,
+            fontWeight: fontWeight,
             reduceMotion: reduceMotion,
             action: action
         )
@@ -1755,17 +1795,18 @@ private struct SettingsCheckboxToggle: View {
 private struct NativeSettingsCheckboxToggle: NSViewRepresentable {
     var title: String
     var isOn: Bool
+    var fontWeight: NSFont.Weight
     var reduceMotion: Bool
     var action: (Bool) -> Void
 
     func makeNSView(context: Context) -> NativeSettingsCheckboxToggleButtonView {
         let view = NativeSettingsCheckboxToggleButtonView()
-        view.apply(title: title, isOn: isOn, reduceMotion: reduceMotion, action: action)
+        view.apply(title: title, isOn: isOn, fontWeight: fontWeight, reduceMotion: reduceMotion, action: action)
         return view
     }
 
     func updateNSView(_ view: NativeSettingsCheckboxToggleButtonView, context: Context) {
-        view.apply(title: title, isOn: isOn, reduceMotion: reduceMotion, action: action)
+        view.apply(title: title, isOn: isOn, fontWeight: fontWeight, reduceMotion: reduceMotion, action: action)
     }
 }
 
@@ -1800,11 +1841,12 @@ private final class NativeSettingsCheckboxToggleButtonView: NSButton {
         return true
     }
 
-    func apply(title: String, isOn: Bool, reduceMotion: Bool, action: @escaping (Bool) -> Void) {
+    func apply(title: String, isOn: Bool, fontWeight: NSFont.Weight, reduceMotion: Bool, action: @escaping (Bool) -> Void) {
         self.title = title
         self.isChecked = isOn
         self.reduceMotion = reduceMotion
         pressHandler = action
+        font = .systemFont(ofSize: 13, weight: fontWeight)
         state = isOn ? .on : .off
         toolTip = title
         setAccessibilityLabel(title)

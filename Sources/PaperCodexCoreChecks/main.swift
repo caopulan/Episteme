@@ -1975,6 +1975,37 @@ func runUILayoutSourceChecks() throws {
     } else {
         throw CheckFailure(description: "settings Explore Processing section source should remain inspectable")
     }
+    if let codexMCPRange = settingsViewSource.range(of: "private var codexMCPSettings: some View"),
+       let codexMCPEndRange = settingsViewSource.range(of: "private var agentRuntimeSettings: some View", range: codexMCPRange.upperBound..<settingsViewSource.endIndex),
+       let agentRuntimeRange = settingsViewSource.range(of: "private var agentRuntimeSettings: some View"),
+       let agentRuntimeEndRange = settingsViewSource.range(of: "private var embeddingProviderSettings: some View", range: agentRuntimeRange.upperBound..<settingsViewSource.endIndex),
+       let embeddingRange = settingsViewSource.range(of: "private var embeddingProviderSettings: some View"),
+       let embeddingEndRange = settingsViewSource.range(of: "private var quickPromptSettings: some View", range: embeddingRange.upperBound..<settingsViewSource.endIndex) {
+        let codexMCPSource = String(settingsViewSource[codexMCPRange.lowerBound..<codexMCPEndRange.lowerBound])
+        let agentRuntimeSource = String(settingsViewSource[agentRuntimeRange.lowerBound..<agentRuntimeEndRange.lowerBound])
+        let embeddingSource = String(settingsViewSource[embeddingRange.lowerBound..<embeddingEndRange.lowerBound])
+        try check(
+            codexMCPSource.contains("SettingsCheckboxToggle(")
+                && agentRuntimeSource.components(separatedBy: "SettingsRuntimePopup(").count - 1 == 2
+                && agentRuntimeSource.contains("SettingsMCPModePopup(")
+                && agentRuntimeSource.contains("SettingsCheckboxToggle(")
+                && embeddingSource.contains("SettingsCheckboxToggle(")
+                && settingsViewSource.contains("private struct SettingsRuntimePopup: View")
+                && settingsViewSource.contains("private struct SettingsMCPModePopup: View")
+                && settingsViewSource.contains("NativeSettingsPopupButton(")
+                && !codexMCPSource.contains("\n            Toggle(")
+                && !codexMCPSource.contains(".toggleStyle(.checkbox)")
+                && !agentRuntimeSource.contains("\n                Toggle(")
+                && !agentRuntimeSource.contains("\n                Picker(")
+                && !agentRuntimeSource.contains(".toggleStyle(.checkbox)")
+                && !agentRuntimeSource.contains(".pickerStyle(.menu)")
+                && !embeddingSource.contains("\n            Toggle(")
+                && !embeddingSource.contains(".toggleStyle(.checkbox)"),
+            "Settings service and runtime controls should use native AppKit checkbox and popup controls"
+        )
+    } else {
+        throw CheckFailure(description: "settings service and runtime sections source should remain inspectable")
+    }
     try check(
         chatSource.contains("Bundle.main.resourceURL")
             && chatSource.contains("loadHTMLString(html, baseURL: htmlBaseURL)"),
