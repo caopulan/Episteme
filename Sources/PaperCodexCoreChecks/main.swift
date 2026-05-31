@@ -1100,12 +1100,16 @@ func runUILayoutSourceChecks() throws {
             && libraryPaperTableSource.contains("NSTableView")
             && libraryPaperTableSource.contains("NSScrollView")
             && libraryPaperTableSource.contains("NSViewRepresentable")
-            && libraryPaperTableSource.contains("NSHostingView")
+            && !libraryPaperTableSource.contains("NSHostingView")
             && libraryPaperTableSource.contains("LibraryPaperTableRow")
+            && libraryPaperTableSource.contains("LibraryPaperNativeCellView")
+            && libraryPaperTableSource.contains("starButton")
+            && libraryPaperTableSource.contains("readButton")
             && libraryPaperTableSource.contains("scrollRowToVisibleCentered")
             && libraryPaperTableSource.contains("keyDown(with event:")
+            && libraryPaperTableSource.contains("pasteboardWriterForRow")
             && libraryPaperTableSource.contains("reloadData()"),
-        "library paper list should use a native NSTableView-backed scroll surface with row reuse, keyboard navigation, and centered reveal"
+        "library paper list should use native NSTableView cells with row reuse, keyboard navigation, drag payloads, and centered reveal"
     )
     try check(
         librarySource.contains("private var sidebarLists: some View") &&
@@ -1148,25 +1152,17 @@ func runUILayoutSourceChecks() throws {
         "library toolbar should expose a one-click sort direction toggle"
     )
     try check(
-        librarySource.contains("onToggleStar"),
-        "library paper rows should expose a direct star toggle"
+        libraryPaperTableSource.contains("onToggleStar")
+            && libraryPaperTableSource.contains("configureSymbolButton(\n            starButton")
+            && libraryPaperTableSource.contains("systemSymbolName: row.paper.isStarred ? \"star.fill\" : \"star\""),
+        "library native paper rows should expose a direct AppKit star toggle with filled star state"
     )
     try check(
-        librarySource.contains("paper.isStarred") && librarySource.contains("star.fill"),
-        "library paper rows should render starred papers with a filled star icon"
+        libraryPaperTableSource.contains("onRead")
+            && libraryPaperTableSource.contains("configureSymbolButton(\n            readButton")
+            && libraryPaperTableSource.contains("readButton.isEnabled = !row.isImportPlaceholder"),
+        "library native paper rows should expose a direct AppKit read action disabled for pending imports"
     )
-    if let paperRowRange = librarySource.range(of: "private struct PaperRow: View"),
-       let paperRowEndRange = librarySource.range(of: "private struct PaperDragPreview", range: paperRowRange.upperBound..<librarySource.endIndex) {
-        let paperRowSource = String(librarySource[paperRowRange.lowerBound..<paperRowEndRange.lowerBound])
-        try check(
-            paperRowSource.contains("PaperCodexIconButton(\n                title: paper.isStarred ? \"Remove Star\" : \"Star Paper\"")
-                && paperRowSource.contains("PaperCodexIconButton(title: \"Read\"")
-                && !paperRowSource.contains(".buttonStyle(.borderless)"),
-            "library row star and read icon buttons should use shared immediate press feedback instead of borderless buttons"
-        )
-    } else {
-        throw CheckFailure(description: "library paper row action source should remain inspectable")
-    }
     try check(
         librarySource.contains("PaperCodexIconButton(\n                                    title: paper.isStarred ? \"Remove Star\" : \"Star Paper\"")
             && librarySource.contains("tint: paper.isStarred ? .yellow : .secondary"),
@@ -1191,13 +1187,15 @@ func runUILayoutSourceChecks() throws {
         "library paper rows should render pending arXiv imports as placeholders"
     )
     try check(
-        librarySource.contains(".disabled(isImportPlaceholder)")
-            || librarySource.contains("disabled: isImportPlaceholder"),
+        libraryPaperTableSource.contains("readButton.isEnabled = !row.isImportPlaceholder")
+            && libraryPaperTableSource.contains("starButton.isEnabled = !row.isImportPlaceholder"),
         "pending arXiv placeholder rows should disable read/open actions until the PDF is ready"
     )
     try check(
-        librarySource.contains(".onDrag {") && librarySource.contains("NSItemProvider(object: paperDragPayload(for: paper) as NSString)"),
-        "library paper rows should expose selected paper IDs as an NSItemProvider drag payload"
+        libraryPaperTableSource.contains("tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int)")
+            && libraryPaperTableSource.contains("dragPayload(tableRow)")
+            && libraryPaperTableSource.contains("return payload as NSString"),
+        "library paper rows should expose selected paper IDs as a native NSTableView drag payload"
     )
     try check(
         libraryCategoryOutlineSource.contains("registerForDraggedTypes([.string])")
@@ -1227,7 +1225,9 @@ func runUILayoutSourceChecks() throws {
         "library paper rows should not attach a competing high-priority drag gesture over native drag/drop"
     )
     try check(
-        librarySource.contains(".onDrag {") && librarySource.contains("NSItemProvider(object: paperDragPayload(for: paper) as NSString)"),
+        libraryPaperTableSource.contains("tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int)")
+            && libraryPaperTableSource.contains("dragPayload(tableRow)")
+            && libraryPaperTableSource.contains("return payload as NSString"),
         "library paper rows should use native drag payloads for folder assignment"
     )
     try check(
@@ -1383,19 +1383,20 @@ func runUILayoutSourceChecks() throws {
         "library multi-selection should show a lower, softer bulk bar with copy instead of move"
     )
     try check(
-        librarySource.contains("dragPreviewPaperIDs(for:"),
-        "native paper drag previews should reflect the seeded multi-selection set"
+        librarySource.contains("dragPayload: { row in")
+            && librarySource.contains("paperDragPayload(for: row.paper)")
+            && librarySource.contains("paperIDsForDrag(startingWith:"),
+        "native paper drags should reflect the seeded multi-selection set in their payload"
     )
     try check(
         !librarySource.contains("DragGesture(minimumDistance: 8"),
         "library paper dragging should not rely on a parallel custom drag gesture"
     )
     try check(
-        librarySource.contains("@State private var isPressing = false")
-            && librarySource.contains(".onLongPressGesture(")
-            && librarySource.contains("minimumDuration: .infinity")
-            && librarySource.contains("isPressing && !isImportPlaceholder")
-            && librarySource.contains("PaperCodexMotion.press")
+        libraryPaperTableSource.contains("private var isPressing = false")
+            && libraryPaperTableSource.contains("onPressRow")
+            && libraryPaperTableSource.contains("setPressedRow")
+            && libraryPaperTableSource.contains("isPressing && !row.isImportPlaceholder")
             && !librarySource.contains("DragGesture(minimumDistance: 0"),
         "library paper rows should provide immediate pressed feedback without replacing native drag/drop"
     )
@@ -2930,10 +2931,11 @@ func runUILayoutSourceChecks() throws {
         librarySource.contains("LibraryPaperTableView(")
             && libraryPaperTableSource.contains("NSTableView")
             && libraryPaperTableSource.contains("NSScrollView")
-            && libraryPaperTableSource.contains("NSHostingView")
-            && librarySource.contains("paperRowThumbnailLimit")
-            && librarySource.contains("paperRowThumbnailMaxPixelSize"),
-        "library paper scrolling should use a native table scroll surface with a bounded thumbnail strip"
+            && !libraryPaperTableSource.contains("NSHostingView")
+            && libraryPaperTableSource.contains("LibraryPaperThumbnailStripView")
+            && libraryPaperTableSource.contains("thumbnailLimit")
+            && libraryPaperTableSource.contains("thumbnailMaxPixelSize"),
+        "library paper scrolling should use a native table scroll surface with a bounded native thumbnail strip"
     )
     try check(
         localThumbnailSource.contains("LocalThumbnailDecodeGate")
@@ -3459,8 +3461,9 @@ func runUILayoutSourceChecks() throws {
         "library paper rows should detect a second quick click from the immediate single-click handler"
     )
     try check(
-        librarySource.contains("@State private var isHovering = false"),
-        "library paper rows should track hover state for row feedback and selection affordances"
+        libraryPaperTableSource.contains("private var isHovering = false")
+            && libraryPaperTableSource.contains("NSTrackingArea"),
+        "library native paper rows should track hover state for row feedback and selection affordances"
     )
     try check(
         librarySource.contains("bulkActionBarOverlay"),
@@ -3475,11 +3478,12 @@ func runUILayoutSourceChecks() throws {
         "library paper rows should rely on command/shift multi-select instead of hover checkboxes"
     )
     try check(
-        librarySource.contains("arxivDisplayID"),
+        libraryPaperTableSource.contains("arxivDisplayID(for:")
+            && libraryPaperTableSource.contains("ArxivIDExtractor.firstCanonicalID(in:)"),
         "library paper rows should show the arXiv ID in the visible card area when available"
     )
     try check(
-        librarySource.contains(".font(.paperCodexSystem(size: 12.5"),
+        libraryPaperTableSource.contains("chipFont = NSFont.systemFont(ofSize: 12.5"),
         "library arXiv, folder, and tag chips should be slightly larger than caption text"
     )
     try check(
@@ -3525,9 +3529,12 @@ func runUILayoutSourceChecks() throws {
         "library inspector should expose per-paper notes"
     )
     try check(
-        librarySource.contains("LocalThumbnailImage")
-            && !librarySource.contains("NSImage(contentsOf: url)"),
-        "library thumbnail rows should decode local thumbnail images asynchronously instead of reading image files in body"
+        libraryPaperTableSource.contains("LibraryPaperThumbnailDecodeGate")
+            && libraryPaperTableSource.contains("decodeLibraryPaperThumbnailImage")
+            && libraryPaperTableSource.contains("Task.detached(priority: LibraryPaperThumbnailDecodePolicy.decodePriority)")
+            && !libraryPaperTableSource.contains("NSImage(contentsOf: url)")
+            && !librarySource.contains("LocalThumbnailImage"),
+        "library native thumbnail rows should decode local thumbnail images asynchronously instead of reading image files in body"
     )
     try check(
         appModelSource.contains("updateCategory(") && appModelSource.contains("deleteCategory("),

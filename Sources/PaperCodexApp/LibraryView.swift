@@ -494,40 +494,24 @@ struct LibraryView: View {
                     selectedPaperID: model.selectedLibraryPaper?.id,
                     revealRequestID: selectedPaperRevealRequestID,
                     focusRequestID: paperTableFocusRequestID,
-                    onMoveSelection: moveFocusedPaperSelection(by:)
-                ) { row in
-                    let paper = row.paper
-                    PaperRow(
-                        paper: paper,
-                        categories: row.categories,
-                        tags: row.tags,
-                        thumbnailURLs: row.thumbnailURLs,
-                        isImportPlaceholder: row.isImportPlaceholder,
-                        placeholderDetail: row.placeholderDetail,
-                        isSelected: row.isSelected,
-                        isMultiSelected: row.isMultiSelected,
-                        onToggleStar: {
-                            model.togglePaperStar(paper)
-                        },
-                        onRead: {
-                            model.openPaper(paper)
-                        }
-                    )
-                    .contentShape(Rectangle())
-                    .onDrag {
-                        outlineDraggedCategoryID = nil
-                        return NSItemProvider(object: paperDragPayload(for: paper) as NSString)
-                    } preview: {
-                        PaperDragPreview(
-                            paper: paper,
-                            selectedCount: dragPreviewPaperIDs(for: paper).count
-                        )
-                    }
-                    .onTapGesture {
+                    onMoveSelection: moveFocusedPaperSelection(by:),
+                    onSelect: { row in
                         paperTableFocusRequestID = UUID()
-                        handlePaperRowClick(paper)
+                        handlePaperRowClick(row.paper)
+                    },
+                    onToggleStar: { row in
+                        model.togglePaperStar(row.paper)
+                    },
+                    onRead: { row in
+                        model.openPaper(row.paper)
+                    },
+                    onBeginDrag: { _ in
+                        outlineDraggedCategoryID = nil
+                    },
+                    dragPayload: { row in
+                        paperDragPayload(for: row.paper)
                     }
-                }
+                )
                 .overlay(alignment: .top) {
                     bulkActionBarOverlay
                 }
@@ -1213,10 +1197,6 @@ struct LibraryView: View {
             return selectedPaperIDsInOrder
         }
         return [paper.id]
-    }
-
-    private func dragPreviewPaperIDs(for paper: Paper) -> [String] {
-        paperIDsForDrag(startingWith: paper)
     }
 
     private func paperDragPayload(for paper: Paper) -> String {
@@ -1934,235 +1914,6 @@ private enum LibraryLayout {
         let categoryID = String(payload.dropFirst(categoryDragPayloadPrefix.count))
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return categoryID.isEmpty ? nil : categoryID
-    }
-}
-
-private struct PaperRow: View {
-    var paper: Paper
-    var categories: [PaperCodexCore.Category]
-    var tags: [PaperTag]
-    var thumbnailURLs: [URL]
-    var isImportPlaceholder: Bool
-    var placeholderDetail: String
-    var isSelected: Bool
-    var isMultiSelected: Bool
-    var onToggleStar: () -> Void
-    var onRead: () -> Void
-
-    @State private var isHovering = false
-    @State private var isPressing = false
-
-    var body: some View {
-        HStack(alignment: .center, spacing: 14) {
-            ThumbnailStrip(urls: Array(thumbnailURLs.prefix(LibraryLayout.paperRowThumbnailLimit)))
-                .frame(width: 132, height: 54)
-                .opacity(isImportPlaceholder ? 0.45 : 1)
-
-            VStack(alignment: .leading, spacing: 7) {
-                Text(paper.title)
-                    .font(.headline)
-                    .foregroundStyle(isImportPlaceholder ? .secondary : .primary)
-                    .lineLimit(2)
-                Text(isImportPlaceholder ? placeholderDetail : (paper.authors.isEmpty ? "Authors not set" : paper.authors.joined(separator: ", ")))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                HStack(spacing: 6) {
-                    if let arxivDisplayID {
-                        SmallChip(title: arxivDisplayID, systemImage: "number")
-                    }
-                    ForEach(categories.prefix(2)) { category in
-                        SmallChip(title: category.name, systemImage: "folder")
-                    }
-                    ForEach(tags.prefix(3)) { tag in
-                        SmallChip(title: tag.name, systemImage: "tag")
-                    }
-                }
-            }
-
-            Spacer()
-
-            PaperCodexIconButton(
-                title: paper.isStarred ? "Remove Star" : "Star Paper",
-                systemImage: paper.isStarred ? "star.fill" : "star",
-                tint: paper.isStarred ? .yellow : .secondary,
-                disabled: isImportPlaceholder,
-                action: onToggleStar
-            )
-
-            PaperCodexIconButton(title: "Read", systemImage: "book", tint: .secondary, disabled: isImportPlaceholder, action: onRead)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 21)
-        .background(rowBackground)
-        .opacity(isImportPlaceholder ? 0.66 : 1)
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(rowBorderColor, lineWidth: isMultiSelected ? 1.5 : 1)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .shadow(color: rowShadowColor, radius: isPressing ? 4 : 6, y: isPressing ? 1 : 2)
-        .scaleEffect(rowScale, anchor: .center)
-        .overlay(alignment: .leading) {
-            if isSelected || isMultiSelected || isPressing {
-                Capsule()
-                    .fill(Color.accentColor.opacity(leadingIndicatorOpacity))
-                    .frame(width: 4)
-                    .padding(.vertical, 12)
-                    .padding(.leading, 4)
-                    .transition(.opacity.combined(with: .scale(scale: 0.92)))
-            }
-        }
-        .onLongPressGesture(
-            minimumDuration: .infinity,
-            maximumDistance: 16,
-            pressing: { isPressing in
-                withAnimation(PaperCodexMotion.press) {
-                    self.isPressing = isPressing && !isImportPlaceholder
-                }
-            },
-            perform: {}
-        )
-        .animation(PaperCodexMotion.press, value: isPressing)
-        .animation(PaperCodexMotion.hover, value: isHovering)
-        .animation(PaperCodexMotion.selection, value: isSelected)
-        .animation(PaperCodexMotion.selection, value: isMultiSelected)
-        .onHover { hovering in
-            withAnimation(PaperCodexMotion.hover) {
-                isHovering = hovering
-            }
-        }
-    }
-
-    private var arxivDisplayID: String? {
-        paper.arxivImportPlaceholderCanonicalID
-            ?? paper.sourceURL.flatMap(ArxivIDExtractor.firstCanonicalID(in:))
-    }
-
-    private var rowBackground: Color {
-        if isMultiSelected {
-            return Color.accentColor.opacity(0.16)
-        }
-        if isPressing && !isImportPlaceholder {
-            return Color.accentColor.opacity(0.12)
-        }
-        if isSelected {
-            return Color.accentColor.opacity(0.10)
-        }
-        if isHovering {
-            return Color(nsColor: .textBackgroundColor)
-        }
-        return Color(nsColor: .controlBackgroundColor)
-    }
-
-    private var rowBorderColor: Color {
-        if isMultiSelected {
-            return Color.accentColor.opacity(0.62)
-        }
-        if isPressing && !isImportPlaceholder {
-            return Color.accentColor.opacity(0.48)
-        }
-        if isSelected {
-            return Color.accentColor.opacity(0.38)
-        }
-        if isHovering {
-            return Color.primary.opacity(0.10)
-        }
-        return Color.clear
-    }
-
-    private var rowShadowColor: Color {
-        if isImportPlaceholder {
-            return .clear
-        }
-        if isPressing {
-            return Color.accentColor.opacity(0.12)
-        }
-        return isHovering ? Color.black.opacity(0.10) : .clear
-    }
-
-    private var rowScale: CGFloat {
-        if isImportPlaceholder {
-            return 1
-        }
-        return isPressing ? 0.992 : (isHovering ? 1.006 : 1)
-    }
-
-    private var leadingIndicatorOpacity: Double {
-        if isMultiSelected {
-            return 0.82
-        }
-        return isPressing ? 0.70 : 0.62
-    }
-}
-
-private struct PaperDragPreview: View {
-    var paper: Paper
-    var selectedCount: Int = 1
-
-    var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "doc.text")
-                .font(.paperCodexSystem(size: 18, weight: .semibold))
-                .foregroundStyle(Color.accentColor)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(paper.title)
-                    .font(.paperCodexSystem(size: 13, weight: .semibold))
-                    .lineLimit(1)
-                Text(paper.authors.isEmpty ? "Authors not set" : paper.authors.joined(separator: ", "))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                if selectedCount > 1 {
-                    Text("\(selectedCount) papers")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(Color.accentColor)
-                        .contentTransition(.numericText())
-                }
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-        .frame(width: 360, alignment: .leading)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10)
-                .stroke(Color.accentColor.opacity(0.28), lineWidth: 1)
-        )
-    }
-}
-
-private struct ThumbnailStrip: View {
-    var urls: [URL]
-
-    var body: some View {
-        HStack(spacing: -18) {
-            if urls.isEmpty {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 5)
-                        .fill(Color(nsColor: .windowBackgroundColor))
-                    Image(systemName: "doc.richtext")
-                        .foregroundStyle(.blue)
-                }
-                .frame(width: 42, height: 54)
-            } else {
-                let visibleURLs = Array(urls.prefix(LibraryLayout.paperRowThumbnailLimit))
-                ForEach(Array(visibleURLs.enumerated()), id: \.offset) { index, url in
-                    LocalThumbnailImage(url: url, maxPixelSize: LibraryLayout.paperRowThumbnailMaxPixelSize) {
-                        Color(nsColor: .textBackgroundColor)
-                    }
-                    .padding(2)
-                    .frame(width: 42, height: 54)
-                    .background(Color(nsColor: .textBackgroundColor))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 5)
-                            .stroke(Color.black.opacity(0.12), lineWidth: 1)
-                    )
-                    .clipShape(RoundedRectangle(cornerRadius: 5))
-                    .zIndex(Double(visibleURLs.count - index))
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
