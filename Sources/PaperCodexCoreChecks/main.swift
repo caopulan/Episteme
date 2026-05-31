@@ -1996,13 +1996,18 @@ func runUILayoutSourceChecks() throws {
        let quickRangeEndRange = discoverSource.range(of: "private struct DiscoverProcessActionSheet", range: quickRangeRange.upperBound..<discoverSource.endIndex) {
         let quickRangeSource = String(discoverSource[quickRangeRange.lowerBound..<quickRangeEndRange.lowerBound])
         try check(
-            quickRangeSource.contains("private struct DiscoverQuickRangeButton: View")
-                && quickRangeSource.contains("private struct DiscoverQuickRangeButtonStyle: ButtonStyle")
-                && quickRangeSource.contains(".buttonStyle(DiscoverQuickRangeButtonStyle(")
-                && quickRangeSource.contains("configuration.isPressed")
-                && quickRangeSource.contains("PaperCodexMotion.press")
+            actionButtonSource.contains("struct PaperCodexQuickRangeButton: View")
+                && actionButtonSource.contains("private struct NativePaperCodexQuickRangeButton: NSViewRepresentable")
+                && actionButtonSource.contains("private final class NativePaperCodexQuickRangeButtonView: NSButton")
+                && actionButtonSource.components(separatedBy: "override func mouseDown(with event: NSEvent)").count - 1 >= 8
+                && actionButtonSource.components(separatedBy: "setAccessibilityRole(.button)").count - 1 >= 8
+                && actionButtonSource.components(separatedBy: "CATransaction.setAnimationDuration").count - 1 >= 8
+                && quickRangeSource.contains("PaperCodexQuickRangeButton(title: range.title)")
+                && !quickRangeSource.contains("@State private var isHovering = false")
+                && !quickRangeSource.contains("private struct DiscoverQuickRangeButtonStyle: ButtonStyle")
+                && !quickRangeSource.contains(".buttonStyle(DiscoverQuickRangeButtonStyle(")
                 && !quickRangeSource.contains(".buttonStyle(.bordered)"),
-            "Explore date quick range buttons should provide immediate pressed feedback before range recalculation"
+            "Explore date quick range buttons should use shared native AppKit buttons before range recalculation"
         )
     } else {
         throw CheckFailure(description: "Discover quick range button source should remain inspectable")

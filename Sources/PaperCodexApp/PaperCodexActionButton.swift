@@ -214,6 +214,26 @@ struct PaperCodexMediaPreviewButton<Content: View>: View {
     }
 }
 
+struct PaperCodexQuickRangeButton: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var title: String
+    var disabled = false
+    var action: () -> Void
+
+    var body: some View {
+        NativePaperCodexQuickRangeButton(
+            title: title,
+            disabled: disabled,
+            reduceMotion: reduceMotion,
+            action: action
+        )
+        .fixedSize(horizontal: true, vertical: true)
+        .help(title)
+        .accessibilityLabel(title)
+    }
+}
+
 struct PaperCodexPathChipButton: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -273,6 +293,10 @@ private enum NativePaperCodexActionMetrics {
     static let resourceLinkFontSize: CGFloat = 13
     static let resourceLinkCornerRadius: CGFloat = 6
     static let mediaPreviewCornerRadius: CGFloat = 6
+    static let quickRangeHeight: CGFloat = 28
+    static let quickRangeHorizontalPadding: CGFloat = 10
+    static let quickRangeFontSize: CGFloat = 12.5
+    static let quickRangeCornerRadius: CGFloat = 7
 }
 
 private struct NativePaperCodexToolbarButton: NSViewRepresentable {
@@ -464,6 +488,33 @@ private struct NativePaperCodexMediaPreviewButton: NSViewRepresentable {
         view.apply(
             disabled: disabled,
             help: help,
+            reduceMotion: reduceMotion,
+            action: action
+        )
+    }
+}
+
+private struct NativePaperCodexQuickRangeButton: NSViewRepresentable {
+    var title: String
+    var disabled: Bool
+    var reduceMotion: Bool
+    var action: () -> Void
+
+    func makeNSView(context: Context) -> NativePaperCodexQuickRangeButtonView {
+        let view = NativePaperCodexQuickRangeButtonView()
+        view.apply(
+            title: title,
+            disabled: disabled,
+            reduceMotion: reduceMotion,
+            action: action
+        )
+        return view
+    }
+
+    func updateNSView(_ view: NativePaperCodexQuickRangeButtonView, context: Context) {
+        view.apply(
+            title: title,
+            disabled: disabled,
             reduceMotion: reduceMotion,
             action: action
         )
@@ -1094,6 +1145,182 @@ private final class NativePaperCodexMediaPreviewButtonView: NSButton {
             targetScale = 0.992
         } else {
             targetScale = isHovering ? 1.006 : 1
+        }
+        CATransaction.begin()
+        CATransaction.setDisableActions(reduceMotion)
+        CATransaction.setAnimationDuration(reduceMotion ? 0 : (isPressed ? 0.05 : 0.12))
+        layer?.transform = CATransform3DMakeScale(targetScale, targetScale, 1)
+        CATransaction.commit()
+    }
+}
+
+private final class NativePaperCodexQuickRangeButtonView: NSButton {
+    private let titleLabel = NSTextField(labelWithString: "")
+    private var trackingArea: NSTrackingArea?
+    private var pressHandler: () -> Void = {}
+    private var isHovering = false
+    private var isPressed = false
+    private var isDisabled = false
+    private var reduceMotion = false
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override var isFlipped: Bool {
+        true
+    }
+
+    override var intrinsicContentSize: NSSize {
+        let width = NativePaperCodexActionMetrics.quickRangeHorizontalPadding * 2
+            + titleLabel.intrinsicContentSize.width
+        return NSSize(width: ceil(width), height: NativePaperCodexActionMetrics.quickRangeHeight)
+    }
+
+    func apply(title: String, disabled: Bool, reduceMotion: Bool, action: @escaping () -> Void) {
+        let localizedTitle = NSLocalizedString(title, comment: "")
+        pressHandler = action
+        isDisabled = disabled
+        self.reduceMotion = reduceMotion
+        isEnabled = !disabled
+        titleLabel.stringValue = localizedTitle
+        toolTip = localizedTitle
+        setAccessibilityLabel(localizedTitle)
+        invalidateIntrinsicContentSize()
+        updateAppearance()
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea {
+            removeTrackingArea(trackingArea)
+        }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.activeInKeyWindow, .mouseEnteredAndExited, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isHovering = true
+        updateAppearance()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHovering = false
+        updateAppearance()
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard !isDisabled else {
+            return
+        }
+        setPressed(true)
+        super.mouseDown(with: event)
+        setPressed(false)
+    }
+
+    private func setup() {
+        translatesAutoresizingMaskIntoConstraints = false
+        title = ""
+        isBordered = false
+        bezelStyle = .regularSquare
+        imagePosition = .noImage
+        focusRingType = .none
+        setButtonType(.momentaryChange)
+        target = self
+        action = #selector(performPress)
+        setAccessibilityElement(true)
+        setAccessibilityRole(.button)
+        wantsLayer = true
+        layer?.cornerRadius = NativePaperCodexActionMetrics.quickRangeCornerRadius
+        layer?.masksToBounds = false
+
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        titleLabel.font = .systemFont(
+            ofSize: NativePaperCodexActionMetrics.quickRangeFontSize,
+            weight: .semibold
+        )
+        titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.maximumNumberOfLines = 1
+        titleLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+        addSubview(titleLabel)
+
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: NativePaperCodexActionMetrics.quickRangeHeight),
+            titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: NativePaperCodexActionMetrics.quickRangeHorizontalPadding),
+            titleLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -NativePaperCodexActionMetrics.quickRangeHorizontalPadding),
+            titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor)
+        ])
+        updateAppearance()
+    }
+
+    @objc private func performPress() {
+        guard !isDisabled else {
+            return
+        }
+        pressHandler()
+    }
+
+    private func setPressed(_ pressed: Bool) {
+        isPressed = pressed
+        updateAppearance()
+    }
+
+    private func updateAppearance() {
+        let tint = NSColor.controlAccentColor
+        let foreground: NSColor
+        let background: NSColor
+        let border: NSColor
+        let shadowOpacity: Float
+
+        if isDisabled {
+            foreground = .secondaryLabelColor.withAlphaComponent(0.45)
+            background = .controlBackgroundColor.withAlphaComponent(0.50)
+            border = .black.withAlphaComponent(0.06)
+            shadowOpacity = 0
+        } else if isPressed {
+            foreground = tint
+            background = tint.withAlphaComponent(0.17)
+            border = tint.withAlphaComponent(0.54)
+            shadowOpacity = 0.10
+        } else if isHovering {
+            foreground = tint
+            background = tint.withAlphaComponent(0.11)
+            border = tint.withAlphaComponent(0.38)
+            shadowOpacity = 0.14
+        } else {
+            foreground = .labelColor.withAlphaComponent(0.82)
+            background = .controlBackgroundColor
+            border = .black.withAlphaComponent(0.10)
+            shadowOpacity = 0
+        }
+
+        titleLabel.textColor = foreground
+        layer?.backgroundColor = background.cgColor
+        layer?.borderWidth = 1
+        layer?.borderColor = border.cgColor
+        layer?.shadowColor = tint.cgColor
+        layer?.shadowOpacity = shadowOpacity
+        layer?.shadowRadius = isPressed ? 3 : 5
+        layer?.shadowOffset = CGSize(width: 0, height: isPressed ? -1 : -2)
+
+        let targetScale: CGFloat
+        if reduceMotion || isDisabled {
+            targetScale = 1
+        } else if isPressed {
+            targetScale = 0.97
+        } else {
+            targetScale = isHovering ? 1.025 : 1
         }
         CATransaction.begin()
         CATransaction.setDisableActions(reduceMotion)
