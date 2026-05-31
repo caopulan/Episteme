@@ -206,19 +206,23 @@ struct SettingsView: View {
                 draftChatFontFamily = family
             }
 
-            Stepper(
-                "Message text: \(Int(ChatAppearanceDefaults.clampedMessageFontSize(draftChatMessageFontSize))) pt",
-                value: $draftChatMessageFontSize,
-                in: ChatAppearanceDefaults.messageFontSizeRange,
+            SettingsFontSizeStepper(
+                title: "Message text",
+                value: draftChatMessageFontSize,
+                range: ChatAppearanceDefaults.messageFontSizeRange,
                 step: 1
-            )
+            ) { size in
+                draftChatMessageFontSize = size
+            }
 
-            Stepper(
-                "Composer text: \(Int(ChatAppearanceDefaults.clampedComposerFontSize(draftChatComposerFontSize))) pt",
-                value: $draftChatComposerFontSize,
-                in: ChatAppearanceDefaults.composerFontSizeRange,
+            SettingsFontSizeStepper(
+                title: "Composer text",
+                value: draftChatComposerFontSize,
+                range: ChatAppearanceDefaults.composerFontSizeRange,
                 step: 1
-            )
+            ) { size in
+                draftChatComposerFontSize = size
+            }
 
             ChatAppearancePreview(
                 messageFontSize: draftChatMessageFontSize,
@@ -1194,6 +1198,174 @@ private final class NativeSettingsSegmentedControlView: NSSegmentedControl {
         CATransaction.setAnimationDuration(reduceMotion ? 0 : (isPressed ? 0.05 : 0.12))
         layer?.transform = CATransform3DMakeScale(targetScale, targetScale, 1)
         CATransaction.commit()
+    }
+}
+
+private struct SettingsFontSizeStepper: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var title: String
+    var value: Double
+    var range: ClosedRange<Double>
+    var step: Double
+    var onChange: (Double) -> Void
+
+    var body: some View {
+        NativeSettingsFontSizeStepper(
+            title: title,
+            value: value,
+            range: range,
+            step: step,
+            reduceMotion: reduceMotion,
+            onChange: onChange
+        )
+        .frame(width: 190, height: 28, alignment: .leading)
+        .help(title)
+    }
+}
+
+private struct NativeSettingsFontSizeStepper: NSViewRepresentable {
+    var title: String
+    var value: Double
+    var range: ClosedRange<Double>
+    var step: Double
+    var reduceMotion: Bool
+    var onChange: (Double) -> Void
+
+    func makeNSView(context: Context) -> NativeSettingsFontSizeStepperView {
+        let view = NativeSettingsFontSizeStepperView()
+        view.apply(
+            title: title,
+            value: value,
+            range: range,
+            step: step,
+            reduceMotion: reduceMotion,
+            onChange: onChange
+        )
+        return view
+    }
+
+    func updateNSView(_ view: NativeSettingsFontSizeStepperView, context: Context) {
+        view.apply(
+            title: title,
+            value: value,
+            range: range,
+            step: step,
+            reduceMotion: reduceMotion,
+            onChange: onChange
+        )
+    }
+}
+
+private final class NativeSettingsFontSizeStepperView: NSView {
+    private let labelField = NSTextField(labelWithString: "")
+    private let stepper = NSStepper()
+    private var range: ClosedRange<Double> = 0...1
+    private var step: Double = 1
+    private var reduceMotion = false
+    private var changeHandler: (Double) -> Void = { _ in }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override var isFlipped: Bool {
+        true
+    }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: 190, height: 28)
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+
+    func apply(
+        title: String,
+        value: Double,
+        range: ClosedRange<Double>,
+        step: Double,
+        reduceMotion: Bool,
+        onChange: @escaping (Double) -> Void
+    ) {
+        self.range = range
+        self.step = step
+        self.reduceMotion = reduceMotion
+        changeHandler = onChange
+
+        let clampedValue = min(max(value, range.lowerBound), range.upperBound)
+        labelField.stringValue = "\(title): \(Int(clampedValue)) pt"
+        labelField.toolTip = labelField.stringValue
+        stepper.minValue = range.lowerBound
+        stepper.maxValue = range.upperBound
+        stepper.increment = step
+        stepper.doubleValue = clampedValue
+        stepper.setAccessibilityLabel(title)
+        stepper.setAccessibilityValue("\(Int(clampedValue)) pt")
+        stepper.toolTip = title
+        setAccessibilityLabel(title)
+        setAccessibilityValue("\(Int(clampedValue)) pt")
+    }
+
+    private func setup() {
+        translatesAutoresizingMaskIntoConstraints = false
+        setAccessibilityElement(false)
+        wantsLayer = true
+
+        labelField.translatesAutoresizingMaskIntoConstraints = false
+        labelField.font = .systemFont(ofSize: 13, weight: .regular)
+        labelField.textColor = .labelColor
+        labelField.lineBreakMode = .byTruncatingTail
+        labelField.maximumNumberOfLines = 1
+
+        stepper.translatesAutoresizingMaskIntoConstraints = false
+        stepper.controlSize = .small
+        stepper.target = self
+        stepper.action = #selector(stepperChanged)
+        stepper.setContentHuggingPriority(.required, for: .horizontal)
+
+        [labelField, stepper].forEach(addSubview(_:))
+
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: 28),
+            labelField.leadingAnchor.constraint(equalTo: leadingAnchor),
+            labelField.centerYAnchor.constraint(equalTo: centerYAnchor),
+            labelField.trailingAnchor.constraint(lessThanOrEqualTo: stepper.leadingAnchor, constant: -8),
+            stepper.trailingAnchor.constraint(equalTo: trailingAnchor),
+            stepper.centerYAnchor.constraint(equalTo: centerYAnchor)
+        ])
+    }
+
+    @objc private func stepperChanged() {
+        let clampedValue = min(max(stepper.doubleValue, range.lowerBound), range.upperBound)
+        stepper.doubleValue = clampedValue
+        changeHandler(clampedValue)
+        pulse()
+    }
+
+    private func pulse() {
+        CATransaction.begin()
+        CATransaction.setDisableActions(reduceMotion)
+        CATransaction.setAnimationDuration(reduceMotion ? 0 : 0.06)
+        layer?.transform = CATransform3DMakeScale(reduceMotion ? 1 : 0.992, reduceMotion ? 1 : 0.992, 1)
+        CATransaction.commit()
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self else {
+                return
+            }
+            CATransaction.begin()
+            CATransaction.setDisableActions(self.reduceMotion)
+            CATransaction.setAnimationDuration(self.reduceMotion ? 0 : 0.10)
+            self.layer?.transform = CATransform3DIdentity
+            CATransaction.commit()
+        }
     }
 }
 

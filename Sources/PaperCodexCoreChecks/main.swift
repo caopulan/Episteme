@@ -1896,15 +1896,38 @@ func runUILayoutSourceChecks() throws {
             && appModelSource.contains("func setChatAppearance(")
             && settingsViewSource.contains("private var chatAppearanceSettings: some View")
             && settingsViewSource.contains("SettingsChatFontSegmentedControl(")
-            && settingsViewSource.contains("Stepper(")
-            && settingsViewSource.contains("Message text:")
-            && settingsViewSource.contains("Composer text:")
+            && (settingsViewSource.contains("SettingsFontSizeStepper(") || settingsViewSource.contains("Stepper("))
+            && settingsViewSource.contains("Message text")
+            && settingsViewSource.contains("Composer text")
             && chatSource.contains("ChatMarkdownRenderStyle(")
             && chatSource.contains("messageFontSize: model.chatMessageFontSize")
             && chatSource.contains("fontSize: model.chatComposerFontSize")
             && chatMarkdownRendererSource.contains("public struct ChatMarkdownRenderStyle"),
         "Reader Chat should expose persistent font family and size settings with larger defaults for messages and composer"
     )
+    if let chatAppearanceRange = settingsViewSource.range(of: "private var chatAppearanceSettings: some View"),
+       let chatAppearanceEndRange = settingsViewSource.range(of: "private var localRankingSettings: some View", range: chatAppearanceRange.upperBound..<settingsViewSource.endIndex) {
+        let chatAppearanceSettingsSource = String(settingsViewSource[chatAppearanceRange.lowerBound..<chatAppearanceEndRange.lowerBound])
+        try check(
+            chatAppearanceSettingsSource.components(separatedBy: "SettingsFontSizeStepper(").count - 1 == 2
+                && settingsViewSource.contains("private struct SettingsFontSizeStepper: View")
+                && settingsViewSource.contains("private struct NativeSettingsFontSizeStepper: NSViewRepresentable")
+                && settingsViewSource.contains("private final class NativeSettingsFontSizeStepperView: NSView")
+                && settingsViewSource.contains("NSStepper()")
+                && settingsViewSource.contains("stepper.setAccessibilityLabel(title)")
+                && settingsViewSource.contains("stepper.setAccessibilityValue(\"\\(Int(clampedValue)) pt\")")
+                && settingsViewSource.contains("labelField.stringValue = \"\\(title): \\(Int(clampedValue)) pt\"")
+                && settingsViewSource.contains("stepper.minValue = range.lowerBound")
+                && settingsViewSource.contains("stepper.maxValue = range.upperBound")
+                && settingsViewSource.contains("stepper.increment = step")
+                && settingsViewSource.contains("override func acceptsFirstMouse(for event: NSEvent?) -> Bool")
+                && settingsViewSource.contains("CATransaction.setAnimationDuration")
+                && !chatAppearanceSettingsSource.contains("\n            Stepper("),
+            "Settings chat appearance font-size controls should use native AppKit NSStepper rows"
+        )
+    } else {
+        throw CheckFailure(description: "settings chat appearance section source should remain inspectable")
+    }
     try check(
         chatSource.contains("Bundle.main.resourceURL")
             && chatSource.contains("loadHTMLString(html, baseURL: htmlBaseURL)"),
