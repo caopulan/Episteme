@@ -1468,7 +1468,7 @@ func runUILayoutSourceChecks() throws {
         return hasSwiftUIStatusView ? fileURL.lastPathComponent : nil
     }
     let swiftUIFormControlRegex = try NSRegularExpression(pattern: #"\b(TextField|SecureField|TextEditor|Picker|Toggle|Stepper|DatePicker)\("#)
-    let swiftUIScrollViewRegex = try NSRegularExpression(pattern: #"\bScrollView\s*\("#)
+    let swiftUIScrollViewRegex = try NSRegularExpression(pattern: #"\bScrollView\s*(?:\(|\{)"#)
     func hasSwiftUIFormControlUse(_ source: String) -> Bool {
         let range = NSRange(source.startIndex..<source.endIndex, in: source)
         return swiftUIFormControlRegex.firstMatch(in: source, range: range) != nil
@@ -1476,6 +1476,10 @@ func runUILayoutSourceChecks() throws {
     func hasSwiftUIScrollViewUse(_ source: String) -> Bool {
         let range = NSRange(source.startIndex..<source.endIndex, in: source)
         return swiftUIScrollViewRegex.firstMatch(in: source, range: range) != nil
+    }
+    func swiftUIScrollViewUseCount(_ source: String) -> Int {
+        let range = NSRange(source.startIndex..<source.endIndex, in: source)
+        return swiftUIScrollViewRegex.numberOfMatches(in: source, range: range)
     }
     try check(
         appModelSource.contains("case search")
@@ -1880,11 +1884,17 @@ func runUILayoutSourceChecks() throws {
             && librarySource.contains("PaperCodexNativeScrollView")
             && saveToLibrarySource.contains("PaperCodexNativeScrollView")
             && interactionFeedbackSource.contains("PaperCodexNativeScrollView")
+            && chatSource.contains("PaperCodexNativeScrollView(.horizontal")
+            && discoverSource.contains("PaperCodexNativeScrollView")
+            && readerViewSource.contains("PaperCodexNativeScrollView")
             && !hasSwiftUIScrollViewUse(settingsViewSource)
             && !hasSwiftUIScrollViewUse(librarySource)
             && !hasSwiftUIScrollViewUse(saveToLibrarySource)
-            && !hasSwiftUIScrollViewUse(interactionFeedbackSource),
-        "Settings, Library, Save-to-Library, and notice detail scroll regions should use shared AppKit NSScrollView hosting instead of SwiftUI ScrollView"
+            && !hasSwiftUIScrollViewUse(interactionFeedbackSource)
+            && swiftUIScrollViewUseCount(chatSource) == 1
+            && swiftUIScrollViewUseCount(discoverSource) == 1
+            && !hasSwiftUIScrollViewUse(readerViewSource),
+        "non-programmatic scroll regions should use shared AppKit NSScrollView hosting, leaving only programmatic Chat and Discover scroll readers on SwiftUI ScrollView"
     )
     try check(
         actionButtonSource.contains("struct PaperCodexToolbarButton")

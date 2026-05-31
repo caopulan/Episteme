@@ -219,7 +219,7 @@ struct DiscoverView: View {
                 .font(.headline)
                 .foregroundStyle(.secondary)
 
-            ScrollView {
+            PaperCodexNativeScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     VStack(alignment: .leading, spacing: 8) {
                         Label("Categories", systemImage: "line.3.horizontal.decrease.circle")
@@ -773,7 +773,7 @@ struct ArxivSearchView: View {
                 .font(.headline)
                 .foregroundStyle(.secondary)
 
-            ScrollView {
+            PaperCodexNativeScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     VStack(alignment: .leading, spacing: 8) {
                         Label("至少包含类别", systemImage: "checklist.checked")
@@ -842,7 +842,7 @@ struct ArxivSearchView: View {
                     let columnWidth = discoverPaperGridColumnWidth(for: proxy.size.width, columnCount: columnCount)
                     let rows = paperRows(papers, columnCount: columnCount)
                     let imagePreloadURLs = discoverImagePreloadURLs(for: papers)
-                    ScrollView {
+                    PaperCodexNativeScrollView {
                         LazyVStack(alignment: .leading, spacing: discoverPaperGridRowSpacing) {
                             ForEach(Array(rows.enumerated()), id: \.offset) { rowIndex, rowPapers in
                                 HStack(alignment: .top, spacing: discoverPaperGridColumnSpacing) {
@@ -864,6 +864,7 @@ struct ArxivSearchView: View {
                             await warmDiscoverLocalImages(imagePreloadURLs)
                         }
                     }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
         }
@@ -1828,7 +1829,7 @@ private struct DiscoverRouteLoadingPlaceholder: View {
             let columnCount = placeholderColumnCount(for: proxy.size.width)
             let rows = Array(0..<3)
 
-            ScrollView {
+            PaperCodexNativeScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     HStack(spacing: 8) {
                         PaperCodexNativeSpinner()

@@ -1226,7 +1226,7 @@ private struct GeneratedImageGallery: View {
     var onPreview: (URL) -> Void
 
     var body: some View {
-        ScrollView(.horizontal) {
+        PaperCodexNativeScrollView(.horizontal) {
             HStack(spacing: 8) {
                 ForEach(urls, id: \.path) { url in
                     PaperCodexMediaPreviewButton(help: "Preview generated image") {
@@ -1262,6 +1262,7 @@ private struct GeneratedImageGallery: View {
                 }
             }
         }
+        .frame(height: 124)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

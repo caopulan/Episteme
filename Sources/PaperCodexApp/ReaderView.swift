@@ -290,7 +290,7 @@ private struct AddPaperToSessionSheet: View {
                 PaperCodexNativeEmptyState(title: "No Papers", systemImage: "doc.text.magnifyingglass")
                     .frame(width: 520, height: 220)
             } else {
-                ScrollView {
+                PaperCodexNativeScrollView {
                     LazyVStack(spacing: 6) {
                         ForEach(filteredPapers) { paper in
                             AddPaperToSessionRowButton(
