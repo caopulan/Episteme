@@ -33,7 +33,6 @@ struct LibraryView: View {
     @State private var paperTableFocusRequestID: UUID?
     @State private var inspectorDetailsPaperID: String?
     @State private var inspectorDetailsRequestID: UUID?
-    @State private var isInspectorReadButtonHovering = false
     @AppStorage("PaperCodexLibrarySortOption") private var librarySortRawValue = LibrarySortOption.addedNewest.rawValue
     @AppStorage("PaperCodexLibrarySortAscending") private var librarySortAscending = false
     @AppStorage("PaperCodexLibraryIncludeSubfolders") private var libraryIncludeSubfolders = true
@@ -661,18 +660,14 @@ struct LibraryView: View {
                                 .textSelection(.enabled)
                         }
 
-                        Button {
+                        PaperCodexPanelButton(
+                            title: "Read",
+                            systemImage: "book",
+                            kind: .primary,
+                            disabled: paper.isArxivImportPlaceholder,
+                            fillsWidth: true
+                        ) {
                             model.openPaper(paper)
-                        } label: {
-                            Label("Read", systemImage: "book")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(LibraryInspectorReadButtonStyle(isHovering: isInspectorReadButtonHovering, disabled: paper.isArxivImportPlaceholder))
-                        .disabled(paper.isArxivImportPlaceholder)
-                        .onHover { hovering in
-                            withAnimation(PaperCodexMotion.hover) {
-                                isInspectorReadButtonHovering = hovering
-                            }
                         }
 
                         if inspectorDetailsPaperID == paper.id {
@@ -1606,71 +1601,6 @@ private struct LibraryPaperListState {
     var hasActiveFilters: Bool
 }
 
-private struct LibraryInspectorReadButtonStyle: ButtonStyle {
-    var isHovering: Bool
-    var disabled: Bool
-
-    func makeBody(configuration: Configuration) -> some View {
-        let isPressed = configuration.isPressed && !disabled
-        configuration.label
-            .font(.paperCodexSystem(size: 13.5, weight: .semibold))
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .foregroundStyle(foregroundColor(isPressed: isPressed))
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(backgroundColor(isPressed: isPressed))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(borderColor(isPressed: isPressed), lineWidth: 1)
-            )
-            .shadow(color: shadowColor(isPressed: isPressed), radius: isPressed ? 4 : 8, y: isPressed ? 1 : 3)
-            .scaleEffect(buttonScale(isPressed: isPressed), anchor: .center)
-            .animation(PaperCodexMotion.press, value: configuration.isPressed)
-            .animation(PaperCodexMotion.hover, value: isHovering)
-            .animation(PaperCodexMotion.hover, value: disabled)
-    }
-
-    private func foregroundColor(isPressed: Bool) -> Color {
-        if disabled {
-            return Color.secondary.opacity(0.48)
-        }
-        return .white
-    }
-
-    private func backgroundColor(isPressed: Bool) -> Color {
-        if disabled {
-            return Color(nsColor: .controlBackgroundColor).opacity(0.56)
-        }
-        if isPressed {
-            return Color.accentColor.opacity(0.84)
-        }
-        return Color.accentColor.opacity(isHovering ? 0.96 : 0.90)
-    }
-
-    private func borderColor(isPressed: Bool) -> Color {
-        if disabled {
-            return Color.black.opacity(0.06)
-        }
-        return Color.accentColor.opacity(isPressed ? 0.62 : (isHovering ? 0.48 : 0.34))
-    }
-
-    private func shadowColor(isPressed: Bool) -> Color {
-        if disabled {
-            return .clear
-        }
-        return Color.accentColor.opacity(isPressed ? 0.14 : (isHovering ? 0.22 : 0.16))
-    }
-
-    private func buttonScale(isPressed: Bool) -> CGFloat {
-        if disabled {
-            return 1
-        }
-        return isPressed ? 0.976 : (isHovering ? 1.012 : 1)
-    }
-}
-
 private struct LibraryCategoryTreeSnapshot {
     var visibleItems: [CategoryListItem]
 
@@ -2213,8 +2143,6 @@ private struct RecentConversationRowButtonStyle: ButtonStyle {
 }
 
 private struct RecentConversationDetailPanel: View {
-    @State private var isOpenButtonHovering = false
-
     var session: PaperSession?
     var papers: [Paper]
     var onOpen: (PaperSession) -> Void
@@ -2242,17 +2170,13 @@ private struct RecentConversationDetailPanel: View {
                                 .foregroundStyle(.tertiary)
                         }
 
-                        Button {
+                        PaperCodexPanelButton(
+                            title: "Open Session",
+                            systemImage: "arrow.forward.circle",
+                            kind: .primary,
+                            fillsWidth: true
+                        ) {
                             onOpen(session)
-                        } label: {
-                            Label("Open Session", systemImage: "arrow.forward.circle")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(RecentConversationDetailOpenButtonStyle(isHovering: isOpenButtonHovering))
-                        .onHover { hovering in
-                            withAnimation(PaperCodexMotion.hover) {
-                                isOpenButtonHovering = hovering
-                            }
                         }
 
                         Divider()
@@ -2299,45 +2223,6 @@ private struct RecentConversationDetailPanel: View {
         formatter.unitsStyle = .short
         return formatter
     }()
-}
-
-private struct RecentConversationDetailOpenButtonStyle: ButtonStyle {
-    var isHovering: Bool
-
-    func makeBody(configuration: Configuration) -> some View {
-        let isPressed = configuration.isPressed
-        configuration.label
-            .font(.paperCodexSystem(size: 13, weight: .semibold))
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
-            .foregroundStyle(Color.white)
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(backgroundColor(isPressed: isPressed))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(Color.accentColor.opacity(isPressed ? 0.64 : 0.36), lineWidth: 1)
-            )
-            .shadow(color: Color.accentColor.opacity(shadowOpacity(isPressed: isPressed)), radius: isPressed ? 4 : 7, y: isPressed ? 1 : 3)
-            .scaleEffect(isPressed ? 0.985 : (isHovering ? 1.012 : 1), anchor: .center)
-            .animation(PaperCodexMotion.press, value: configuration.isPressed)
-            .animation(PaperCodexMotion.hover, value: isHovering)
-    }
-
-    private func backgroundColor(isPressed: Bool) -> Color {
-        if isPressed {
-            return Color.accentColor.opacity(0.86)
-        }
-        return Color.accentColor.opacity(isHovering ? 0.96 : 0.92)
-    }
-
-    private func shadowOpacity(isPressed: Bool) -> Double {
-        if isPressed {
-            return 0.14
-        }
-        return isHovering ? 0.22 : 0.16
-    }
 }
 
 private struct BulkLibraryActionBar: View {

@@ -2196,13 +2196,17 @@ func runUILayoutSourceChecks() throws {
        let recentDetailEndRange = librarySource.range(of: "private struct BulkLibraryActionBar", range: recentDetailRange.upperBound..<librarySource.endIndex) {
         let recentDetailSource = String(librarySource[recentDetailRange.lowerBound..<recentDetailEndRange.lowerBound])
         try check(
-            recentDetailSource.contains("@State private var isOpenButtonHovering = false")
-                && recentDetailSource.contains("private struct RecentConversationDetailOpenButtonStyle: ButtonStyle")
-                && recentDetailSource.contains(".buttonStyle(RecentConversationDetailOpenButtonStyle(")
-                && recentDetailSource.contains("configuration.isPressed")
-                && recentDetailSource.contains("PaperCodexMotion.press")
+            actionButtonSource.contains("var fillsWidth = false")
+                && actionButtonSource.contains("private final class NativePaperCodexPanelButtonView: NSButton")
+                && recentDetailSource.contains("PaperCodexPanelButton(\n                            title: \"Open Session\"")
+                && recentDetailSource.contains("systemImage: \"arrow.forward.circle\"")
+                && recentDetailSource.contains("kind: .primary")
+                && recentDetailSource.contains("fillsWidth: true")
+                && !recentDetailSource.contains("@State private var isOpenButtonHovering = false")
+                && !recentDetailSource.contains("private struct RecentConversationDetailOpenButtonStyle: ButtonStyle")
+                && !recentDetailSource.contains(".buttonStyle(RecentConversationDetailOpenButtonStyle(")
                 && !recentDetailSource.contains(".buttonStyle(.borderedProminent)"),
-            "recent conversation detail Open Session should provide immediate pressed feedback before opening the reader"
+            "recent conversation detail Open Session should use the shared native AppKit panel button before opening the reader"
         )
     } else {
         throw CheckFailure(description: "recent conversation detail source should remain inspectable")
@@ -2211,13 +2215,18 @@ func runUILayoutSourceChecks() throws {
        let inspectorEndRange = librarySource.range(of: "private func paperMetadataSection", range: inspectorRange.upperBound..<librarySource.endIndex) {
         let inspectorSource = String(librarySource[inspectorRange.lowerBound..<inspectorEndRange.lowerBound])
         try check(
-            librarySource.contains("@State private var isInspectorReadButtonHovering = false")
-                && librarySource.contains("private struct LibraryInspectorReadButtonStyle: ButtonStyle")
-                && inspectorSource.contains(".buttonStyle(LibraryInspectorReadButtonStyle(")
-                && librarySource.contains("configuration.isPressed")
-                && librarySource.contains("PaperCodexMotion.press")
+            actionButtonSource.contains("var fillsWidth = false")
+                && actionButtonSource.contains("private final class NativePaperCodexPanelButtonView: NSButton")
+                && inspectorSource.contains("PaperCodexPanelButton(\n                            title: \"Read\"")
+                && inspectorSource.contains("systemImage: \"book\"")
+                && inspectorSource.contains("kind: .primary")
+                && inspectorSource.contains("disabled: paper.isArxivImportPlaceholder")
+                && inspectorSource.contains("fillsWidth: true")
+                && !librarySource.contains("@State private var isInspectorReadButtonHovering = false")
+                && !librarySource.contains("private struct LibraryInspectorReadButtonStyle: ButtonStyle")
+                && !inspectorSource.contains(".buttonStyle(LibraryInspectorReadButtonStyle(")
                 && !inspectorSource.contains(".buttonStyle(.borderedProminent)"),
-            "library inspector Read action should provide immediate pressed feedback before opening the reader"
+            "library inspector Read action should use the shared native AppKit panel button before opening the reader"
         )
     } else {
         throw CheckFailure(description: "library inspector source should remain inspectable")

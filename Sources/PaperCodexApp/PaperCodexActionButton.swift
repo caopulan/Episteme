@@ -89,6 +89,7 @@ struct PaperCodexPanelButton: View {
     var role: ButtonRole?
     var keyEquivalent = ""
     var keyEquivalentModifierMask: NSEvent.ModifierFlags = []
+    var fillsWidth = false
     var action: () -> Void
 
     var body: some View {
@@ -103,7 +104,8 @@ struct PaperCodexPanelButton: View {
             reduceMotion: reduceMotion,
             action: action
         )
-        .fixedSize(horizontal: true, vertical: true)
+        .frame(maxWidth: fillsWidth ? .infinity : nil, minHeight: NativePaperCodexActionMetrics.toolbarHeight)
+        .fixedSize(horizontal: !fillsWidth, vertical: true)
         .help(title)
     }
 }
@@ -1341,6 +1343,7 @@ private final class NativePaperCodexQuickRangeButtonView: NSButton {
 }
 
 private final class NativePaperCodexPanelButtonView: NSButton {
+    private let contentView = NSView()
     private let iconView = NSImageView()
     private let titleLabel = NSTextField(labelWithString: "")
     private var titleLeadingIconConstraint: NSLayoutConstraint?
@@ -1454,6 +1457,8 @@ private final class NativePaperCodexPanelButtonView: NSButton {
         layer?.cornerRadius = NativePaperCodexActionMetrics.cornerRadius
         layer?.masksToBounds = false
 
+        contentView.translatesAutoresizingMaskIntoConstraints = false
+
         iconView.translatesAutoresizingMaskIntoConstraints = false
         iconView.symbolConfiguration = NSImage.SymbolConfiguration(
             pointSize: NativePaperCodexActionMetrics.toolbarIconSize,
@@ -1467,26 +1472,32 @@ private final class NativePaperCodexPanelButtonView: NSButton {
         titleLabel.maximumNumberOfLines = 1
         titleLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
 
-        [iconView, titleLabel].forEach(addSubview(_:))
+        addSubview(contentView)
+        [iconView, titleLabel].forEach(contentView.addSubview(_:))
         let leadingIconConstraint = titleLabel.leadingAnchor.constraint(
             equalTo: iconView.trailingAnchor,
             constant: NativePaperCodexActionMetrics.toolbarIconTextSpacing
         )
         let leadingButtonConstraint = titleLabel.leadingAnchor.constraint(
-            equalTo: leadingAnchor,
-            constant: PaperCodexHitTarget.toolbarButtonHorizontalPadding
+            equalTo: contentView.leadingAnchor
         )
         titleLeadingIconConstraint = leadingIconConstraint
         titleLeadingButtonConstraint = leadingButtonConstraint
         NSLayoutConstraint.activate([
             heightAnchor.constraint(equalToConstant: NativePaperCodexActionMetrics.toolbarHeight),
-            iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: PaperCodexHitTarget.toolbarButtonHorizontalPadding),
-            iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            contentView.centerXAnchor.constraint(equalTo: centerXAnchor),
+            contentView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            contentView.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: PaperCodexHitTarget.toolbarButtonHorizontalPadding),
+            contentView.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -PaperCodexHitTarget.toolbarButtonHorizontalPadding),
+            iconView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            iconView.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
             iconView.widthAnchor.constraint(equalToConstant: NativePaperCodexActionMetrics.toolbarIconWidth),
             iconView.heightAnchor.constraint(equalToConstant: NativePaperCodexActionMetrics.toolbarIconWidth),
             leadingIconConstraint,
-            titleLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -PaperCodexHitTarget.toolbarButtonHorizontalPadding),
-            titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor)
+            titleLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            titleLabel.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
+            titleLabel.topAnchor.constraint(greaterThanOrEqualTo: contentView.topAnchor),
+            titleLabel.bottomAnchor.constraint(lessThanOrEqualTo: contentView.bottomAnchor)
         ])
         updateAppearance()
     }
