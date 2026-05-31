@@ -1861,6 +1861,96 @@ func runUILayoutSourceChecks() throws {
     } else {
         throw CheckFailure(description: "library bulk action bar source should remain inspectable")
     }
+    if let watchedFoldersRange = librarySource.range(of: "private struct WatchedFoldersSheet: View"),
+       let categoryListItemRange = librarySource.range(of: "private struct CategoryListItem", range: watchedFoldersRange.upperBound..<librarySource.endIndex) {
+        let watchedFoldersSource = String(librarySource[watchedFoldersRange.lowerBound..<categoryListItemRange.lowerBound])
+        try check(
+            watchedFoldersSource.contains("PaperCodexPanelButton(title: \"Add Folder\"")
+                && watchedFoldersSource.contains("PaperCodexPanelButton(\n                    title: model.isScanningWatchedFolders ? \"Scanning\" : \"Scan\"")
+                && watchedFoldersSource.contains("PaperCodexPanelButton(title: \"Close\"")
+                && watchedFoldersSource.contains("PaperCodexIconButton(title: \"Remove Folder\"")
+                && !watchedFoldersSource.contains("\n                Button")
+                && !watchedFoldersSource.contains("\n            Button")
+                && !watchedFoldersSource.contains(".buttonStyle("),
+            "library watched-folder sheet and rows should use native AppKit-backed buttons"
+        )
+    } else {
+        throw CheckFailure(description: "library watched-folder sheet source should remain inspectable")
+    }
+    if let bulkCopyRange = librarySource.range(of: "private struct LibraryBulkCopySheet: View"),
+       let sortOptionRange = librarySource.range(of: "enum LibrarySortOption", range: bulkCopyRange.upperBound..<librarySource.endIndex) {
+        let libraryBulkSheetsSource = String(librarySource[bulkCopyRange.lowerBound..<sortOptionRange.lowerBound])
+        try check(
+            libraryBulkSheetsSource.contains("PaperCodexPanelButton(title: \"Cancel\", systemImage: \"xmark\")")
+                && libraryBulkSheetsSource.contains("PaperCodexPanelButton(\n                    title: \"Copy\"")
+                && libraryBulkSheetsSource.contains("PaperCodexPanelButton(\n                    title: \"Apply\"")
+                && libraryBulkSheetsSource.contains("PaperCodexTagToggleButton(title: tag.name")
+                && !libraryBulkSheetsSource.contains("\n                Button")
+                && !libraryBulkSheetsSource.contains("\n                        Button")
+                && !libraryBulkSheetsSource.contains(".buttonStyle("),
+            "library bulk copy and tag sheets should use native AppKit-backed buttons"
+        )
+    } else {
+        throw CheckFailure(description: "library bulk sheet source should remain inspectable")
+    }
+    if let arxivImportRange = librarySource.range(of: "private struct LibraryArxivImportSheet: View"),
+       let flowLayoutRange = librarySource.range(of: "private struct FlowLayout", range: arxivImportRange.upperBound..<librarySource.endIndex) {
+        let arxivImportSource = String(librarySource[arxivImportRange.lowerBound..<flowLayoutRange.lowerBound])
+        try check(
+            arxivImportSource.contains("PaperCodexPanelButton(title: \"Close\", systemImage: \"xmark\")")
+                && arxivImportSource.contains("PaperCodexPanelButton(title: \"Cancel\", systemImage: \"xmark\")")
+                && arxivImportSource.contains("PaperCodexPanelButton(\n                    title: \"Add\"")
+                && !arxivImportSource.contains("\n                Button")
+                && !arxivImportSource.contains(".buttonStyle("),
+            "library arXiv import sheet should use native AppKit-backed action buttons"
+        )
+    } else {
+        throw CheckFailure(description: "library arXiv import sheet source should remain inspectable")
+    }
+    if let tagSidebarRange = librarySource.range(of: "private struct TagSidebarRow: View"),
+       let categoryManagementRange = librarySource.range(of: "private struct CategoryManagementSheet: View", range: tagSidebarRange.upperBound..<librarySource.endIndex) {
+        let tagSidebarSource = String(librarySource[tagSidebarRange.lowerBound..<categoryManagementRange.lowerBound])
+        try check(
+            tagSidebarSource.contains("PaperCodexIconButton(title: \"Manage \\(title)\"")
+                && !tagSidebarSource.contains("\n                    Button")
+                && !tagSidebarSource.contains(".buttonStyle("),
+            "library tag sidebar manage action should use the shared native icon button"
+        )
+    } else {
+        throw CheckFailure(description: "library tag sidebar source should remain inspectable")
+    }
+    if let categoryManagementRange = librarySource.range(of: "private struct CategoryManagementSheet: View"),
+       let categoryEditorRange = librarySource.range(of: "private struct CategoryEditorSheet: View", range: categoryManagementRange.upperBound..<librarySource.endIndex) {
+        let managementSheetsSource = String(librarySource[categoryManagementRange.lowerBound..<categoryEditorRange.lowerBound])
+        try check(
+            managementSheetsSource.components(separatedBy: "PaperCodexPanelButton(").count - 1 >= 6
+                && managementSheetsSource.contains("title: \"Delete\"")
+                && managementSheetsSource.contains("title: \"Cancel\"")
+                && managementSheetsSource.contains("title: \"Save\"")
+                && managementSheetsSource.contains("PaperNoteSelectionButton(")
+                && librarySource.contains("private struct PaperNoteSelectionButton: NSViewRepresentable")
+                && librarySource.contains("private final class NativePaperNoteSelectionButtonView: NSButton")
+                && librarySource.contains("PaperCodexIconButton(title: \"Delete Note\"")
+                && !managementSheetsSource.contains("\n                Button")
+                && !managementSheetsSource.contains("\n            Button")
+                && !managementSheetsSource.contains(".buttonStyle("),
+            "library category/tag management sheets and note rows should use native AppKit-backed actions"
+        )
+    } else {
+        throw CheckFailure(description: "library management sheet source should remain inspectable")
+    }
+    if let categoryEditorRange = librarySource.range(of: "private struct CategoryEditorSheet: View") {
+        let editorSheetsSource = String(librarySource[categoryEditorRange.lowerBound..<librarySource.endIndex])
+        try check(
+            editorSheetsSource.contains("PaperCodexPanelButton(title: \"Cancel\", systemImage: \"xmark\")")
+                && editorSheetsSource.contains("PaperCodexPanelButton(\n                    title: \"Create\"")
+                && !editorSheetsSource.contains("\n                Button")
+                && !editorSheetsSource.contains(".buttonStyle("),
+            "library category and tag creation sheets should use native AppKit-backed action buttons"
+        )
+    } else {
+        throw CheckFailure(description: "library creation sheet source should remain inspectable")
+    }
     try check(
         readerSessionToolbarSource.contains("ReaderSessionToolbarView")
             && readerSessionToolbarSource.contains("NSSegmentedControl")

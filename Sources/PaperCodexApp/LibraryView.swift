@@ -1367,17 +1367,16 @@ private struct WatchedFoldersSheet: View {
                 Text("Watched Folders")
                     .font(.title3.weight(.semibold))
                 Spacer()
-                Button(action: onAdd) {
-                    Label("Add Folder", systemImage: "plus")
+                PaperCodexPanelButton(title: "Add Folder", systemImage: "plus", kind: .primary) {
+                    onAdd()
                 }
-                .buttonStyle(.bordered)
-                Button {
+                PaperCodexPanelButton(
+                    title: model.isScanningWatchedFolders ? "Scanning" : "Scan",
+                    systemImage: "arrow.clockwise",
+                    disabled: model.watchedFolders.isEmpty || model.isScanningWatchedFolders
+                ) {
                     model.scanWatchedFolders()
-                } label: {
-                    Label(model.isScanningWatchedFolders ? "Scanning" : "Scan", systemImage: "arrow.clockwise")
                 }
-                .buttonStyle(.bordered)
-                .disabled(model.watchedFolders.isEmpty || model.isScanningWatchedFolders)
             }
 
             if model.watchedFolders.isEmpty {
@@ -1397,8 +1396,9 @@ private struct WatchedFoldersSheet: View {
 
             HStack {
                 Spacer()
-                Button("Close", action: onClose)
-                    .keyboardShortcut(.defaultAction)
+                PaperCodexPanelButton(title: "Close", systemImage: "xmark", keyEquivalent: "\r") {
+                    onClose()
+                }
             }
         }
         .padding(22)
@@ -1427,12 +1427,9 @@ private struct WatchedFolderRow: View {
                     .foregroundStyle(folderExists ? Color.secondary.opacity(0.72) : Color.orange)
             }
             Spacer()
-            Button(action: onRemove) {
-                Image(systemName: "trash")
+            PaperCodexIconButton(title: "Remove Folder", systemImage: "trash", tint: .red) {
+                onRemove()
             }
-            .buttonStyle(.borderless)
-            .foregroundStyle(.secondary)
-            .help("Remove Folder")
         }
         .padding(.vertical, 4)
     }
@@ -2913,14 +2910,17 @@ private struct LibraryBulkCopySheet: View {
             .frame(height: 30)
             HStack {
                 Spacer()
-                Button("Cancel", action: onCancel)
-                Button {
-                    onCopy(targetCategoryID.isEmpty ? nil : targetCategoryID)
-                } label: {
-                    Label("Copy", systemImage: "doc.on.doc")
+                PaperCodexPanelButton(title: "Cancel", systemImage: "xmark") {
+                    onCancel()
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(targetCategoryID.isEmpty)
+                PaperCodexPanelButton(
+                    title: "Copy",
+                    systemImage: "doc.on.doc",
+                    kind: .primary,
+                    disabled: targetCategoryID.isEmpty
+                ) {
+                    onCopy(targetCategoryID.isEmpty ? nil : targetCategoryID)
+                }
             }
         }
         .padding(22)
@@ -2948,29 +2948,27 @@ private struct LibraryBulkTagSheet: View {
             } else {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 126), spacing: 8)], alignment: .leading, spacing: 8) {
                     ForEach(tags) { tag in
-                        Button {
+                        PaperCodexTagToggleButton(title: tag.name, isSelected: selectedTagIDs.contains(tag.id)) {
                             toggle(tag.id)
-                        } label: {
-                            Label(tag.name, systemImage: selectedTagIDs.contains(tag.id) ? "checkmark.circle.fill" : "circle")
-                                .lineLimit(1)
-                                .frame(maxWidth: .infinity, alignment: .leading)
                         }
-                        .buttonStyle(.bordered)
-                        .tint(selectedTagIDs.contains(tag.id) ? .accentColor : .secondary)
+                        .frame(maxWidth: .infinity, minHeight: 30, maxHeight: 30)
                     }
                 }
                 .frame(width: 420)
             }
             HStack {
                 Spacer()
-                Button("Cancel", action: onCancel)
-                Button {
-                    onApply(Array(selectedTagIDs))
-                } label: {
-                    Label("Apply", systemImage: "checkmark")
+                PaperCodexPanelButton(title: "Cancel", systemImage: "xmark") {
+                    onCancel()
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(selectedTagIDs.isEmpty)
+                PaperCodexPanelButton(
+                    title: "Apply",
+                    systemImage: "checkmark",
+                    kind: .primary,
+                    disabled: selectedTagIDs.isEmpty
+                ) {
+                    onApply(Array(selectedTagIDs))
+                }
             }
         }
         .padding(22)
@@ -3119,7 +3117,9 @@ private struct LibraryArxivImportSheet: View {
                 Label("Add arXiv Papers", systemImage: "number")
                     .font(.title3.weight(.semibold))
                 Spacer()
-                Button("Close", action: onClose)
+                PaperCodexPanelButton(title: "Close", systemImage: "xmark") {
+                    onClose()
+                }
             }
 
             VStack(alignment: .leading, spacing: 8) {
@@ -3158,19 +3158,22 @@ private struct LibraryArxivImportSheet: View {
 
             HStack {
                 Spacer()
-                Button("Cancel", action: onClose)
-                Button {
+                PaperCodexPanelButton(title: "Cancel", systemImage: "xmark") {
+                    onClose()
+                }
+                PaperCodexPanelButton(
+                    title: "Add",
+                    systemImage: "arrow.down.doc",
+                    kind: .primary,
+                    disabled: parsedIDs.isEmpty
+                ) {
                     let ids = parsedIDs
                     model.enqueueArxivIDsForLibrary(
                         ids,
                         categoryID: targetCategoryID.isEmpty ? nil : targetCategoryID
                     )
                     onClose()
-                } label: {
-                    Label("Add", systemImage: "arrow.down.doc")
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(parsedIDs.isEmpty)
             }
         }
         .padding(22)
@@ -3285,13 +3288,9 @@ private struct TagSidebarRow: View {
                     .foregroundStyle(.secondary)
                     .contentTransition(.numericText())
                 if isHovering || isSelected {
-                    Button(action: onManage) {
-                        Image(systemName: "ellipsis")
-                            .font(.paperCodexSystem(size: 11, weight: .bold))
-                            .frame(width: 22, height: 22)
+                    PaperCodexIconButton(title: "Manage \(title)", systemImage: "ellipsis") {
+                        onManage()
                     }
-                    .buttonStyle(.plain)
-                    .help("Manage \(title)")
                 }
             }
             .padding(.trailing, 6)
@@ -3353,17 +3352,21 @@ private struct CategoryManagementSheet: View {
             )
             .frame(height: 30)
             HStack {
-                Button(role: .destructive, action: onDelete) {
-                    Label("Delete", systemImage: "trash")
+                PaperCodexPanelButton(title: "Delete", systemImage: "trash", kind: .destructive) {
+                    onDelete()
                 }
-                .buttonStyle(.bordered)
                 Spacer()
-                Button("Cancel", action: onCancel)
-                Button("Save") {
+                PaperCodexPanelButton(title: "Cancel", systemImage: "xmark") {
+                    onCancel()
+                }
+                PaperCodexPanelButton(
+                    title: "Save",
+                    systemImage: "checkmark",
+                    kind: .primary,
+                    disabled: name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ) {
                     onSave(name, parentID.isEmpty ? nil : parentID)
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
         .padding(22)
@@ -3394,17 +3397,21 @@ private struct TagManagementSheet: View {
             PaperCodexNativeTextField(text: $name, placeholder: "Name")
                 .frame(height: 30)
             HStack {
-                Button(role: .destructive, action: onDelete) {
-                    Label("Delete", systemImage: "trash")
+                PaperCodexPanelButton(title: "Delete", systemImage: "trash", kind: .destructive) {
+                    onDelete()
                 }
-                .buttonStyle(.bordered)
                 Spacer()
-                Button("Cancel", action: onCancel)
-                Button("Save") {
+                PaperCodexPanelButton(title: "Cancel", systemImage: "xmark") {
+                    onCancel()
+                }
+                PaperCodexPanelButton(
+                    title: "Save",
+                    systemImage: "checkmark",
+                    kind: .primary,
+                    disabled: name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ) {
                     onSave(name)
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
         .padding(22)
@@ -3419,27 +3426,17 @@ private struct PaperNoteRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
-            Button(action: onEdit) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(note.title)
-                        .font(.paperCodexSystem(size: 13, weight: .semibold))
-                        .lineLimit(1)
-                    if !note.bodyMarkdown.isEmpty {
-                        Text(note.bodyMarkdown)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(2)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
+            PaperNoteSelectionButton(
+                title: note.title,
+                body: note.bodyMarkdown,
+                updatedAt: note.updatedAt
+            ) {
+                onEdit()
             }
-            .buttonStyle(.plain)
-            Button(action: onDelete) {
-                Image(systemName: "trash")
+            .frame(maxWidth: .infinity, minHeight: note.bodyMarkdown.isEmpty ? 44 : 58, alignment: .leading)
+            PaperCodexIconButton(title: "Delete Note", systemImage: "trash", tint: .red) {
+                onDelete()
             }
-            .buttonStyle(.borderless)
-            .foregroundStyle(.secondary)
-            .help("Delete Note")
         }
         .padding(9)
         .background(Color(nsColor: .textBackgroundColor))
@@ -3448,6 +3445,198 @@ private struct PaperNoteRow: View {
                 .stroke(Color.black.opacity(0.08), lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 7))
+    }
+}
+
+private struct PaperNoteSelectionButton: NSViewRepresentable {
+    var title: String
+    var body: String
+    var updatedAt: Date
+    var action: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(action: action)
+    }
+
+    func makeNSView(context: Context) -> NativePaperNoteSelectionButtonView {
+        let button = NativePaperNoteSelectionButtonView()
+        button.target = context.coordinator
+        button.action = #selector(Coordinator.performAction(_:))
+        button.apply(title: title, body: body, updatedAt: updatedAt)
+        return button
+    }
+
+    func updateNSView(_ button: NativePaperNoteSelectionButtonView, context: Context) {
+        context.coordinator.action = action
+        button.apply(title: title, body: body, updatedAt: updatedAt)
+    }
+
+    @MainActor final class Coordinator: NSObject {
+        var action: () -> Void
+
+        init(action: @escaping () -> Void) {
+            self.action = action
+            super.init()
+        }
+
+        @objc func performAction(_ sender: NSButton) {
+            action()
+        }
+    }
+}
+
+private final class NativePaperNoteSelectionButtonView: NSButton {
+    private let iconView = NSImageView()
+    private let titleLabel = NSTextField(labelWithString: "")
+    private let bodyLabel = NSTextField(labelWithString: "")
+    private let dateLabel = NSTextField(labelWithString: "")
+    private var trackingAreaToken: NSTrackingArea?
+    private var isHovering = false
+    private var isPressed = false
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: 58)
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingAreaToken {
+            removeTrackingArea(trackingAreaToken)
+        }
+        let area = NSTrackingArea(rect: bounds, options: [.activeInKeyWindow, .mouseEnteredAndExited, .inVisibleRect], owner: self, userInfo: nil)
+        addTrackingArea(area)
+        trackingAreaToken = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isHovering = true
+        updateAppearance()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHovering = false
+        isPressed = false
+        updateAppearance()
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        isPressed = true
+        updateAppearance()
+        super.mouseDown(with: event)
+        isPressed = false
+        updateAppearance()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        updateAppearance()
+    }
+
+    func apply(title: String, body: String, updatedAt: Date) {
+        titleLabel.stringValue = title
+        bodyLabel.stringValue = body
+        bodyLabel.isHidden = body.isEmpty
+        dateLabel.stringValue = updatedAt.formatted(date: .abbreviated, time: .shortened)
+        toolTip = body.isEmpty ? title : "\(title)\n\(body)"
+        setAccessibilityLabel(title)
+        setAccessibilityValue(body)
+        updateAppearance()
+    }
+
+    private func setup() {
+        translatesAutoresizingMaskIntoConstraints = false
+        wantsLayer = true
+        isBordered = false
+        title = ""
+        bezelStyle = .regularSquare
+        setButtonType(.momentaryChange)
+        focusRingType = .none
+        setAccessibilityElement(true)
+        setAccessibilityRole(.button)
+
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+        iconView.image = NSImage(systemSymbolName: "note.text", accessibilityDescription: nil)
+        iconView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 13, weight: .semibold)
+        iconView.imageScaling = .scaleProportionallyDown
+
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        titleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+        titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.maximumNumberOfLines = 1
+
+        bodyLabel.translatesAutoresizingMaskIntoConstraints = false
+        bodyLabel.font = .systemFont(ofSize: 11.5, weight: .regular)
+        bodyLabel.lineBreakMode = .byTruncatingTail
+        bodyLabel.maximumNumberOfLines = 2
+
+        dateLabel.translatesAutoresizingMaskIntoConstraints = false
+        dateLabel.font = .monospacedDigitSystemFont(ofSize: 10.5, weight: .regular)
+        dateLabel.lineBreakMode = .byTruncatingTail
+        dateLabel.maximumNumberOfLines = 1
+
+        addSubview(iconView)
+        addSubview(titleLabel)
+        addSubview(bodyLabel)
+        addSubview(dateLabel)
+
+        NSLayoutConstraint.activate([
+            iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            iconView.topAnchor.constraint(equalTo: topAnchor, constant: 8),
+            iconView.widthAnchor.constraint(equalToConstant: 15),
+            iconView.heightAnchor.constraint(equalToConstant: 15),
+
+            titleLabel.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 7),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: dateLabel.leadingAnchor, constant: -8),
+            titleLabel.topAnchor.constraint(equalTo: topAnchor, constant: 6),
+
+            dateLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            dateLabel.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
+
+            bodyLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+            bodyLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            bodyLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 4),
+            bodyLabel.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -7)
+        ])
+
+        setContentHuggingPriority(.defaultLow, for: .horizontal)
+        setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        updateAppearance()
+    }
+
+    private func updateAppearance() {
+        layer?.cornerRadius = 6
+        layer?.masksToBounds = false
+        let accent = NSColor.controlAccentColor
+        if isPressed {
+            layer?.backgroundColor = accent.withAlphaComponent(0.14).cgColor
+            layer?.borderColor = accent.withAlphaComponent(0.38).cgColor
+            layer?.borderWidth = 1
+        } else if isHovering {
+            layer?.backgroundColor = accent.withAlphaComponent(0.08).cgColor
+            layer?.borderColor = accent.withAlphaComponent(0.22).cgColor
+            layer?.borderWidth = 1
+        } else {
+            layer?.backgroundColor = NSColor.clear.cgColor
+            layer?.borderWidth = 0
+        }
+        iconView.contentTintColor = accent
+        titleLabel.textColor = .labelColor
+        bodyLabel.textColor = .secondaryLabelColor
+        dateLabel.textColor = .tertiaryLabelColor
+        alphaValue = isPressed ? 0.82 : 1
     }
 }
 
@@ -3489,12 +3678,17 @@ private struct CategoryEditorSheet: View {
             .frame(height: 30)
             HStack {
                 Spacer()
-                Button("Cancel", action: onCancel)
-                Button("Create") {
+                PaperCodexPanelButton(title: "Cancel", systemImage: "xmark") {
+                    onCancel()
+                }
+                PaperCodexPanelButton(
+                    title: "Create",
+                    systemImage: "plus",
+                    kind: .primary,
+                    disabled: name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ) {
                     onCreate(name, parentID)
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
         .padding(22)
@@ -3519,12 +3713,17 @@ private struct TagEditorSheet: View {
                 .frame(height: 30)
             HStack {
                 Spacer()
-                Button("Cancel", action: onCancel)
-                Button("Create") {
+                PaperCodexPanelButton(title: "Cancel", systemImage: "xmark") {
+                    onCancel()
+                }
+                PaperCodexPanelButton(
+                    title: "Create",
+                    systemImage: "plus",
+                    kind: .primary,
+                    disabled: name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ) {
                     onCreate(name)
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
         .padding(22)
