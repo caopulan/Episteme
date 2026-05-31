@@ -439,6 +439,31 @@ final class AppModel: ObservableObject {
         )
     }
 
+    func libraryPaperTableRows(
+        listState: LibraryPaperListState,
+        selectedPaperIDs: Set<String>
+    ) -> [LibraryPaperTableRow] {
+        let placeholderDetailsByPaperID = Dictionary(
+            uniqueKeysWithValues: listState.papers.compactMap { paper -> (String, String)? in
+                guard paper.isArxivImportPlaceholder else {
+                    return nil
+                }
+                return (paper.id, arxivImportPlaceholderDetail(for: paper))
+            }
+        )
+        return libraryStore.paperTableRowsState(
+            request: LibraryPaperTableRowsRequest(
+                paperIDs: listState.paperIDs,
+                selectedPaperID: selectedLibraryPaper?.id,
+                selectedPaperIDs: selectedPaperIDs,
+                paperCollectionVersion: libraryStore.paperCollectionVersion,
+                rowMetadataVersion: libraryStore.rowMetadataVersion,
+                placeholderDetailsByPaperID: placeholderDetailsByPaperID
+            ),
+            papers: listState.papers
+        ).rows
+    }
+
     var selectedLibraryPaper: Paper? {
         get { libraryStore.selectedLibraryPaper }
         set { libraryStore.selectedLibraryPaper = newValue }

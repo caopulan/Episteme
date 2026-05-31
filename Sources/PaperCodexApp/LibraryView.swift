@@ -486,9 +486,8 @@ struct LibraryView: View {
                 PaperCodexNativeEmptyState(title: "No Papers", systemImage: "doc.text.magnifyingglass")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                let paperTableRows = paperTableRows(for: listState.papers)
                 LibraryPaperTableView(
-                    rows: paperTableRows,
+                    rows: model.libraryPaperTableRows(listState: listState, selectedPaperIDs: selectedPaperIDs),
                     selectedPaperID: model.selectedLibraryPaper?.id,
                     revealRequestID: selectedPaperRevealRequestID,
                     focusRequestID: paperTableFocusRequestID,
@@ -2211,26 +2210,6 @@ struct LibraryView: View {
 
     private func paperDragPayload(for paper: Paper) -> String {
         paperIDsForDrag(startingWith: paper).joined(separator: "\n")
-    }
-
-    private func categories(for paper: Paper) -> [PaperCodexCore.Category] {
-        let ids = Set(model.paperCategoryIDsByID[paper.id, default: []])
-        return model.categories.filter { ids.contains($0.id) }
-    }
-
-    private func paperTableRows(for papers: [Paper]) -> [LibraryPaperTableRow] {
-        papers.map { paper in
-            LibraryPaperTableRow(
-                paper: paper,
-                categories: categories(for: paper),
-                tags: model.paperTagsByID[paper.id, default: []],
-                thumbnailURLs: model.paperThumbnailURLsByID[paper.id, default: []],
-                isImportPlaceholder: paper.isArxivImportPlaceholder,
-                placeholderDetail: model.arxivImportPlaceholderDetail(for: paper),
-                isSelected: model.selectedLibraryPaper?.id == paper.id,
-                isMultiSelected: selectedPaperIDs.contains(paper.id)
-            )
-        }
     }
 
     private func presentPDFImportPanel() {

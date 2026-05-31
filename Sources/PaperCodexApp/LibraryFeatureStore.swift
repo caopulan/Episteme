@@ -30,26 +30,58 @@ struct LibraryPaperListState {
     var hasActiveFilters: Bool
 }
 
+struct LibraryPaperTableRowsRequest: Equatable {
+    var paperIDs: [String]
+    var selectedPaperID: String?
+    var selectedPaperIDs: Set<String>
+    var paperCollectionVersion: Int
+    var rowMetadataVersion: Int
+    var placeholderDetailsByPaperID: [String: String]
+}
+
+struct LibraryPaperTableRowsState {
+    static let empty = LibraryPaperTableRowsState(rows: [])
+
+    var rows: [LibraryPaperTableRow]
+}
+
 @MainActor
 final class LibraryFeatureStore: ObservableObject {
     @Published var papers: [Paper] = [] {
         didSet {
             paperCollectionVersion += 1
             invalidatePaperListStateCache()
+            invalidatePaperTableRowsCache()
         }
     }
     @Published var categories: [PaperCodexCore.Category] = [] {
-        didSet { invalidatePaperListStateCache() }
+        didSet {
+            rowMetadataVersion += 1
+            invalidatePaperListStateCache()
+            invalidatePaperTableRowsCache()
+        }
     }
     @Published var tags: [PaperTag] = [] {
-        didSet { invalidatePaperListStateCache() }
+        didSet {
+            rowMetadataVersion += 1
+            invalidatePaperListStateCache()
+            invalidatePaperTableRowsCache()
+        }
     }
     @Published var watchedFolders: [WatchedFolder] = []
     @Published var paperCategoryIDsByID: [String: [String]] = [:] {
-        didSet { invalidatePaperListStateCache() }
+        didSet {
+            rowMetadataVersion += 1
+            invalidatePaperListStateCache()
+            invalidatePaperTableRowsCache()
+        }
     }
     @Published var paperTagsByID: [String: [PaperTag]] = [:] {
-        didSet { invalidatePaperListStateCache() }
+        didSet {
+            rowMetadataVersion += 1
+            invalidatePaperListStateCache()
+            invalidatePaperTableRowsCache()
+        }
     }
     @Published var libraryDerivedState: PaperLibraryDerivedState = .empty {
         didSet { invalidatePaperListStateCache() }
@@ -57,11 +89,19 @@ final class LibraryFeatureStore: ObservableObject {
     @Published var selectedLibraryPaper: Paper?
     @Published private var selection = LibrarySelection(surface: .papers, categoryID: nil, tagID: nil)
     @Published var librarySearchText = ""
-    @Published var paperThumbnailURLsByID: [String: [URL]] = [:]
+    @Published var paperThumbnailURLsByID: [String: [URL]] = [:] {
+        didSet {
+            rowMetadataVersion += 1
+            invalidatePaperTableRowsCache()
+        }
+    }
     @Published var paperNotesByID: [String: [PaperNote]] = [:]
     private(set) var paperCollectionVersion = 0
+    private(set) var rowMetadataVersion = 0
     private var cachedPaperListRequest: LibraryPaperListRequest?
     private var cachedPaperListState: LibraryPaperListState?
+    private var cachedPaperTableRowsRequest: LibraryPaperTableRowsRequest?
+    private var cachedPaperTableRowsState: LibraryPaperTableRowsState?
 
     var selectedLibrarySurface: LibrarySurface {
         get { selection.surface }
@@ -175,8 +215,58 @@ final class LibraryFeatureStore: ObservableObject {
         return state
     }
 
+    func paperTableRowsState(
+        request: LibraryPaperTableRowsRequest,
+        papers: [Paper]
+    ) -> LibraryPaperTableRowsState {
+        if cachedPaperTableRowsRequest == request, let cachedPaperTableRowsState {
+            return cachedPaperTableRowsState
+        }
+
+        let categoryRankByID = Dictionary(
+            uniqueKeysWithValues: categories.enumerated().map { offset, category in
+                (category.id, offset)
+            }
+        )
+        let categoriesByID = Dictionary(uniqueKeysWithValues: categories.map { ($0.id, $0) })
+        let selectedPaperIDs = request.selectedPaperIDs
+        let rows = papers.map { paper in
+            let categoryIDs = paperCategoryIDsByID[paper.id, default: []]
+            let paperCategories = categoryIDs
+                .compactMap { categoriesByID[$0] }
+                .sorted { left, right in
+                    categoryRankByID[left.id, default: Int.max] < categoryRankByID[right.id, default: Int.max]
+                }
+            return LibraryPaperTableRow(
+                paper: paper,
+                categories: paperCategories,
+                tags: paperTagsByID[paper.id, default: []],
+                thumbnailURLs: paperThumbnailURLsByID[paper.id, default: []],
+                isImportPlaceholder: paper.isArxivImportPlaceholder,
+                placeholderDetail: request.placeholderDetailsByPaperID[paper.id]
+                    ?? Self.defaultPaperTableRowPlaceholderDetail(for: paper),
+                isSelected: request.selectedPaperID == paper.id,
+                isMultiSelected: selectedPaperIDs.contains(paper.id)
+            )
+        }
+
+        let state = LibraryPaperTableRowsState(rows: rows)
+        cachedPaperTableRowsRequest = request
+        cachedPaperTableRowsState = state
+        return state
+    }
+
     private func invalidatePaperListStateCache() {
         cachedPaperListRequest = nil
         cachedPaperListState = nil
+    }
+
+    private func invalidatePaperTableRowsCache() {
+        cachedPaperTableRowsRequest = nil
+        cachedPaperTableRowsState = nil
+    }
+
+    private static func defaultPaperTableRowPlaceholderDetail(for paper: Paper) -> String {
+        paper.authors.isEmpty ? "Authors not set" : paper.authors.joined(separator: ", ")
     }
 }

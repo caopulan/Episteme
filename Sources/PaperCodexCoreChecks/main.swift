@@ -1122,6 +1122,17 @@ func runUILayoutSourceChecks() throws {
         "library paper list should use native NSTableView cells with row reuse, keyboard navigation, drag payloads, and centered reveal"
     )
     try check(
+        libraryFeatureStoreSource.contains("struct LibraryPaperTableRowsRequest: Equatable")
+            && libraryFeatureStoreSource.contains("func paperTableRowsState(")
+            && libraryFeatureStoreSource.contains("cachedPaperTableRowsRequest")
+            && appModelSource.contains("func libraryPaperTableRows(")
+            && librarySource.contains("model.libraryPaperTableRows(listState: listState, selectedPaperIDs: selectedPaperIDs)")
+            && !librarySource.contains("private func paperTableRows(for papers")
+            && !librarySource.contains("private func categories(for paper")
+            && !librarySource.contains("let paperTableRows = paperTableRows(for: listState.papers)"),
+        "library native table row models should be derived and cached in LibraryFeatureStore instead of rebuilt from SwiftUI view bodies"
+    )
+    try check(
         librarySource.contains("private var sidebarLists: some View") &&
             librarySource.contains("PaperCodexNativeScrollView {") &&
             librarySource.contains("sidebarLists"),
@@ -1239,7 +1250,7 @@ func runUILayoutSourceChecks() throws {
         "library arXiv import sheet should enqueue IDs and close instead of waiting in the sheet"
     )
     try check(
-        librarySource.contains("isImportPlaceholder: paper.isArxivImportPlaceholder"),
+        libraryFeatureStoreSource.contains("isImportPlaceholder: paper.isArxivImportPlaceholder"),
         "library paper rows should render pending arXiv imports as placeholders"
     )
     try check(
@@ -3619,7 +3630,7 @@ func runUILayoutSourceChecks() throws {
     )
     try check(
         librarySource.contains("LibraryPaperTableView(")
-            && librarySource.contains("rows: paperTableRows")
+            && librarySource.contains("rows: model.libraryPaperTableRows(")
             && libraryPaperTableSource.contains("tableView.rowHeight")
             && libraryPaperTableSource.contains("heightOfRow"),
         "library paper rows should keep dense, stable native table row sizing instead of SwiftUI list row insets"
