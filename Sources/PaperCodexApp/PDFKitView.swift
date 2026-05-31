@@ -944,12 +944,13 @@ private struct PDFLinkPreviewCard: View {
             }
             HStack {
                 Spacer()
-                Button {
+                PaperCodexPanelButton(
+                    title: preview.actionTitle,
+                    systemImage: "arrow.up.right",
+                    kind: .primary
+                ) {
                     onOpen()
-                } label: {
-                    Label(preview.actionTitle, systemImage: "arrow.up.right")
                 }
-                .buttonStyle(.borderedProminent)
             }
         }
         .padding(15)

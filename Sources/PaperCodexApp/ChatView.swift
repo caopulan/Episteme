@@ -1229,9 +1229,9 @@ private struct GeneratedImageGallery: View {
         ScrollView(.horizontal) {
             HStack(spacing: 8) {
                 ForEach(urls, id: \.path) { url in
-                    Button {
+                    PaperCodexMediaPreviewButton(help: "Preview generated image") {
                         onPreview(url)
-                    } label: {
+                    } content: {
                         VStack(alignment: .leading, spacing: 5) {
                             ZStack(alignment: .topTrailing) {
                                 LocalThumbnailImage(url: url, maxPixelSize: 260, contentMode: .fill) {
@@ -1259,8 +1259,6 @@ private struct GeneratedImageGallery: View {
                         .background(Color(nsColor: .controlBackgroundColor))
                         .clipShape(RoundedRectangle(cornerRadius: 8))
                     }
-                    .buttonStyle(.plain)
-                    .help("Preview generated image")
                 }
             }
         }
@@ -1289,16 +1287,9 @@ private struct GeneratedImagePreviewOverlay: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                     Spacer(minLength: 12)
-                    Button {
+                    PaperCodexIconButton(title: "Close Preview", systemImage: "xmark", tint: .white) {
                         onDismiss()
-                    } label: {
-                        Image(systemName: "xmark")
-                            .font(.callout.weight(.semibold))
-                            .frame(width: 28, height: 28)
                     }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.white.opacity(0.82))
-                    .help("Close preview")
                 }
                 .padding(.horizontal, 14)
                 .frame(height: 44)
@@ -1342,15 +1333,12 @@ private struct CurrentSelectionReplyCard: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
-                    .truncationMode(.tail)
+                .truncationMode(.tail)
             }
             Spacer(minLength: 8)
-            Button(action: onClear) {
-                Image(systemName: "xmark.circle.fill")
-                    .foregroundStyle(.tertiary)
+            PaperCodexIconButton(title: "Remove Source", systemImage: "xmark.circle.fill", tint: .secondary) {
+                onClear()
             }
-            .buttonStyle(.plain)
-            .help("Remove source")
         }
         .padding(10)
         .background(Color.accentColor.opacity(0.08))
@@ -1368,9 +1356,9 @@ private struct UserSourceReplyView: View {
     var onOpen: (String) -> Void
 
     var body: some View {
-        Button {
+        PaperCodexMediaPreviewButton(help: "Open quoted source") {
             onOpen(attachment.anchorID)
-        } label: {
+        } content: {
             HStack(alignment: .top, spacing: 9) {
                 Image(systemName: "quote.opening")
                     .foregroundStyle(Color.accentColor)
@@ -1404,8 +1392,6 @@ private struct UserSourceReplyView: View {
             )
             .clipShape(RoundedRectangle(cornerRadius: 7))
         }
-        .buttonStyle(.plain)
-        .help("Open quoted source")
     }
 }
 

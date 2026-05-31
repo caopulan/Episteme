@@ -177,25 +177,21 @@ private struct InteractionNoticeCard: View {
                 }
                 Spacer(minLength: 8)
                 if canExpand {
-                    Button {
+                    PaperCodexIconButton(
+                        title: isExpanded ? "Hide details" : "Show details",
+                        systemImage: isExpanded ? "chevron.up" : "doc.text.magnifyingglass",
+                        tint: .secondary
+                    ) {
                         isExpanded.toggle()
-                    } label: {
-                        Label(isExpanded ? "Less" : "Details", systemImage: isExpanded ? "chevron.up" : "doc.text.magnifyingglass")
-                            .labelStyle(.iconOnly)
-                            .frame(width: 20, height: 20)
                     }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
-                    .help(isExpanded ? "Hide details" : "Show details")
                 }
-                Button(action: onDismiss) {
-                    Image(systemName: "xmark")
-                        .font(.paperCodexSystem(size: 10, weight: .bold))
-                        .frame(width: 18, height: 18)
+                PaperCodexIconButton(
+                    title: "Dismiss Notification",
+                    systemImage: "xmark",
+                    tint: .secondary
+                ) {
+                    onDismiss()
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                .accessibilityLabel("Dismiss notification")
             }
             if isExpanded, !notice.message.isEmpty {
                 ScrollView(.vertical) {

@@ -1485,6 +1485,15 @@ func runUILayoutSourceChecks() throws {
         "success and failure notices should auto-dismiss after 5s and 10s respectively"
     )
     try check(
+        interactionFeedbackSource.contains("PaperCodexIconButton(")
+            && interactionFeedbackSource.contains("title: isExpanded ? \"Hide details\" : \"Show details\"")
+            && interactionFeedbackSource.contains("title: \"Dismiss Notification\"")
+            && !interactionFeedbackSource.contains("\n                    Button")
+            && !interactionFeedbackSource.contains("\n                Button(action:")
+            && !interactionFeedbackSource.contains(".buttonStyle("),
+        "global interaction notices should use native AppKit-backed icon buttons for details and dismiss actions"
+    )
+    try check(
         !collectionViewExists
             && !appSource.contains("case .collections")
             && !appSource.contains("CollectionView()")
@@ -2069,6 +2078,24 @@ func runUILayoutSourceChecks() throws {
         )
     } else {
         throw CheckFailure(description: "chat message bubble source should remain inspectable")
+    }
+    if let generatedGalleryRange = chatSource.range(of: "private struct GeneratedImageGallery: View"),
+       let generatedGalleryEndRange = chatSource.range(of: "private struct MarkdownMessageView: View", range: generatedGalleryRange.upperBound..<chatSource.endIndex) {
+        let generatedGallerySource = String(chatSource[generatedGalleryRange.lowerBound..<generatedGalleryEndRange.lowerBound])
+        try check(
+            generatedGallerySource.components(separatedBy: "PaperCodexMediaPreviewButton(").count - 1 >= 2
+                && generatedGallerySource.contains("help: \"Preview generated image\"")
+                && generatedGallerySource.contains("help: \"Open quoted source\"")
+                && generatedGallerySource.contains("PaperCodexIconButton(title: \"Close Preview\"")
+                && generatedGallerySource.contains("PaperCodexIconButton(title: \"Remove Source\"")
+                && !generatedGallerySource.contains("\n                    Button")
+                && !generatedGallerySource.contains("\n            Button(action:")
+                && !generatedGallerySource.contains("\n        Button {")
+                && !generatedGallerySource.contains(".buttonStyle("),
+            "reader chat generated image and source reply controls should use native AppKit-backed buttons"
+        )
+    } else {
+        throw CheckFailure(description: "chat generated image and source reply source should remain inspectable")
     }
     try check(
         chatAppearanceSource.contains("enum ChatFontFamily: String, CaseIterable, Identifiable")
@@ -3116,6 +3143,20 @@ func runUILayoutSourceChecks() throws {
         pdfKitSource.contains("centerPDFPagePointInViewport"),
         "PDF citation jumps should scroll the target point into the middle of the viewport"
     )
+    if let pdfLinkPreviewRange = pdfKitSource.range(of: "private struct PDFLinkPreviewCard: View"),
+       let pdfLinkPreviewEndRange = pdfKitSource.range(of: "private struct ReferenceEntryCard: View", range: pdfLinkPreviewRange.upperBound..<pdfKitSource.endIndex) {
+        let pdfLinkPreviewSource = String(pdfKitSource[pdfLinkPreviewRange.lowerBound..<pdfLinkPreviewEndRange.lowerBound])
+        try check(
+            pdfLinkPreviewSource.contains("PaperCodexPanelButton(")
+                && pdfLinkPreviewSource.contains("title: preview.actionTitle")
+                && pdfLinkPreviewSource.contains("systemImage: \"arrow.up.right\"")
+                && !pdfLinkPreviewSource.contains("\n                Button")
+                && !pdfLinkPreviewSource.contains(".buttonStyle("),
+            "PDF link preview cards should use the shared native panel button for open actions"
+        )
+    } else {
+        throw CheckFailure(description: "PDF link preview source should remain inspectable")
+    }
     try check(
         !pdfKitSource.contains("first.y + first.height"),
         "PDF citation jumps should not align the highlight top edge to the viewport top"
