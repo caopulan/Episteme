@@ -635,6 +635,10 @@ final class AppModel: ObservableObject {
         set { discoverStore.discoverEnrichmentsByID = newValue }
     }
 
+    var discoverSidebarFacets: DiscoverSidebarFacets {
+        discoverStore.discoverSidebarFacets
+    }
+
     var isSearchingDiscover: Bool {
         get { discoverStore.isSearchingDiscover }
         set { discoverStore.isSearchingDiscover = newValue }
@@ -2533,6 +2537,23 @@ final class AppModel: ObservableObject {
             }
             return paper.sourceURL == absURL || paper.sourceURL?.contains(arxivPaper.id) == true
         }
+    }
+
+    func libraryArxivPaperIDs(includePlaceholders: Bool = true) -> Set<String> {
+        var ids: Set<String> = []
+        for paper in papers {
+            if !includePlaceholders, paper.isArxivImportPlaceholder {
+                continue
+            }
+            if let canonicalID = paper.arxivImportPlaceholderCanonicalID {
+                ids.insert(canonicalID)
+            }
+            if let sourceURL = paper.sourceURL,
+               let canonicalID = ArxivIDExtractor.firstCanonicalID(in: sourceURL) {
+                ids.insert(canonicalID)
+            }
+        }
+        return ids
     }
 
     func libraryArxivMetadata(for paper: Paper) -> LibraryPaperArxivMetadata? {

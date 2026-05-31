@@ -365,6 +365,12 @@ func runAppKitLifecycleSourceChecks() throws {
             && rootViewSource.contains("paperCodexTypographyScale()"),
         "SwiftUI root content should remain a hosted content view rather than owning the application/window lifecycle"
     )
+    try check(
+        rootViewSource.contains("private let initiallyMountedRoutes: Set<AppRoute> = []")
+            && !rootViewSource.contains("scheduleRouteCacheWarmup()")
+            && !rootViewSource.contains("routeCacheWarmupTask"),
+        "root view should not pre-mount hidden routes because offscreen SwiftUI/AppKit scroll surfaces still perform layout work"
+    )
 }
 
 func runMCPChecks() throws {
@@ -1502,9 +1508,10 @@ func runUILayoutSourceChecks() throws {
     try check(
         discoverSource.contains("struct ArxivSearchView")
             && discoverSource.contains("model.startArxivSearch()")
-            && discoverSource.contains("ArxivPaperCard(")
+            && discoverSource.contains("NativeDiscoverCollectionView(")
+            && discoverSource.contains("nativeSearchCardModels")
             && discoverSource.contains("model.processCurrentDiscoverResults(searchPapers"),
-        "search page should call arXiv API search and reuse Explore paper cards and processing"
+        "search page should call arXiv API search and reuse the native Explore collection card surface and processing"
     )
     try check(
         localArxivClientSource.contains("func search(query:")
@@ -1567,20 +1574,18 @@ func runUILayoutSourceChecks() throws {
             && appShellSource.contains("@EnvironmentObject private var navigation: AppNavigation")
             && appSource.contains("private let initiallyMountedRoutes: Set<AppRoute>")
             && appSource.contains("@State private var mountedRoutes: Set<AppRoute> = initiallyMountedRoutes")
-            && appSource.contains("@State private var routeCacheWarmupTask: Task<Void, Never>?")
             && appSource.contains("private let persistentRouteOrder: [AppRoute]")
             && appSource.contains("persistentRoutedContent")
             && appSource.contains("RouteTransitionPlaceholder")
             && appSource.contains("RouteVisibilityHost")
             && appSource.contains("mountedRoutes.contains(navigation.route)")
             && appSource.contains("mountRoute(newRoute)")
-            && appSource.contains("scheduleRouteCacheWarmup")
             && appSource.contains("RouteVisibilityHost(route: route, activeRoute: navigation.route) {\n                        routedContent(for: route)\n                    }\n                    .frame(maxWidth: .infinity, maxHeight: .infinity)")
             && appSource.contains("content()\n            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)\n            .opacity(route == activeRoute ? 1 : 0)")
             && appSource.contains(".allowsHitTesting(route == activeRoute)")
             && appSource.contains(".accessibilityHidden(route != activeRoute)")
             && !appModelSource.contains("scheduleReaderContextClear()"),
-        "routes should be persistently mounted, prewarmed, and preserve reader context across navigation"
+        "routes should be lazily mounted and preserve visited reader context across navigation without prewarming hidden surfaces"
     )
     if let routeVisibilityRange = appSource.range(of: "private struct RouteVisibilityHost"),
        let routeVisibilityEndRange = appSource.range(of: "private struct RouteTransitionPlaceholder", range: routeVisibilityRange.upperBound..<appSource.endIndex) {
@@ -1929,6 +1934,24 @@ func runUILayoutSourceChecks() throws {
             && appSourcesWithSwiftUIScrollViews.isEmpty,
         "static app scroll regions should use shared AppKit NSScrollView hosting while high-throughput Discover results use native NSCollectionView; remaining SwiftUI scroll files: \(appSourcesWithSwiftUIScrollViews.joined(separator: ", "))"
     )
+    if let nativeScrollApplyRange = nativeScrollViewSource.range(of: "    func apply("),
+       let nativeScrollSetupRange = nativeScrollViewSource.range(of: "    private func setup()", range: nativeScrollApplyRange.upperBound..<nativeScrollViewSource.endIndex) {
+        let nativeScrollApplySource = String(nativeScrollViewSource[nativeScrollApplyRange.lowerBound..<nativeScrollSetupRange.lowerBound])
+        try check(
+            nativeScrollViewSource.contains("private var isLayingOutHostedContent = false")
+                && nativeScrollViewSource.contains("private var needsContentMeasurement = true")
+                && nativeScrollViewSource.contains("private var lastMeasuredWidth: CGFloat?")
+                && nativeScrollViewSource.contains("var contentID: AnyHashable?")
+                && nativeScrollViewSource.contains("let contentChanged = contentID == nil || self.contentID != contentID")
+                && nativeScrollViewSource.contains("if contentChanged {")
+                && nativeScrollViewSource.contains("guard !isLayingOutHostedContent else")
+                && discoverSource.contains("PaperCodexNativeScrollView(contentID: sidebarContentID)")
+                && !nativeScrollApplySource.contains("layoutSubtreeIfNeeded()"),
+            "shared native hosted scroll view should avoid synchronous update-layout recursion and cache content measurement/root updates"
+        )
+    } else {
+        throw CheckFailure(description: "native hosted scroll apply source should remain inspectable")
+    }
     try check(
         actionButtonSource.contains("struct PaperCodexToolbarButton")
             && actionButtonSource.contains("struct PaperCodexIconButton")
@@ -2434,67 +2457,38 @@ func runUILayoutSourceChecks() throws {
         "chat markdown web view should resolve bundled math assets relative to the app resources directory"
     )
     try check(
-        actionButtonSource.contains("struct PaperCodexCardActionButton: View")
-            && actionButtonSource.contains("private struct NativePaperCodexCardActionButton: NSViewRepresentable")
-            && actionButtonSource.contains("private final class NativePaperCodexCardActionButtonView: NSButton")
-            && actionButtonSource.components(separatedBy: "override func mouseDown(with event: NSEvent)").count - 1 >= 5
-            && actionButtonSource.components(separatedBy: "setAccessibilityRole(.button)").count - 1 >= 5
-            && actionButtonSource.components(separatedBy: "CATransaction.setAnimationDuration").count - 1 >= 5
-            && discoverSource.contains("PaperCodexCardActionButton(")
-            && discoverSource.contains("title: \"Add\"")
-            && discoverSource.contains("kind: .success")
-            && discoverSource.contains("title: \"Open\"")
-            && discoverSource.contains("kind: .primary")
-            && discoverSource.contains("disabled: isBusy")
+        nativeDiscoverCollectionSource.contains("private let saveButton = NSButton()")
+            && nativeDiscoverCollectionSource.contains("private let openButton = NSButton()")
+            && nativeDiscoverCollectionSource.contains("configureActionButton(saveButton, title: \"Add\"")
+            && nativeDiscoverCollectionSource.contains("configureActionButton(openButton, title: \"Open\"")
+            && nativeDiscoverCollectionSource.contains("saveButton.isEnabled = !model.isBusy")
+            && nativeDiscoverCollectionSource.contains("openButton.isEnabled = !model.isBusy")
+            && nativeDiscoverCollectionSource.contains("@objc private func performSave()")
+            && nativeDiscoverCollectionSource.contains("@objc private func performOpen()")
             && !discoverSource.contains("private struct SaveActionButtonStyle")
             && !discoverSource.contains("private struct StableOpenButtonStyle")
             && !discoverSource.contains(".buttonStyle(SaveActionButtonStyle(")
             && !discoverSource.contains(".buttonStyle(StableOpenButtonStyle("),
-        "Discover card save and open actions should use shared native AppKit buttons before busy work starts"
+        "Discover and Search native card save/open actions should be real AppKit buttons disabled before busy work starts"
     )
-    if let resourceButtonRange = discoverSource.range(of: "private struct ResourceLinkButton: View"),
-       let resourceLinkEndRange = discoverSource.range(of: "private struct PaperResourceLink", range: resourceButtonRange.upperBound..<discoverSource.endIndex) {
-        let resourceLinkControlsSource = String(discoverSource[resourceButtonRange.lowerBound..<resourceLinkEndRange.lowerBound])
-        try check(
-            actionButtonSource.contains("struct PaperCodexResourceLinkButton: View")
-                && actionButtonSource.contains("private struct NativePaperCodexResourceLinkButton: NSViewRepresentable")
-                && actionButtonSource.contains("private final class NativePaperCodexResourceLinkButtonView: NSButton")
-                && actionButtonSource.components(separatedBy: "override func mouseDown(with event: NSEvent)").count - 1 >= 6
-                && actionButtonSource.components(separatedBy: "setAccessibilityRole(.button)").count - 1 >= 6
-                && actionButtonSource.components(separatedBy: "CATransaction.setAnimationDuration").count - 1 >= 6
-                && resourceLinkControlsSource.contains("PaperCodexResourceLinkButton(")
-                && resourceLinkControlsSource.contains("title: link.title")
-                && resourceLinkControlsSource.contains("systemImage: link.systemImage")
-                && resourceLinkControlsSource.contains("compact: compact")
-                && !resourceLinkControlsSource.contains("private struct ResourceLinkButtonStyle: ButtonStyle")
-                && !resourceLinkControlsSource.contains(".buttonStyle(ResourceLinkButtonStyle(")
-                && !resourceLinkControlsSource.contains(".buttonStyle("),
-            "Discover and Search resource link buttons should use shared native AppKit buttons before opening external targets"
-        )
-    } else {
-        throw CheckFailure(description: "Discover resource link button source should remain inspectable")
-    }
-    if let arxivCardRange = discoverSource.range(of: "private struct ArxivPaperCard: View"),
-       let cardFooterRange = discoverSource.range(of: "private var cardFooter", range: arxivCardRange.upperBound..<discoverSource.endIndex) {
-        let arxivCardSource = String(discoverSource[arxivCardRange.lowerBound..<cardFooterRange.lowerBound])
-        try check(
-            actionButtonSource.contains("struct PaperCodexMediaPreviewButton<Content: View>: View")
-                && actionButtonSource.contains("private struct NativePaperCodexMediaPreviewButton: NSViewRepresentable")
-                && actionButtonSource.contains("private final class NativePaperCodexMediaPreviewButtonView: NSButton")
-                && actionButtonSource.components(separatedBy: "override func mouseDown(with event: NSEvent)").count - 1 >= 7
-                && actionButtonSource.components(separatedBy: "setAccessibilityRole(.button)").count - 1 >= 7
-                && actionButtonSource.components(separatedBy: "CATransaction.setAnimationDuration").count - 1 >= 7
-                && arxivCardSource.contains("PaperCodexMediaPreviewButton(")
-                && arxivCardSource.contains("disabled: imageURL == nil && isBusy")
-                && arxivCardSource.contains("help: imageURL == nil ? \"Open cached PDF\" : \"Open image preview\"")
-                && !arxivCardSource.contains("@State private var isMediaHovering = false")
-                && !arxivCardSource.contains("private struct DiscoverMediaButtonStyle: ButtonStyle")
-                && !arxivCardSource.contains(".buttonStyle(DiscoverMediaButtonStyle("),
-            "Discover and Search media preview buttons should use shared native AppKit buttons before opening PDFs or previews"
-        )
-    } else {
-        throw CheckFailure(description: "Discover media preview button source should remain inspectable")
-    }
+    try check(
+        nativeDiscoverCollectionSource.contains("private func configureLinks(_ links: [NativeDiscoverCardLink])")
+            && nativeDiscoverCollectionSource.contains("button.identifier = NSUserInterfaceItemIdentifier(link.urlString)")
+            && nativeDiscoverCollectionSource.contains("@objc private func openResourceLink(_ sender: NSButton)")
+            && nativeDiscoverCollectionSource.contains("NSWorkspace.shared.open(url)")
+            && !discoverSource.contains("private struct ResourceLinkButton: View")
+            && !discoverSource.contains("PaperCodexResourceLinkButton("),
+        "Discover and Search resource links should be native AppKit buttons in the reusable collection card"
+    )
+    try check(
+        nativeDiscoverCollectionSource.contains("private let mediaButton = NSButton()")
+            && nativeDiscoverCollectionSource.contains("mediaButton.action = #selector(performMediaAction)")
+            && nativeDiscoverCollectionSource.contains("@objc private func performMediaAction()")
+            && nativeDiscoverCollectionSource.contains("mediaButton.toolTip = model.imageURL == nil ? \"Open cached PDF\" : \"Open image preview\"")
+            && !discoverSource.contains("PaperCodexMediaPreviewButton(")
+            && !discoverSource.contains("private struct DiscoverMediaButtonStyle: ButtonStyle"),
+        "Discover and Search media preview actions should be native AppKit buttons before opening PDFs or previews"
+    )
     try check(
         discoverSource.contains("private struct NativeSidebarFilterButton: NSViewRepresentable")
             && discoverSource.contains("NativeSidebarFilterButtonView")
@@ -2529,6 +2523,20 @@ func runUILayoutSourceChecks() throws {
     if let arxivSearchRange = discoverSource.range(of: "struct ArxivSearchView: View"),
        let arxivSearchEndRange = discoverSource.range(of: "private struct SidebarFilterButton: View", range: arxivSearchRange.upperBound..<discoverSource.endIndex) {
         let arxivSearchSource = String(discoverSource[arxivSearchRange.lowerBound..<arxivSearchEndRange.lowerBound])
+        if let searchFeedRange = arxivSearchSource.range(of: "private var feed: some View"),
+           let searchToolbarRange = arxivSearchSource.range(of: "private var toolbar: some View", range: searchFeedRange.upperBound..<arxivSearchSource.endIndex) {
+            let arxivSearchFeedSource = String(arxivSearchSource[searchFeedRange.lowerBound..<searchToolbarRange.lowerBound])
+            try check(
+                arxivSearchFeedSource.contains("NativeDiscoverCollectionView(")
+                    && arxivSearchFeedSource.contains("let cardModels = nativeSearchCardModels")
+                    && arxivSearchFeedSource.contains("updateNativeSearchCardModels(for: papers, inputID:")
+                    && !arxivSearchFeedSource.contains("LazyVStack")
+                    && !arxivSearchFeedSource.contains("ArxivPaperCard("),
+                "Search results should use the same reusable native AppKit collection surface as Discover instead of SwiftUI card rows"
+            )
+        } else {
+            throw CheckFailure(description: "Search feed source should remain inspectable")
+        }
         try check(
             arxivSearchSource.contains("PaperCodexIconButton(\n                    title: sortOrderTitle")
                 && arxivSearchSource.contains("private var sortOrderTitle: String")
@@ -2938,7 +2946,7 @@ func runUILayoutSourceChecks() throws {
         discoverSource.contains("NativeDiscoverCollectionView(")
             && discoverSource.contains("requestNativeDiscoverScrollRestore")
             && discoverSource.contains("isRestoringDiscoverScrollPosition")
-            && discoverSource.contains("DiscoverImagePreloadPolicy")
+            && discoverSource.contains("DiscoverScrollPolicy")
             && nativeDiscoverCollectionSource.contains("scrollToPaper")
             && nativeDiscoverCollectionSource.contains("onVisiblePaperChange")
             && !discoverSource.contains(".scrollPosition(id: $discoverScrollAnchorID")
@@ -3059,8 +3067,41 @@ func runUILayoutSourceChecks() throws {
         "settings should describe language as an app-wide setting, not only answer language"
     )
     try check(
-        discoverSource.contains("languageMode: model.globalLanguageMode"),
+        discoverSource.contains("NativeDiscoverCardModelBuilder")
+            && discoverSource.contains("model.globalLanguageMode.discoverLanguageCode"),
         "Discover cards should render with the configured global language"
+    )
+    try check(
+        appModelSource.contains("func libraryArxivPaperIDs(includePlaceholders:")
+            && discoverSource.contains("let libraryArxivPaperIDs = model.libraryArxivPaperIDs()")
+            && discoverSource.contains("inLibrary: libraryArxivPaperIDs.contains(paper.id)")
+            && !discoverSource.contains("inLibrary: model.libraryPaper(for: paper) != nil"),
+        "Discover/Search card model building should use one library arXiv ID set instead of scanning the library for every result"
+    )
+    try check(
+        discoverSource.contains("final class NativeDiscoverCardModelCache")
+            && discoverSource.contains("@StateObject private var cardModelCache = NativeDiscoverCardModelCache()")
+            && discoverSource.contains("cardModelCache.models(scope: \"discover\", for: papers, model: model)")
+            && discoverSource.contains("cardModelCache.models(scope: \"search\", for: papers, model: model)")
+            && discoverSource.contains("@State private var nativeDiscoverCardModels: [NativeDiscoverCardModel] = []")
+            && discoverSource.contains("@State private var nativeSearchCardModels: [NativeDiscoverCardModel] = []")
+            && discoverSource.contains("let cardModels = nativeDiscoverCardModels")
+            && discoverSource.contains("let cardModels = nativeSearchCardModels")
+            && discoverSource.contains("updateNativeDiscoverCardModels(for: visiblePapers, inputID:")
+            && discoverSource.contains("updateNativeSearchCardModels(for: papers, inputID:")
+            && discoverSource.contains("private static func signature(scope: String, papers: [ArxivFeedPaper], model: AppModel) -> Int"),
+        "Discover/Search native card models should be cached across layout passes instead of rebuilt from SwiftUI GeometryReader every frame"
+    )
+    try check(
+        discoverFeatureStoreSource.contains("struct DiscoverSidebarFacets")
+            && discoverFeatureStoreSource.contains("@Published private(set) var discoverSidebarFacets")
+            && discoverFeatureStoreSource.contains("refreshDiscoverSidebarFacets()")
+            && appModelSource.contains("var discoverSidebarFacets: DiscoverSidebarFacets")
+            && discoverSource.contains("model.discoverSidebarFacets.sortedTags")
+            && !discoverSource.contains("private var tags: [String] {\n        let counts = tagCounts")
+            && !discoverSource.contains("folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)")
+            && !discoverFeatureStoreSource.contains("folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)"),
+        "Discover sidebar categories and tags should be precomputed outside the SwiftUI body/layout hot path"
     )
     try check(
         discoverSource.contains("paper.displayTitle(language: model.globalLanguageMode.discoverLanguageCode)"),
@@ -3386,10 +3427,10 @@ func runUILayoutSourceChecks() throws {
         "opening Discover should show cached state while background loaders warm JSON, asset, and thumbnail data off the main actor"
     )
     try check(
-        appSource.contains("private let initiallyMountedRoutes: Set<AppRoute> = [.library, .discover, .search]")
+        appSource.contains("private let initiallyMountedRoutes: Set<AppRoute> = []")
             && appSource.contains("@State private var mountedRoutes: Set<AppRoute> = initiallyMountedRoutes")
             && !appSource.contains("@State private var mountedRoutes: Set<AppRoute> = [.library]"),
-        "Library, Explore, and Search route shells should be mounted before navigation clicks so route switching never flashes a transition placeholder"
+        "Library, Explore, and Search route shells should mount only when visited so hidden route trees do not consume layout time"
     )
     let discoverCacheLoaderSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/DiscoverCacheLoader.swift"))
     let pdfThumbnailCacheSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/PDFThumbnailCache.swift"))
@@ -3861,8 +3902,10 @@ func runUILayoutSourceChecks() throws {
     )
 
     try check(
-        discoverSource.contains("DiscoverPaperStatusBadge"),
-        "Discover cards should show per-paper processing and cache state"
+        nativeDiscoverCollectionSource.contains("private let statusLabel = NSTextField(labelWithString: \"\")")
+            && nativeDiscoverCollectionSource.contains("nativeDiscoverStatusTitle(for: model.interactionState)")
+            && nativeDiscoverCollectionSource.contains("statusLabel.isHidden = model.interactionState == nil"),
+        "Discover and Search native cards should show per-paper processing and cache state"
     )
     try check(
         appModelSource.contains("discoverScrollPositionPaperID")
@@ -3996,7 +4039,7 @@ func runUILayoutSourceChecks() throws {
     try check(
         discoverSource.contains("let visiblePapers = papers")
             && discoverSource.contains("DiscoverLayoutSignature")
-            && discoverSource.contains("DiscoverImageWarmupSignature")
+            && discoverSource.contains("NativeDiscoverCollectionView(")
             && !discoverSource.contains("papers.map(\\.id).joined(separator: \",\")"),
         "Discover feed rendering should reuse one visible-paper snapshot and avoid building long string layout signatures in body"
     )
@@ -4029,23 +4072,46 @@ func runUILayoutSourceChecks() throws {
         "Opening Discover should not automatically start a network search"
     )
     try check(
-        discoverSource.contains("private let discoverMediaHorizontalPadding: CGFloat = 14")
-            && discoverSource.contains(".padding(.horizontal, discoverMediaHorizontalPadding)")
-            && discoverSource.contains(".padding(.top, discoverMediaHorizontalPadding)")
-            && discoverSource.contains(".padding(.bottom, 8)"),
-        "Discover paper images should use a small horizontal inset aligned with card text"
+        nativeDiscoverCollectionSource.contains("mediaButton.leadingAnchor.constraint(equalTo: mediaWrap.leadingAnchor, constant: 14)")
+            && nativeDiscoverCollectionSource.contains("mediaButton.trailingAnchor.constraint(equalTo: mediaWrap.trailingAnchor, constant: -14)")
+            && nativeDiscoverCollectionSource.contains("mediaButton.topAnchor.constraint(equalTo: mediaWrap.topAnchor, constant: 14)")
+            && nativeDiscoverCollectionSource.contains("mediaButton.bottomAnchor.constraint(equalTo: mediaWrap.bottomAnchor, constant: -8)"),
+        "Discover paper images should use a small native inset aligned with card text"
     )
     try check(
-        discoverSource.contains("private func discoverPaperGridColumnWidth(for containerWidth: CGFloat, columnCount: Int) -> CGFloat")
+        discoverSource.components(separatedBy: "NativeDiscoverCollectionView(").count - 1 >= 2
             && nativeDiscoverCollectionSource.contains("NativeDiscoverCollectionMetrics.columnCount")
             && nativeDiscoverCollectionSource.contains("flowLayout.itemSize")
             && nativeDiscoverCollectionSource.contains("currentItemSize")
-            && discoverSource.contains("let columnWidth = discoverPaperGridColumnWidth(for: proxy.size.width, columnCount: columnCount)")
-            && discoverSource.components(separatedBy: ".frame(width: columnWidth, alignment: .topLeading)").count - 1 >= 1
-            && discoverSource.components(separatedBy: ".frame(width: columnWidth)").count - 1 >= 1
+            && !discoverSource.contains("discoverPaperGridColumnWidth")
+            && !discoverSource.contains("LazyVStack(alignment: .leading, spacing: discoverPaperGridRowSpacing)")
             && !discoverSource.contains("Color.clear\n                                                .frame(maxWidth: .infinity)")
             && !discoverSource.contains("Color.clear\n                                            .frame(maxWidth: .infinity)"),
-        "Discover and Search paper rows should reserve stable fixed-width grid tracks or native collection item sizes"
+        "Discover and Search paper results should use stable native collection item sizes instead of SwiftUI grid row placeholders"
+    )
+    try check(
+        nativeDiscoverCollectionSource.contains("NativeDiscoverImageCache")
+            && !discoverSource.contains("private struct ArxivPaperCard: View")
+            && !discoverSource.contains("private struct DiscoverPDFThumbnailHero")
+            && !discoverSource.contains("private struct ArxivPreviewImage")
+            && !discoverSource.contains("warmDiscoverLocalImages")
+            && !discoverSource.contains("DiscoverLocalImageCache")
+            && !discoverSource.contains("LocalCachedImage"),
+        "Discover and Search native collection migration should remove the unused SwiftUI card and duplicate image warmup path"
+    )
+    try check(
+        nativeDiscoverCollectionSource.contains("let shouldReloadCards = context.coordinator.update(from: self)")
+            && nativeDiscoverCollectionSource.contains("if shouldReloadCards {\n            view.collectionView.reloadData()\n        }")
+            && nativeDiscoverCollectionSource.contains("@discardableResult\n        func update(from view: NativeDiscoverCollectionView) -> Bool")
+            && nativeDiscoverCollectionSource.contains("let shouldReload = cards != view.cards"),
+        "Native Discover/Search collection should avoid full reloads when SwiftUI updates without card data changes"
+    )
+    try check(
+        nativeDiscoverCollectionSource.contains("private var lastReportedVisiblePaperID: String?")
+            && nativeDiscoverCollectionSource.contains("private func publishVisiblePaper(_ paperID: String?)")
+            && nativeDiscoverCollectionSource.contains("guard !hasReportedVisiblePaper || lastReportedVisiblePaperID != paperID else")
+            && discoverSource.contains("guard visibleDiscoverPaperID != paperID else"),
+        "Native Discover/Search collection should avoid re-reporting the same visible item into SwiftUI state on every update pass"
     )
     try check(
         appModelSource.contains("tokenUsage: CodexTokenUsage?")

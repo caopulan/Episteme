@@ -25,6 +25,7 @@ struct PaperCodexNativeScrollView<Content: View>: NSViewRepresentable {
     var axes: Axis.Set = .vertical
     var showsIndicators = true
     var drawsBackground = false
+    var contentID: AnyHashable?
     var scrollRequest: PaperCodexNativeScrollRequest?
     var onVisibleRangeChange: ((PaperCodexNativeVisibleRange) -> Void)?
     var content: () -> Content
@@ -33,6 +34,7 @@ struct PaperCodexNativeScrollView<Content: View>: NSViewRepresentable {
         _ axes: Axis.Set = .vertical,
         showsIndicators: Bool = true,
         drawsBackground: Bool = false,
+        contentID: AnyHashable? = nil,
         scrollRequest: PaperCodexNativeScrollRequest? = nil,
         onVisibleRangeChange: ((PaperCodexNativeVisibleRange) -> Void)? = nil,
         @ViewBuilder content: @escaping () -> Content
@@ -40,6 +42,7 @@ struct PaperCodexNativeScrollView<Content: View>: NSViewRepresentable {
         self.axes = axes
         self.showsIndicators = showsIndicators
         self.drawsBackground = drawsBackground
+        self.contentID = contentID
         self.scrollRequest = scrollRequest
         self.onVisibleRangeChange = onVisibleRangeChange
         self.content = content
@@ -54,6 +57,7 @@ struct PaperCodexNativeScrollView<Content: View>: NSViewRepresentable {
             axes: axes,
             showsIndicators: showsIndicators,
             drawsBackground: drawsBackground,
+            contentID: contentID,
             scrollRequest: scrollRequest,
             onVisibleRangeChange: onVisibleRangeChange,
             rootView: AnyView(content())
@@ -70,6 +74,11 @@ final class NativePaperCodexHostingScrollView: NSScrollView {
     private var lastHandledScrollRequestToken: Int?
     private var onVisibleRangeChange: ((PaperCodexNativeVisibleRange) -> Void)?
     private var lastVisibleRange: PaperCodexNativeVisibleRange?
+    private var contentID: AnyHashable?
+    private var isLayingOutHostedContent = false
+    private var needsContentMeasurement = true
+    private var lastMeasuredWidth: CGFloat?
+    private var measuredFittingSize = NSSize(width: 1, height: 1)
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -94,20 +103,36 @@ final class NativePaperCodexHostingScrollView: NSScrollView {
         axes: Axis.Set,
         showsIndicators: Bool,
         drawsBackground: Bool,
+        contentID: AnyHashable?,
         scrollRequest: PaperCodexNativeScrollRequest?,
         onVisibleRangeChange: ((PaperCodexNativeVisibleRange) -> Void)?,
         rootView: AnyView
     ) {
+        let axesChanged = self.axes != axes
+        let indicatorsChanged = hasVerticalScroller != (showsIndicators && axes.contains(.vertical))
+            || hasHorizontalScroller != (showsIndicators && axes.contains(.horizontal))
+        let backgroundChanged = self.drawsBackground != drawsBackground
+        let scrollRequestChanged = self.scrollRequest != scrollRequest
+        let contentChanged = contentID == nil || self.contentID != contentID
         self.axes = axes
+        self.contentID = contentID
         self.scrollRequest = scrollRequest
         self.onVisibleRangeChange = onVisibleRangeChange
         hasVerticalScroller = showsIndicators && axes.contains(.vertical)
         hasHorizontalScroller = showsIndicators && axes.contains(.horizontal)
         self.drawsBackground = drawsBackground
         backgroundColor = drawsBackground ? .textBackgroundColor : .clear
-        hostingView.rootView = rootView
-        needsLayout = true
-        layoutSubtreeIfNeeded()
+        if contentChanged {
+            hostingView.rootView = rootView
+            needsContentMeasurement = true
+        }
+        if axesChanged {
+            lastMeasuredWidth = nil
+            hasLaidOutInitialDocument = false
+        }
+        if contentChanged || axesChanged || indicatorsChanged || backgroundChanged || scrollRequestChanged {
+            needsLayout = true
+        }
     }
 
     private func setup() {
@@ -122,22 +147,36 @@ final class NativePaperCodexHostingScrollView: NSScrollView {
     }
 
     private func layoutHostedContent() {
+        guard !isLayingOutHostedContent else {
+            return
+        }
         let clipSize = contentView.bounds.size
         guard clipSize.width > 0, clipSize.height > 0 else {
             return
         }
+        isLayingOutHostedContent = true
+        defer {
+            isLayingOutHostedContent = false
+        }
 
-        let fittingBeforeWidth = hostingView.fittingSize
+        let fittingBeforeWidth = measuredContentSize(forWidth: max(1, clipSize.width))
         let targetWidth = axes.contains(.horizontal)
             ? max(clipSize.width, fittingBeforeWidth.width)
             : clipSize.width
+        let fittingAtTargetWidth = targetWidth == fittingBeforeWidth.width
+            ? fittingBeforeWidth
+            : measuredContentSize(forWidth: targetWidth)
         let targetHeight = axes.contains(.vertical)
-            ? max(clipSize.height, fittingHeight(forWidth: targetWidth))
+            ? max(clipSize.height, fittingAtTargetWidth.height)
             : max(clipSize.height, fittingBeforeWidth.height)
 
         let documentSize = NSSize(width: max(1, targetWidth), height: max(1, targetHeight))
-        documentContainer.setFrameSize(documentSize)
-        hostingView.frame = NSRect(origin: .zero, size: documentSize)
+        if !approximatelyEqual(documentContainer.frame.size, documentSize) {
+            documentContainer.setFrameSize(documentSize)
+        }
+        if !approximatelyEqual(hostingView.frame.size, documentSize) {
+            hostingView.frame = NSRect(origin: .zero, size: documentSize)
+        }
         if !hasLaidOutInitialDocument {
             scroll(to: .zero, animated: false)
             hasLaidOutInitialDocument = true
@@ -147,11 +186,24 @@ final class NativePaperCodexHostingScrollView: NSScrollView {
         notifyVisibleRangeChange()
     }
 
-    private func fittingHeight(forWidth width: CGFloat) -> CGFloat {
+    private func measuredContentSize(forWidth width: CGFloat) -> NSSize {
+        let normalizedWidth = max(1, width)
+        if !needsContentMeasurement,
+           let lastMeasuredWidth,
+           abs(lastMeasuredWidth - normalizedWidth) < 0.5 {
+            return measuredFittingSize
+        }
         let currentHeight = max(1, hostingView.frame.height)
-        hostingView.setFrameSize(NSSize(width: max(1, width), height: currentHeight))
+        hostingView.setFrameSize(NSSize(width: normalizedWidth, height: currentHeight))
         hostingView.layoutSubtreeIfNeeded()
-        return hostingView.fittingSize.height
+        measuredFittingSize = hostingView.fittingSize
+        lastMeasuredWidth = normalizedWidth
+        needsContentMeasurement = false
+        return measuredFittingSize
+    }
+
+    private func approximatelyEqual(_ lhs: NSSize, _ rhs: NSSize) -> Bool {
+        abs(lhs.width - rhs.width) < 0.5 && abs(lhs.height - rhs.height) < 0.5
     }
 
     private func handlePendingScrollRequest() {

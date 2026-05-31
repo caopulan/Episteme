@@ -1,17 +1,10 @@
 import AppKit
-import ImageIO
 import PaperCodexCore
 import SwiftUI
 
-private let discoverMediaHorizontalPadding: CGFloat = 14
 private let discoverRouteToolbarMinHeight: CGFloat = 126
-private let discoverPaperGridHorizontalPadding: CGFloat = 10
-private let discoverPaperGridVerticalPadding: CGFloat = 8
-private let discoverPaperGridColumnSpacing: CGFloat = 16
-private let discoverPaperGridRowSpacing: CGFloat = 14
 
-private enum DiscoverImagePreloadPolicy {
-    static let visiblePaperLimit = 36
+private enum DiscoverScrollPolicy {
     static let scrollRestoreSettleNanoseconds: UInt64 = 320_000_000
     static let scrollPositionCommitDelayNanoseconds: UInt64 = 550_000_000
 }
@@ -22,21 +15,221 @@ private struct DiscoverLayoutSignature: Hashable {
     var paperIDHash: Int
 }
 
-private struct DiscoverImageWarmupSignature: Hashable {
-    var layout: DiscoverLayoutSignature
-    var imageCount: Int
+@MainActor
+private enum NativeDiscoverCardModelBuilder {
+    static func models(for papers: [ArxivFeedPaper], model: AppModel) -> [NativeDiscoverCardModel] {
+        let libraryArxivPaperIDs = model.libraryArxivPaperIDs()
+        return papers.map { paper in
+            let enrichment = model.discoverEnrichment(for: paper)
+            let languageCode = model.globalLanguageMode.discoverLanguageCode
+            let primaryTitle: String
+            let secondaryTitle: String
+            if languageCode == "zh" {
+                let enrichedTitle = enrichment?.titleZH.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                primaryTitle = enrichedTitle.isEmpty ? paper.displayTitle(language: "zh") : enrichedTitle
+                secondaryTitle = paper.title.en
+            } else {
+                primaryTitle = paper.title.en
+                secondaryTitle = ""
+            }
+
+            let summary: String
+            if languageCode == "zh" {
+                let enrichedSummary = enrichment?.summaryZH.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                if !enrichedSummary.isEmpty {
+                    summary = enrichedSummary
+                } else if !paper.summary.zh.isEmpty {
+                    summary = paper.summary.zh
+                } else if !paper.summary.en.isEmpty {
+                    summary = paper.summary.en
+                } else {
+                    summary = paper.abstract.en
+                }
+            } else if !paper.summary.en.isEmpty {
+                summary = paper.summary.en
+            } else {
+                summary = paper.abstract.en
+            }
+
+            return NativeDiscoverCardModel(
+                id: paper.id,
+                primaryCategory: paper.primaryCategory ?? paper.categories.first ?? "arXiv",
+                arxivID: paper.id,
+                primaryTitle: primaryTitle,
+                secondaryTitle: secondaryTitle,
+                summary: summary,
+                contribution: enrichment?.contribution,
+                error: enrichment?.error,
+                tags: tags(for: paper, enrichment: enrichment),
+                links: links(for: paper, enrichment: enrichment),
+                imageURL: model.cachedArxivAssetURL(for: paper.assets.small),
+                thumbnailURLs: model.cachedArxivPDFThumbnailURLs(for: paper),
+                inLibrary: libraryArxivPaperIDs.contains(paper.id),
+                isBusy: model.isDownloadingArxivPaper(paper),
+                downloadProgress: model.arxivDownloadProgress(for: paper),
+                interactionState: model.discoverPaperInteractionStateByID[paper.id]
+            )
+        }
+    }
+
+    private static func tags(for paper: ArxivFeedPaper, enrichment: DiscoverPaperEnrichment?) -> [String] {
+        let fallback = paper.tags.isEmpty ? paper.categories : paper.tags
+        var seen: Set<String> = []
+        var result: [String] = []
+        for tag in (enrichment?.tags ?? []) + fallback {
+            let trimmed = tag.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else {
+                continue
+            }
+            let key = trimmed.lowercased()
+            guard !seen.contains(key) else {
+                continue
+            }
+            seen.insert(key)
+            result.append(trimmed)
+        }
+        return result
+    }
+
+    private static func links(for paper: ArxivFeedPaper, enrichment: DiscoverPaperEnrichment?) -> [NativeDiscoverCardLink] {
+        var result = baseLinks(for: paper)
+
+        func append(id: String, title: String, systemImage: String, key: String) {
+            guard let value = enrichment?.links[key] else {
+                return
+            }
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty,
+                  !result.contains(where: { $0.urlString.localizedCaseInsensitiveCompare(trimmed) == .orderedSame }) else {
+                return
+            }
+            result.append(NativeDiscoverCardLink(id: id, title: title, systemImage: systemImage, urlString: trimmed))
+        }
+        append(id: "github-enriched", title: "GitHub", systemImage: "chevron.left.forwardslash.chevron.right", key: "github")
+        append(id: "project-enriched", title: "Project", systemImage: "globe", key: "project")
+        append(id: "hf-enriched", title: "HF", systemImage: "shippingbox", key: "hugging_face")
+        return result
+    }
+
+    private static func baseLinks(for paper: ArxivFeedPaper) -> [NativeDiscoverCardLink] {
+        var result: [NativeDiscoverCardLink] = []
+        var seen: Set<String> = []
+
+        func append(id: String, title: String, systemImage: String, urlString: String?) {
+            guard let urlString, !urlString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                return
+            }
+            let key = urlString.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard !seen.contains(key) else {
+                return
+            }
+            seen.insert(key)
+            result.append(NativeDiscoverCardLink(id: id, title: title, systemImage: systemImage, urlString: urlString))
+        }
+
+        append(id: "github", title: "GitHub", systemImage: "chevron.left.forwardslash.chevron.right", urlString: paper.links.github ?? paper.links.code)
+        append(id: "project", title: "Project", systemImage: "globe", urlString: paper.links.project)
+        append(id: "hf", title: "HF", systemImage: "shippingbox", urlString: paper.links.huggingFace)
+        append(id: "arxiv", title: "arXiv", systemImage: "doc.text", urlString: paper.links.abs)
+        append(id: "pdf", title: "PDF", systemImage: "doc.richtext", urlString: paper.links.pdf)
+        return result
+    }
 }
 
-private func discoverPaperGridColumnWidth(for containerWidth: CGFloat, columnCount: Int) -> CGFloat {
-    let safeColumnCount = max(columnCount, 1)
-    let totalHorizontalPadding = discoverPaperGridHorizontalPadding * 2
-    let totalColumnSpacing = discoverPaperGridColumnSpacing * CGFloat(safeColumnCount - 1)
-    let availableWidth = max(0, containerWidth - totalHorizontalPadding - totalColumnSpacing)
-    return floor(availableWidth / CGFloat(safeColumnCount))
+@MainActor
+private final class NativeDiscoverCardModelCache: ObservableObject {
+    private struct Entry {
+        var signature: Int
+        var models: [NativeDiscoverCardModel]
+    }
+
+    private var entries: [String: Entry] = [:]
+
+    func models(scope: String, for papers: [ArxivFeedPaper], model: AppModel) -> [NativeDiscoverCardModel] {
+        let signature = Self.signature(scope: scope, papers: papers, model: model)
+        if let entry = entries[scope], entry.signature == signature {
+            return entry.models
+        }
+        let models = NativeDiscoverCardModelBuilder.models(for: papers, model: model)
+        entries[scope] = Entry(signature: signature, models: models)
+        return models
+    }
+
+    private static func signature(scope: String, papers: [ArxivFeedPaper], model: AppModel) -> Int {
+        var hasher = Hasher()
+        hasher.combine(scope)
+        hasher.combine(model.globalLanguageMode.rawValue)
+        combineLibrarySignature(model.papers, into: &hasher)
+        for paper in papers {
+            combinePaperSignature(paper, model: model, into: &hasher)
+        }
+        return hasher.finalize()
+    }
+
+    private static func combineLibrarySignature(_ papers: [Paper], into hasher: inout Hasher) {
+        hasher.combine(papers.count)
+        hasher.combine(papers.first?.id)
+        hasher.combine(papers.last?.id)
+        var latestUpdate: TimeInterval = 0
+        for paper in papers {
+            latestUpdate = max(latestUpdate, paper.updatedAt.timeIntervalSinceReferenceDate)
+        }
+        hasher.combine(latestUpdate)
+    }
+
+    private static func combinePaperSignature(_ paper: ArxivFeedPaper, model: AppModel, into hasher: inout Hasher) {
+        hasher.combine(paper.id)
+        hasher.combine(paper.thumbnailVersion)
+        hasher.combine(paper.categories.count)
+        hasher.combine(paper.tags.count)
+        hasher.combine(paper.assets.small?.path)
+        hasher.combine(paper.links.github != nil || paper.links.code != nil)
+        hasher.combine(paper.links.project != nil)
+        hasher.combine(paper.links.huggingFace != nil)
+
+        if let enrichment = model.discoverEnrichment(for: paper) {
+            hasher.combine(enrichment.generatedAt.timeIntervalSinceReferenceDate)
+            hasher.combine(enrichment.error)
+            hasher.combine(enrichment.tags.count)
+            hasher.combine(enrichment.links.count)
+        }
+
+        hasher.combine(model.arxivAssetURLs[paper.assets.small?.path ?? ""] != nil)
+        hasher.combine(model.arxivPDFThumbnailURLsByID[paper.id]?.count ?? 0)
+        hasher.combine(model.arxivDownloadingPaperIDs.contains(paper.id))
+        hasher.combine(model.arxivDownloadProgressByID[paper.id])
+        combineInteractionState(model.discoverPaperInteractionStateByID[paper.id], into: &hasher)
+    }
+
+    private static func combineInteractionState(_ state: DiscoverPaperInteractionState?, into hasher: inout Hasher) {
+        switch state {
+        case nil:
+            hasher.combine("none")
+        case .queued:
+            hasher.combine("queued")
+        case .processing:
+            hasher.combine("processing")
+        case .processed:
+            hasher.combine("processed")
+        case .cached:
+            hasher.combine("cached")
+        case .failed:
+            hasher.combine("failed")
+        case .cancelled:
+            hasher.combine("cancelled")
+        case .downloading:
+            hasher.combine("downloading")
+        case .pdfCached:
+            hasher.combine("pdfCached")
+        }
+    }
 }
 
 struct DiscoverView: View {
     @EnvironmentObject private var model: AppModel
+    @StateObject private var cardModelCache = NativeDiscoverCardModelCache()
+    @State private var nativeDiscoverCardModels: [NativeDiscoverCardModel] = []
+    @State private var nativeDiscoverCardInputID: Int?
     @State private var selectedCategory: String?
     @State private var selectedTag: String?
     @State private var selectedProcessingFilter: DiscoverProcessingFilter = .all
@@ -90,48 +283,47 @@ struct DiscoverView: View {
     }
 
     private var categories: [String] {
-        let all = (model.arxivFeed?.papers ?? []).flatMap { $0.listCategories.isEmpty ? $0.categories : $0.listCategories }
-        return Array(Set(all)).sorted()
+        model.discoverSidebarFacets.categories
     }
 
     private var tags: [String] {
-        let counts = tagCounts
-        return counts.keys.sorted { left, right in
-            let leftCount = counts[left, default: 0]
-            let rightCount = counts[right, default: 0]
-            if leftCount == rightCount {
-                return left.localizedCaseInsensitiveCompare(right) == .orderedAscending
-            }
-            return leftCount > rightCount
-        }
+        model.discoverSidebarFacets.sortedTags
     }
 
     private var tagCounts: [String: Int] {
-        Dictionary((model.arxivFeed?.papers ?? []).flatMap { tags(for: $0) }.map { ($0, 1) }, uniquingKeysWith: +)
+        model.discoverSidebarFacets.tagCounts
+    }
+
+    private var totalTagCount: Int {
+        model.discoverSidebarFacets.totalTagCount
     }
 
     private var commonCategories: [String] {
         ["cs.CV", "cs.CL", "cs.AI", "cs.LG", "cs.RO", "stat.ML", "cs.HC", "cs.IR", "cs.SE"]
     }
 
-    private func tags(for paper: ArxivFeedPaper) -> [String] {
-        let generated = model.discoverEnrichment(for: paper)?.tags ?? []
-        let combined = generated + paper.tags + Array(paper.categories.prefix(2))
-        var seen: Set<String> = []
-        var result: [String] = []
-        for tag in combined {
-            let trimmed = tag.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else {
-                continue
-            }
-            let key = trimmed.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
-            guard !seen.contains(key) else {
-                continue
-            }
-            seen.insert(key)
-            result.append(trimmed)
+    private var sidebarContentID: AnyHashable {
+        var hasher = Hasher()
+        hasher.combine("discover-sidebar")
+        hasher.combine(selectedCategory)
+        hasher.combine(selectedTag)
+        hasher.combine(selectedProcessingFilter.rawValue)
+        hasher.combine(selectedLibraryFilter.rawValue)
+        hasher.combine(requiresProjectLink)
+        hasher.combine(selectedSimilarityBucket.rawValue)
+        hasher.combine(totalTagCount)
+        for category in categories {
+            hasher.combine(category)
         }
-        return result
+        for tag in tags.prefix(18) {
+            hasher.combine(tag)
+            hasher.combine(tagCounts[tag, default: 0])
+        }
+        return AnyHashable(hasher.finalize())
+    }
+
+    private func tags(for paper: ArxivFeedPaper) -> [String] {
+        DiscoverSidebarFacets.tags(for: paper, enrichment: model.discoverEnrichment(for: paper))
     }
 
     var body: some View {
@@ -221,7 +413,7 @@ struct DiscoverView: View {
                 .font(.headline)
                 .foregroundStyle(.secondary)
 
-            PaperCodexNativeScrollView {
+            PaperCodexNativeScrollView(contentID: sidebarContentID) {
                 VStack(alignment: .leading, spacing: 18) {
                     VStack(alignment: .leading, spacing: 8) {
                         Label("Categories", systemImage: "line.3.horizontal.decrease.circle")
@@ -284,7 +476,7 @@ struct DiscoverView: View {
                             .font(.headline)
                         filterButton(
                             title: "All Tags",
-                            detail: "\(tagCounts.values.reduce(0, +))",
+                            detail: "\(totalTagCount)",
                             selected: selectedTag == nil
                         ) {
                             selectedTag = nil
@@ -323,19 +515,16 @@ struct DiscoverView: View {
                 PaperCodexNativeEmptyState(title: "No Papers", systemImage: "doc.text.magnifyingglass")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
+                let cardInputID = nativeDiscoverCardInputID(for: visiblePapers)
+                let cardModels = nativeDiscoverCardModels
                 GeometryReader { proxy in
                     let layoutSignature = rowLayoutSignature(
                         papers: visiblePapers,
                         columnCount: gridColumnCount(for: proxy.size.width)
                     )
-                    let imagePreloadURLs = discoverImagePreloadURLs(for: visiblePapers)
-                    let warmupSignature = DiscoverImageWarmupSignature(
-                        layout: layoutSignature,
-                        imageCount: imagePreloadURLs.count
-                    )
 
                     NativeDiscoverCollectionView(
-                        cards: nativeDiscoverCardModels(for: visiblePapers),
+                        cards: cardModels,
                         restorePaperID: model.discoverScrollPositionPaperID,
                         restoreToken: discoverScrollRequestToken,
                         onVisiblePaperChange: { paperID in
@@ -363,11 +552,12 @@ struct DiscoverView: View {
                             }
                         }
                     )
-                    .task(id: warmupSignature) {
-                        await warmDiscoverLocalImages(imagePreloadURLs)
-                    }
                     .onAppear {
+                        updateNativeDiscoverCardModels(for: visiblePapers, inputID: cardInputID)
                         requestNativeDiscoverScrollRestore()
+                    }
+                    .onChange(of: cardInputID) { _, newInputID in
+                        updateNativeDiscoverCardModels(for: visiblePapers, inputID: newInputID)
                     }
                     .onChange(of: layoutSignature) { _, _ in
                         requestNativeDiscoverScrollRestore()
@@ -392,13 +582,6 @@ struct DiscoverView: View {
         return 1
     }
 
-    private func paperRows(_ papers: [ArxivFeedPaper], columnCount: Int) -> [[ArxivFeedPaper]] {
-        let count = max(columnCount, 1)
-        return stride(from: 0, to: papers.count, by: count).map { start in
-            Array(papers[start..<min(start + count, papers.count)])
-        }
-    }
-
     private func rowLayoutSignature(papers: [ArxivFeedPaper], columnCount: Int) -> DiscoverLayoutSignature {
         var hasher = Hasher()
         for paper in papers {
@@ -411,115 +594,31 @@ struct DiscoverView: View {
         )
     }
 
-    private func discoverImagePreloadURLs(for papers: [ArxivFeedPaper]) -> [URL] {
-        papers.prefix(DiscoverImagePreloadPolicy.visiblePaperLimit).flatMap { paper in
-            var urls: [URL] = []
-            if let assetURL = model.cachedArxivAssetURL(for: paper.assets.small) {
-                urls.append(assetURL)
-            }
-            urls.append(contentsOf: model.cachedArxivPDFThumbnailURLs(for: paper))
-            return urls
+    private func nativeDiscoverCardInputID(for papers: [ArxivFeedPaper]) -> Int {
+        var hasher = Hasher()
+        hasher.combine("discover")
+        hasher.combine(model.globalLanguageMode.rawValue)
+        hasher.combine(model.papers.count)
+        hasher.combine(model.discoverEnrichmentsByID.count)
+        hasher.combine(model.arxivAssetURLs.count)
+        hasher.combine(model.arxivPDFThumbnailURLsByID.count)
+        hasher.combine(model.arxivDownloadingPaperIDs.count)
+        hasher.combine(model.arxivDownloadProgressByID.count)
+        hasher.combine(model.discoverPaperInteractionStateByID.count)
+        hasher.combine(papers.count)
+        for paper in papers {
+            hasher.combine(paper.id)
+            hasher.combine(paper.thumbnailVersion)
         }
+        return hasher.finalize()
     }
 
-    private func nativeDiscoverCardModels(for papers: [ArxivFeedPaper]) -> [NativeDiscoverCardModel] {
-        papers.map { paper in
-            let enrichment = model.discoverEnrichment(for: paper)
-            let languageCode = model.globalLanguageMode.discoverLanguageCode
-            let primaryTitle: String
-            let secondaryTitle: String
-            if languageCode == "zh" {
-                let enrichedTitle = enrichment?.titleZH.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                primaryTitle = enrichedTitle.isEmpty ? paper.displayTitle(language: "zh") : enrichedTitle
-                secondaryTitle = paper.title.en
-            } else {
-                primaryTitle = paper.title.en
-                secondaryTitle = ""
-            }
-
-            let summary: String
-            if languageCode == "zh" {
-                let enrichedSummary = enrichment?.summaryZH.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                if !enrichedSummary.isEmpty {
-                    summary = enrichedSummary
-                } else if !paper.summary.zh.isEmpty {
-                    summary = paper.summary.zh
-                } else if !paper.summary.en.isEmpty {
-                    summary = paper.summary.en
-                } else {
-                    summary = paper.abstract.en
-                }
-            } else if !paper.summary.en.isEmpty {
-                summary = paper.summary.en
-            } else {
-                summary = paper.abstract.en
-            }
-
-            return NativeDiscoverCardModel(
-                id: paper.id,
-                primaryCategory: paper.primaryCategory ?? paper.categories.first ?? "arXiv",
-                arxivID: paper.id,
-                primaryTitle: primaryTitle,
-                secondaryTitle: secondaryTitle,
-                summary: summary,
-                contribution: enrichment?.contribution,
-                error: enrichment?.error,
-                tags: nativeDiscoverTags(for: paper, enrichment: enrichment),
-                links: nativeDiscoverLinks(for: paper, enrichment: enrichment),
-                imageURL: model.cachedArxivAssetURL(for: paper.assets.small),
-                thumbnailURLs: model.cachedArxivPDFThumbnailURLs(for: paper),
-                inLibrary: model.libraryPaper(for: paper) != nil,
-                isBusy: model.isDownloadingArxivPaper(paper),
-                downloadProgress: model.arxivDownloadProgress(for: paper),
-                interactionState: model.discoverPaperInteractionStateByID[paper.id]
-            )
+    private func updateNativeDiscoverCardModels(for papers: [ArxivFeedPaper], inputID: Int) {
+        guard nativeDiscoverCardInputID != inputID else {
+            return
         }
-    }
-
-    private func nativeDiscoverTags(for paper: ArxivFeedPaper, enrichment: DiscoverPaperEnrichment?) -> [String] {
-        let fallback = paper.tags.isEmpty ? paper.categories : paper.tags
-        var seen: Set<String> = []
-        var result: [String] = []
-        for tag in (enrichment?.tags ?? []) + fallback {
-            let trimmed = tag.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else {
-                continue
-            }
-            let key = trimmed.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
-            guard !seen.contains(key) else {
-                continue
-            }
-            seen.insert(key)
-            result.append(trimmed)
-        }
-        return result
-    }
-
-    private func nativeDiscoverLinks(for paper: ArxivFeedPaper, enrichment: DiscoverPaperEnrichment?) -> [NativeDiscoverCardLink] {
-        var result = paper.externalLinks.map {
-            NativeDiscoverCardLink(
-                id: $0.id,
-                title: $0.title,
-                systemImage: $0.systemImage,
-                urlString: $0.urlString
-            )
-        }
-
-        func append(id: String, title: String, systemImage: String, key: String) {
-            guard let value = enrichment?.links[key] else {
-                return
-            }
-            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty,
-                  !result.contains(where: { $0.urlString.localizedCaseInsensitiveCompare(trimmed) == .orderedSame }) else {
-                return
-            }
-            result.append(NativeDiscoverCardLink(id: id, title: title, systemImage: systemImage, urlString: trimmed))
-        }
-        append(id: "github-enriched", title: "GitHub", systemImage: "chevron.left.forwardslash.chevron.right", key: "github")
-        append(id: "project-enriched", title: "Project", systemImage: "globe", key: "project")
-        append(id: "hf-enriched", title: "HF", systemImage: "shippingbox", key: "hugging_face")
-        return result
+        nativeDiscoverCardInputID = inputID
+        nativeDiscoverCardModels = cardModelCache.models(scope: "discover", for: papers, model: model)
     }
 
     private func requestNativeDiscoverScrollRestore() {
@@ -529,7 +628,7 @@ struct DiscoverView: View {
         isRestoringDiscoverScrollPosition = true
         discoverScrollRequestToken += 1
         discoverScrollRestoreTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: DiscoverImagePreloadPolicy.scrollRestoreSettleNanoseconds)
+            try? await Task.sleep(nanoseconds: DiscoverScrollPolicy.scrollRestoreSettleNanoseconds)
             guard !Task.isCancelled else {
                 return
             }
@@ -543,6 +642,9 @@ struct DiscoverView: View {
               visiblePapers.contains(where: { $0.id == paperID }) else {
             return
         }
+        guard visibleDiscoverPaperID != paperID else {
+            return
+        }
         visibleDiscoverPaperID = paperID
         scheduleDiscoverScrollPositionCommit(paperID, in: visiblePapers)
     }
@@ -554,7 +656,7 @@ struct DiscoverView: View {
         }
         discoverScrollPositionCommitTask?.cancel()
         discoverScrollPositionCommitTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: DiscoverImagePreloadPolicy.scrollPositionCommitDelayNanoseconds)
+            try? await Task.sleep(nanoseconds: DiscoverScrollPolicy.scrollPositionCommitDelayNanoseconds)
             guard !Task.isCancelled else {
                 return
             }
@@ -720,6 +822,9 @@ struct DiscoverView: View {
 
 struct ArxivSearchView: View {
     @EnvironmentObject private var model: AppModel
+    @StateObject private var cardModelCache = NativeDiscoverCardModelCache()
+    @State private var nativeSearchCardModels: [NativeDiscoverCardModel] = []
+    @State private var nativeSearchCardInputID: Int?
     @State private var selectedCategory: String?
     @State private var selectedLibraryFilter: DiscoverLibraryFilter = .all
     @State private var paperPendingSave: ArxivFeedPaper?
@@ -767,6 +872,23 @@ struct ArxivSearchView: View {
 
     private var sortOrderSystemImage: String {
         model.arxivSearchSortOrderRawValue == ArxivAPISortOrder.descending.rawValue ? "arrow.down" : "arrow.up"
+    }
+
+    private var sidebarContentID: AnyHashable {
+        var hasher = Hasher()
+        hasher.combine("search-sidebar")
+        hasher.combine(selectedCategory)
+        hasher.combine(selectedLibraryFilter.rawValue)
+        for category in model.arxivSearchRequiredCategories {
+            hasher.combine(category)
+        }
+        for category in requiredCategoryOptions {
+            hasher.combine(category)
+        }
+        for category in resultCategories {
+            hasher.combine(category)
+        }
+        return AnyHashable(hasher.finalize())
     }
 
     var body: some View {
@@ -848,7 +970,7 @@ struct ArxivSearchView: View {
                 .font(.headline)
                 .foregroundStyle(.secondary)
 
-            PaperCodexNativeScrollView {
+            PaperCodexNativeScrollView(contentID: sidebarContentID) {
                 VStack(alignment: .leading, spacing: 18) {
                     VStack(alignment: .leading, spacing: 8) {
                         Label("至少包含类别", systemImage: "checklist.checked")
@@ -912,34 +1034,42 @@ struct ArxivSearchView: View {
                 PaperCodexNativeEmptyState(title: "No Papers", systemImage: "doc.text.magnifyingglass")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                GeometryReader { proxy in
-                    let columnCount = gridColumnCount(for: proxy.size.width)
-                    let columnWidth = discoverPaperGridColumnWidth(for: proxy.size.width, columnCount: columnCount)
-                    let rows = paperRows(papers, columnCount: columnCount)
-                    let imagePreloadURLs = discoverImagePreloadURLs(for: papers)
-                    PaperCodexNativeScrollView {
-                        LazyVStack(alignment: .leading, spacing: discoverPaperGridRowSpacing) {
-                            ForEach(Array(rows.enumerated()), id: \.offset) { rowIndex, rowPapers in
-                                HStack(alignment: .top, spacing: discoverPaperGridColumnSpacing) {
-                                    ForEach(rowPapers) { paper in
-                                        discoverCard(for: paper, rowIndex: rowIndex)
-                                            .frame(width: columnWidth, alignment: .topLeading)
-                                    }
-                                    ForEach(0..<max(0, columnCount - rowPapers.count), id: \.self) { _ in
-                                        Color.clear
-                                            .frame(width: columnWidth)
-                                    }
-                                }
-                                .frame(maxWidth: .infinity, alignment: .leading)
+                let cardInputID = nativeSearchCardInputID(for: papers)
+                let cardModels = nativeSearchCardModels
+                GeometryReader { _ in
+                    NativeDiscoverCollectionView(
+                        cards: cardModels,
+                        restorePaperID: nil,
+                        restoreToken: 0,
+                        onVisiblePaperChange: { _ in },
+                        onPreview: { paperID in
+                            guard let paper = papers.first(where: { $0.id == paperID }) else {
+                                return
+                            }
+                            previewPaper = paper
+                        },
+                        onSave: { paperID in
+                            guard let paper = papers.first(where: { $0.id == paperID }) else {
+                                return
+                            }
+                            paperPendingSave = paper
+                        },
+                        onOpen: { paperID in
+                            guard let paper = papers.first(where: { $0.id == paperID }) else {
+                                return
+                            }
+                            Task {
+                                await model.openArxivPaper(paper)
                             }
                         }
-                        .padding(.horizontal, discoverPaperGridHorizontalPadding)
-                        .padding(.vertical, discoverPaperGridVerticalPadding)
-                        .task(id: imagePreloadURLs.map(\.path).joined(separator: "|")) {
-                            await warmDiscoverLocalImages(imagePreloadURLs)
-                        }
-                    }
+                    )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .onAppear {
+                        updateNativeSearchCardModels(for: papers, inputID: cardInputID)
+                    }
+                    .onChange(of: cardInputID) { _, newInputID in
+                        updateNativeSearchCardModels(for: papers, inputID: newInputID)
+                    }
                 }
             }
         }
@@ -1070,57 +1200,31 @@ struct ArxivSearchView: View {
             : ArxivAPISortOrder.descending.rawValue
     }
 
-    private func gridColumnCount(for width: CGFloat) -> Int {
-        if width >= 1120 {
-            return 3
+    private func nativeSearchCardInputID(for papers: [ArxivFeedPaper]) -> Int {
+        var hasher = Hasher()
+        hasher.combine("search")
+        hasher.combine(model.globalLanguageMode.rawValue)
+        hasher.combine(model.papers.count)
+        hasher.combine(model.discoverEnrichmentsByID.count)
+        hasher.combine(model.arxivAssetURLs.count)
+        hasher.combine(model.arxivPDFThumbnailURLsByID.count)
+        hasher.combine(model.arxivDownloadingPaperIDs.count)
+        hasher.combine(model.arxivDownloadProgressByID.count)
+        hasher.combine(model.discoverPaperInteractionStateByID.count)
+        hasher.combine(papers.count)
+        for paper in papers {
+            hasher.combine(paper.id)
+            hasher.combine(paper.thumbnailVersion)
         }
-        if width >= 760 {
-            return 2
-        }
-        return 1
+        return hasher.finalize()
     }
 
-    private func paperRows(_ papers: [ArxivFeedPaper], columnCount: Int) -> [[ArxivFeedPaper]] {
-        let count = max(columnCount, 1)
-        return stride(from: 0, to: papers.count, by: count).map { start in
-            Array(papers[start..<min(start + count, papers.count)])
+    private func updateNativeSearchCardModels(for papers: [ArxivFeedPaper], inputID: Int) {
+        guard nativeSearchCardInputID != inputID else {
+            return
         }
-    }
-
-    private func discoverImagePreloadURLs(for papers: [ArxivFeedPaper]) -> [URL] {
-        papers.prefix(DiscoverImagePreloadPolicy.visiblePaperLimit).flatMap { paper in
-            var urls: [URL] = []
-            if let assetURL = model.cachedArxivAssetURL(for: paper.assets.small) {
-                urls.append(assetURL)
-            }
-            urls.append(contentsOf: model.cachedArxivPDFThumbnailURLs(for: paper))
-            return urls
-        }
-    }
-
-    private func discoverCard(for paper: ArxivFeedPaper, rowIndex: Int) -> some View {
-        ArxivPaperCard(
-            paper: paper,
-            enrichment: model.discoverEnrichment(for: paper),
-            imageURL: model.cachedArxivAssetURL(for: paper.assets.small),
-            thumbnailURLs: model.cachedArxivPDFThumbnailURLs(for: paper),
-            inLibrary: model.libraryPaper(for: paper) != nil,
-            isBusy: model.isDownloadingArxivPaper(paper),
-            downloadProgress: model.arxivDownloadProgress(for: paper),
-            interactionState: model.discoverPaperInteractionStateByID[paper.id],
-            languageMode: model.globalLanguageMode,
-            onPreview: {
-                previewPaper = paper
-            },
-            onSave: {
-                paperPendingSave = paper
-            },
-            onOpen: {
-                Task {
-                    await model.openArxivPaper(paper)
-                }
-            }
-        )
+        nativeSearchCardInputID = inputID
+        nativeSearchCardModels = cardModelCache.models(scope: "search", for: papers, model: model)
     }
 }
 
@@ -1992,84 +2096,6 @@ private struct DiscoverRouteLoadingCard: View {
             RoundedRectangle(cornerRadius: 8)
                 .stroke(Color.black.opacity(0.08), lineWidth: 1)
         )
-    }
-}
-
-private struct DiscoverPaperStatusBadge: View {
-    var state: DiscoverPaperInteractionState
-
-    var body: some View {
-        Label {
-            Text(LocalizedStringKey(title))
-        } icon: {
-            Image(systemName: systemImage)
-        }
-        .font(.caption2.weight(.semibold))
-            .lineLimit(1)
-            .padding(.horizontal, 7)
-            .padding(.vertical, 4)
-            .foregroundStyle(tint)
-            .background(tint.opacity(0.10), in: Capsule())
-            .help(title)
-    }
-
-    private var title: String {
-        switch state {
-        case .queued:
-            "Queued"
-        case .processing:
-            "Processing"
-        case .processed:
-            "Processed"
-        case .cached:
-            "Cached"
-        case .failed:
-            "Failed"
-        case .cancelled:
-            "Stopped"
-        case .downloading:
-            "Caching PDF"
-        case .pdfCached:
-            "PDF Cached"
-        }
-    }
-
-    private var systemImage: String {
-        switch state {
-        case .queued:
-            "clock"
-        case .processing:
-            "sparkles"
-        case .processed:
-            "checkmark.circle.fill"
-        case .cached:
-            "archivebox.fill"
-        case .failed:
-            "xmark.octagon.fill"
-        case .cancelled:
-            "stop.circle.fill"
-        case .downloading:
-            "arrow.down.circle.fill"
-        case .pdfCached:
-            "doc.fill"
-        }
-    }
-
-    private var tint: Color {
-        switch state {
-        case .queued:
-            .secondary
-        case .processing:
-            .indigo
-        case .processed, .cached, .pdfCached:
-            .green
-        case .failed:
-            .red
-        case .cancelled:
-            .orange
-        case .downloading:
-            .blue
-        }
     }
 }
 
@@ -3199,638 +3225,6 @@ private struct ArxivCacheProgressStrip: View {
     }
 }
 
-private struct ArxivPaperCard: View {
-    @State private var isHovering = false
-
-    var paper: ArxivFeedPaper
-    var enrichment: DiscoverPaperEnrichment?
-    var imageURL: URL?
-    var thumbnailURLs: [URL]
-    var inLibrary: Bool
-    var isBusy: Bool
-    var downloadProgress: Double?
-    var interactionState: DiscoverPaperInteractionState?
-    var languageMode: PaperCodexLanguageMode
-    var onPreview: () -> Void
-    var onSave: () -> Void
-    var onOpen: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if imageURL != nil || !thumbnailURLs.isEmpty {
-                PaperCodexMediaPreviewButton(
-                    disabled: imageURL == nil && isBusy,
-                    help: imageURL == nil ? "Open cached PDF" : "Open image preview"
-                ) {
-                    if imageURL != nil {
-                        onPreview()
-                    } else {
-                        onOpen()
-                    }
-                } content: {
-                    if imageURL != nil {
-                        ArxivPreviewImage(url: imageURL)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 150)
-                            .clipped()
-                    } else {
-                        DiscoverPDFThumbnailHero(urls: thumbnailURLs)
-                            .frame(maxWidth: .infinity)
-                    }
-                }
-                .padding(.horizontal, discoverMediaHorizontalPadding)
-                .padding(.top, discoverMediaHorizontalPadding)
-                .padding(.bottom, 8)
-            }
-
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(alignment: .top, spacing: 8) {
-                    metadataRow
-                    Spacer()
-                    if let interactionState {
-                        DiscoverPaperStatusBadge(state: interactionState)
-                    }
-                }
-
-                Text(primaryTitle)
-                    .font(.paperCodexSystem(size: 16, weight: .semibold))
-                    .fixedSize(horizontal: false, vertical: true)
-                if !secondaryTitle.isEmpty, secondaryTitle != primaryTitle {
-                    Text(secondaryTitle)
-                        .font(.paperCodexSystem(size: 13))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Text(summaryText)
-                    .font(.paperCodexSystem(size: 13.5))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(5)
-                    .fixedSize(horizontal: false, vertical: true)
-                if let contribution = enrichment?.contribution,
-                   !contribution.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Text(contribution)
-                        .font(.paperCodexSystem(size: 13.5, weight: .medium))
-                        .foregroundStyle(Color.accentColor)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                if let error = enrichment?.error, !error.isEmpty {
-                    Text(error)
-                        .font(.caption)
-                        .foregroundStyle(Color(nsColor: .systemRed))
-                        .lineLimit(3)
-                }
-
-                FlowTags(tags: Array(displayTags.prefix(7)))
-            }
-            .padding(14)
-            .padding(.bottom, footerReservedHeight)
-            .frame(
-                maxWidth: .infinity,
-                maxHeight: .infinity,
-                alignment: .topLeading
-            )
-            .overlay(alignment: .bottomLeading) {
-                cardFooter
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 14)
-                    .padding(.bottom, 14)
-            }
-        }
-        .contentShape(RoundedRectangle(cornerRadius: 8))
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Color(nsColor: .textBackgroundColor))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(isHovering ? Color.accentColor.opacity(0.36) : Color.black.opacity(0.08), lineWidth: isHovering ? 1.3 : 1)
-        )
-        .shadow(color: isHovering ? Color.black.opacity(0.15) : Color.black.opacity(0.035), radius: isHovering ? 14 : 2, y: isHovering ? 7 : 1)
-        .scaleEffect(isHovering ? 1.008 : 1)
-        .offset(y: isHovering ? -1 : 0)
-        .onHover { hovering in
-            withAnimation(.easeOut(duration: 0.14)) {
-                isHovering = hovering
-            }
-        }
-    }
-
-    private var cardFooter: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(alignment: .bottom, spacing: 8) {
-                ResourceLinkButtons(links: resourceLinks, compact: true)
-                Spacer(minLength: 10)
-                actionGroup
-            }
-            VStack(alignment: .leading, spacing: 8) {
-                ResourceLinkButtons(links: resourceLinks, compact: true)
-                HStack(alignment: .bottom) {
-                    Spacer(minLength: 0)
-                    actionGroup
-                }
-            }
-        }
-    }
-
-    private var actionGroup: some View {
-        HStack(spacing: 8) {
-            if isBusy {
-                PaperCodexNativeProgressBar(value: downloadProgress)
-                    .frame(width: 78)
-            }
-            if inLibrary {
-                SavedActionBadge()
-            } else {
-                SaveActionButton(isBusy: isBusy, action: onSave)
-            }
-            StableOpenButton(isBusy: isBusy, action: onOpen)
-        }
-        .fixedSize()
-    }
-
-    private var footerReservedHeight: CGFloat {
-        38
-    }
-
-    private var previewHeight: CGFloat {
-        guard imageURL != nil || !thumbnailURLs.isEmpty else {
-            return 0
-        }
-        return imageURL != nil ? 150 : 154
-    }
-
-    private var metadataRow: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(alignment: .center, spacing: 8) {
-                metadataPills
-                    .layoutPriority(1)
-                Spacer(minLength: 8)
-                if let similarity = paper.similarity {
-                    SimilarityMeter(value: similarity)
-                }
-            }
-            VStack(alignment: .leading, spacing: 7) {
-                metadataPills
-                if let similarity = paper.similarity {
-                    SimilarityMeter(value: similarity)
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var metadataPills: some View {
-        HStack(alignment: .center, spacing: 6) {
-            MetadataPill(
-                title: paper.primaryCategory ?? paper.categories.first ?? "arXiv",
-                foreground: .teal,
-                background: Color.teal.opacity(0.12)
-            )
-            ArxivIDPill(id: paper.id)
-        }
-    }
-
-    private var primaryTitle: String {
-        if languageMode.discoverLanguageCode == "zh" {
-            if let title = enrichment?.titleZH.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty {
-                return title
-            }
-            return paper.displayTitle(language: "zh")
-        }
-        return paper.title.en
-    }
-
-    private var secondaryTitle: String {
-        guard languageMode.discoverLanguageCode == "zh" else {
-            return ""
-        }
-        return paper.title.en
-    }
-
-    private var summaryText: String {
-        if languageMode.discoverLanguageCode == "zh" {
-            if let summary = enrichment?.summaryZH.trimmingCharacters(in: .whitespacesAndNewlines), !summary.isEmpty {
-                return summary
-            }
-            if !paper.summary.zh.isEmpty {
-                return paper.summary.zh
-            }
-        }
-        if !paper.summary.en.isEmpty {
-            return paper.summary.en
-        }
-        return paper.abstract.en
-    }
-
-    private var displayTags: [String] {
-        let generated = enrichment?.tags ?? []
-        let fallback = paper.tags.isEmpty ? paper.categories : paper.tags
-        var seen: Set<String> = []
-        var result: [String] = []
-        for tag in generated + fallback {
-            let trimmed = tag.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else {
-                continue
-            }
-            let key = trimmed.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
-            guard !seen.contains(key) else {
-                continue
-            }
-            seen.insert(key)
-            result.append(trimmed)
-        }
-        return result
-    }
-
-    private var resourceLinks: [PaperResourceLink] {
-        var result = paper.externalLinks
-        func append(id: String, title: String, systemImage: String, key: String) {
-            guard let value = enrichment?.links[key] else {
-                return
-            }
-            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty,
-                  !result.contains(where: { $0.urlString.localizedCaseInsensitiveCompare(trimmed) == .orderedSame }) else {
-                return
-            }
-            result.append(PaperResourceLink(id: id, title: title, systemImage: systemImage, urlString: trimmed))
-        }
-        append(id: "github-enriched", title: "GitHub", systemImage: "chevron.left.forwardslash.chevron.right", key: "github")
-        append(id: "project-enriched", title: "Project", systemImage: "globe", key: "project")
-        append(id: "hf-enriched", title: "HF", systemImage: "shippingbox", key: "hugging_face")
-        return result
-    }
-}
-
-
-private struct MetadataPill: View {
-    var title: String
-    var foreground: Color
-    var background: Color
-
-    var body: some View {
-        Text(title)
-            .font(.paperCodexSystem(size: 12, weight: .semibold))
-            .lineLimit(1)
-            .padding(.horizontal, 7)
-            .frame(height: 23)
-            .background(background)
-            .foregroundStyle(foreground)
-            .clipShape(RoundedRectangle(cornerRadius: 6))
-    }
-}
-
-private struct ArxivIDPill: View {
-    var id: String
-
-    var body: some View {
-        Text(id)
-            .font(.paperCodexSystem(size: 12, weight: .medium))
-            .monospacedDigit()
-            .lineLimit(1)
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 6)
-            .frame(height: 23)
-            .background(Color(nsColor: .controlBackgroundColor).opacity(0.72))
-            .clipShape(RoundedRectangle(cornerRadius: 6))
-            .help("arXiv ID")
-    }
-}
-
-private struct SavedActionBadge: View {
-    var body: some View {
-        Label("Saved", systemImage: "checkmark.seal.fill")
-            .font(.paperCodexSystem(size: 13, weight: .semibold))
-            .padding(.horizontal, 10)
-            .frame(height: 26)
-            .foregroundStyle(Color(nsColor: .systemGreen))
-            .background(
-                RoundedRectangle(cornerRadius: 7)
-                    .fill(Color(nsColor: .systemGreen).opacity(0.12))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 7)
-                            .stroke(Color(nsColor: .systemGreen).opacity(0.34), lineWidth: 1)
-                    )
-            )
-            .help("Already in Library")
-            .fixedSize()
-            .layoutPriority(1)
-    }
-}
-
-private struct SaveActionButton: View {
-    var isBusy: Bool
-    var action: () -> Void
-
-    var body: some View {
-        PaperCodexCardActionButton(
-            title: "Add",
-            systemImage: "tray.and.arrow.down",
-            kind: .success,
-            disabled: isBusy,
-            help: "Add to Library",
-            action: action
-        )
-        .fixedSize()
-        .layoutPriority(1)
-    }
-}
-
-private struct StableOpenButton: View {
-    var isBusy: Bool
-    var action: () -> Void
-
-    var body: some View {
-        PaperCodexCardActionButton(
-            title: "Open",
-            systemImage: "book",
-            kind: .primary,
-            disabled: isBusy,
-            help: "Open in reader",
-            action: action
-        )
-        .fixedSize()
-        .layoutPriority(2)
-    }
-}
-
-private struct SimilarityMeter: View {
-    var value: Double
-
-    private var clampedValue: Double {
-        min(max(value, 0), 1)
-    }
-
-    private var color: Color {
-        if clampedValue >= 0.78 {
-            return .green
-        }
-        if clampedValue >= 0.62 {
-            return .blue
-        }
-        return .orange
-    }
-
-    var body: some View {
-        HStack(spacing: 5) {
-            ZStack(alignment: .leading) {
-                Capsule()
-                    .fill(color.opacity(0.16))
-                Capsule()
-                    .fill(color)
-                    .frame(width: 34 * clampedValue)
-            }
-            .frame(width: 34, height: 5)
-            Text("\(Int((clampedValue * 100).rounded()))%")
-                .font(.paperCodexSystem(size: 12, weight: .semibold))
-                .foregroundStyle(color)
-        }
-        .padding(.horizontal, 7)
-        .padding(.vertical, 4)
-        .background(color.opacity(0.10))
-        .clipShape(RoundedRectangle(cornerRadius: 6))
-        .help("Similarity score")
-    }
-}
-
-@MainActor
-private final class DiscoverLocalImageCache {
-    static let shared = DiscoverLocalImageCache()
-
-    private let cache = NSCache<NSURL, CachedDiscoverImage>()
-
-    private init() {
-        cache.countLimit = 420
-        cache.totalCostLimit = 180 * 1024 * 1024
-    }
-
-    func image(for url: URL) -> CGImage? {
-        cache.object(forKey: url as NSURL)?.image
-    }
-
-    func contains(_ url: URL) -> Bool {
-        cache.object(forKey: url as NSURL) != nil
-    }
-
-    func insert(_ image: CGImage, for url: URL) {
-        cache.setObject(
-            CachedDiscoverImage(image),
-            forKey: url as NSURL,
-            cost: image.bytesPerRow * image.height
-        )
-    }
-}
-
-private final class CachedDiscoverImage {
-    let image: CGImage
-
-    init(_ image: CGImage) {
-        self.image = image
-    }
-}
-
-private struct DecodedDiscoverImage: @unchecked Sendable {
-    let image: CGImage
-}
-
-private struct LocalCachedImage<Placeholder: View>: View {
-    var url: URL
-    var contentMode: ContentMode = .fill
-    @ViewBuilder var placeholder: () -> Placeholder
-
-    @State private var image: CGImage?
-
-    var body: some View {
-        Group {
-            if let image {
-                Image(decorative: image, scale: 1, orientation: .up)
-                    .resizable()
-                    .aspectRatio(contentMode: contentMode)
-            } else {
-                placeholder()
-            }
-        }
-        .task(id: url) {
-            await load()
-        }
-    }
-
-    @MainActor
-    private func load() async {
-        if let cached = DiscoverLocalImageCache.shared.image(for: url) {
-            image = cached
-            return
-        }
-
-        let imageURL = url
-        guard let decoded = await decodeDiscoverLocalImage(at: imageURL, priority: .userInitiated) else {
-            image = nil
-            return
-        }
-        DiscoverLocalImageCache.shared.insert(decoded.image, for: url)
-        image = decoded.image
-    }
-}
-
-private func warmDiscoverLocalImages(_ urls: [URL], limit: Int = 360) async {
-    do {
-        try await Task.sleep(nanoseconds: 600_000_000)
-    } catch {
-        return
-    }
-
-    var seen: Set<URL> = []
-    var warmed = 0
-
-    for url in urls {
-        guard !Task.isCancelled, warmed < limit else {
-            return
-        }
-        guard seen.insert(url).inserted else {
-            continue
-        }
-        let isCached = await MainActor.run {
-            DiscoverLocalImageCache.shared.contains(url)
-        }
-        guard !isCached else {
-            continue
-        }
-        guard let decoded = await decodeDiscoverLocalImage(at: url, priority: .utility) else {
-            continue
-        }
-        await MainActor.run {
-            DiscoverLocalImageCache.shared.insert(decoded.image, for: url)
-        }
-        warmed += 1
-        do {
-            try await Task.sleep(nanoseconds: 8_000_000)
-        } catch {
-            return
-        }
-    }
-}
-
-private actor DiscoverImageDecodeGate {
-    static let shared = DiscoverImageDecodeGate(maxConcurrent: 2)
-
-    private let maxConcurrent: Int
-    private var activeCount = 0
-    private var waiters: [CheckedContinuation<Void, Never>] = []
-
-    init(maxConcurrent: Int) {
-        self.maxConcurrent = maxConcurrent
-    }
-
-    func wait() async {
-        if activeCount < maxConcurrent {
-            activeCount += 1
-            return
-        }
-
-        await withCheckedContinuation { continuation in
-            waiters.append(continuation)
-        }
-    }
-
-    func signal() {
-        if waiters.isEmpty {
-            activeCount = max(0, activeCount - 1)
-        } else {
-            waiters.removeFirst().resume()
-        }
-    }
-}
-
-private func decodeDiscoverLocalImage(at url: URL, priority: TaskPriority) async -> DecodedDiscoverImage? {
-    await DiscoverImageDecodeGate.shared.wait()
-    if Task.isCancelled {
-        await DiscoverImageDecodeGate.shared.signal()
-        return nil
-    }
-
-    let result = await Task.detached(priority: priority) { () -> DecodedDiscoverImage? in
-        let sourceOptions = [
-            kCGImageSourceShouldCache: false
-        ] as CFDictionary
-        guard let source = CGImageSourceCreateWithURL(url as CFURL, sourceOptions) else {
-            return nil
-        }
-
-        let thumbnailOptions = [
-            kCGImageSourceCreateThumbnailFromImageAlways: true,
-            kCGImageSourceCreateThumbnailWithTransform: true,
-            kCGImageSourceShouldCache: true,
-            kCGImageSourceShouldCacheImmediately: true,
-            kCGImageSourceThumbnailMaxPixelSize: 900
-        ] as CFDictionary
-        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, thumbnailOptions) else {
-            return nil
-        }
-        return DecodedDiscoverImage(image: image)
-    }.value
-    await DiscoverImageDecodeGate.shared.signal()
-    return result
-}
-
-private struct DiscoverPDFThumbnailHero: View {
-    var urls: [URL]
-
-    var body: some View {
-        GeometryReader { proxy in
-            let visibleURLs = Array(urls.prefix(5))
-            let itemCount = max(visibleURLs.count, 1)
-            let itemWidth = max(proxy.size.width / CGFloat(itemCount), 1)
-
-            HStack(spacing: 0) {
-                ForEach(Array(visibleURLs.enumerated()), id: \.offset) { _, url in
-                    LocalCachedImage(url: url, contentMode: .fill) {
-                        Color(nsColor: .controlBackgroundColor)
-                            .frame(width: itemWidth, height: proxy.size.height)
-                    }
-                    .frame(width: itemWidth, height: proxy.size.height)
-                    .clipped()
-                    .overlay(alignment: .trailing) {
-                        Rectangle()
-                            .fill(Color.black.opacity(0.06))
-                            .frame(width: 1)
-                    }
-                }
-            }
-            .frame(width: proxy.size.width, height: proxy.size.height, alignment: .leading)
-            .clipped()
-        }
-        .frame(height: 154)
-        .background(Color(nsColor: .controlBackgroundColor))
-    }
-}
-
-private struct ArxivPreviewImage: View {
-    var url: URL?
-
-    var body: some View {
-        Group {
-            if let url {
-                LocalCachedImage(url: url, contentMode: .fill) {
-                    ZStack {
-                        Color(nsColor: .separatorColor).opacity(0.22)
-                        PaperCodexNativeSpinner()
-                            .frame(width: 16, height: 16)
-                    }
-                    .aspectRatio(4.7, contentMode: .fit)
-                }
-            } else {
-                ZStack {
-                    Color(nsColor: .separatorColor).opacity(0.22)
-                    Image(systemName: "doc.richtext")
-                        .font(.paperCodexSystem(size: 24))
-                        .foregroundStyle(.secondary)
-                }
-                .aspectRatio(4.7, contentMode: .fit)
-            }
-        }
-        .background(Color(nsColor: .textBackgroundColor))
-    }
-}
-
 private struct ArxivImagePreviewOverlay: View {
     @EnvironmentObject private var model: AppModel
     var paper: ArxivFeedPaper
@@ -3870,97 +3264,6 @@ private struct ArxivImagePreviewOverlay: View {
         }
         .onExitCommand {
             onDismiss()
-        }
-    }
-}
-
-private struct ResourceLinkButtons: View {
-    var links: [PaperResourceLink]
-    var compact: Bool
-
-    var body: some View {
-        if !links.isEmpty {
-            HStack(spacing: compact ? 5 : 8) {
-                ForEach(links) { link in
-                    ResourceLinkButton(link: link, compact: compact)
-                }
-            }
-        }
-    }
-}
-
-private struct ResourceLinkButton: View {
-    var link: PaperResourceLink
-    var compact: Bool
-
-    var body: some View {
-        PaperCodexResourceLinkButton(
-            title: link.title,
-            systemImage: link.systemImage,
-            compact: compact
-        ) {
-            openExternalURL(link.urlString)
-        }
-    }
-}
-
-private struct PaperResourceLink: Identifiable {
-    var id: String
-    var title: String
-    var systemImage: String
-    var urlString: String
-}
-
-private extension ArxivFeedPaper {
-    var externalLinks: [PaperResourceLink] {
-        var result: [PaperResourceLink] = []
-        var seen: Set<String> = []
-
-        func append(id: String, title: String, systemImage: String, urlString: String?) {
-            guard let urlString, !urlString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                return
-            }
-            let key = urlString.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-            guard !seen.contains(key) else {
-                return
-            }
-            seen.insert(key)
-            result.append(PaperResourceLink(id: id, title: title, systemImage: systemImage, urlString: urlString))
-        }
-
-        append(id: "github", title: "GitHub", systemImage: "chevron.left.forwardslash.chevron.right", urlString: links.github ?? links.code)
-        append(id: "project", title: "Project", systemImage: "globe", urlString: links.project)
-        append(id: "hf", title: "HF", systemImage: "shippingbox", urlString: links.huggingFace)
-        append(id: "arxiv", title: "arXiv", systemImage: "doc.text", urlString: links.abs)
-        append(id: "pdf", title: "PDF", systemImage: "doc.richtext", urlString: links.pdf)
-        return result
-    }
-}
-
-private func openExternalURL(_ urlString: String) {
-    guard let url = URL(string: urlString) else {
-        NSSound.beep()
-        return
-    }
-    if !NSWorkspace.shared.open(url) {
-        NSSound.beep()
-    }
-}
-
-private struct FlowTags: View {
-    var tags: [String]
-
-    var body: some View {
-        FlowLayout(spacing: 5) {
-            ForEach(tags, id: \.self) { tag in
-                Text(tag)
-                    .font(.paperCodexSystem(size: 12))
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 3)
-                    .background(Color.orange.opacity(0.12))
-                    .foregroundStyle(.orange)
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
-            }
         }
     }
 }

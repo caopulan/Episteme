@@ -49,8 +49,10 @@ struct NativeDiscoverCollectionView: NSViewRepresentable {
             coordinator?.reportVisiblePaper()
         }
         context.coordinator.containerView = view
-        context.coordinator.update(from: self)
-        view.collectionView.reloadData()
+        let shouldReloadCards = context.coordinator.update(from: self)
+        if shouldReloadCards {
+            view.collectionView.reloadData()
+        }
         view.updateLayoutMetrics()
         context.coordinator.scrollToPaper(restorePaperID, token: restoreToken)
         context.coordinator.reportVisiblePaper()
@@ -59,8 +61,10 @@ struct NativeDiscoverCollectionView: NSViewRepresentable {
 
     func updateNSView(_ view: NativeDiscoverCollectionContainerView, context: Context) {
         context.coordinator.containerView = view
-        context.coordinator.update(from: self)
-        view.collectionView.reloadData()
+        let shouldReloadCards = context.coordinator.update(from: self)
+        if shouldReloadCards {
+            view.collectionView.reloadData()
+        }
         view.updateLayoutMetrics()
         context.coordinator.scrollToPaper(restorePaperID, token: restoreToken)
         context.coordinator.reportVisiblePaper()
@@ -82,19 +86,28 @@ struct NativeDiscoverCollectionView: NSViewRepresentable {
         private var restorePaperID: String?
         private var restoreToken = 0
         private var lastAppliedRestoreToken: Int?
+        private var lastReportedVisiblePaperID: String?
+        private var hasReportedVisiblePaper = false
         private var onVisiblePaperChange: (String?) -> Void = { _ in }
         private var onPreview: (String) -> Void = { _ in }
         private var onSave: (String) -> Void = { _ in }
         private var onOpen: (String) -> Void = { _ in }
 
-        func update(from view: NativeDiscoverCollectionView) {
+        @discardableResult
+        func update(from view: NativeDiscoverCollectionView) -> Bool {
+            let shouldReload = cards != view.cards
             cards = view.cards
+            if shouldReload {
+                lastReportedVisiblePaperID = nil
+                hasReportedVisiblePaper = false
+            }
             restorePaperID = view.restorePaperID
             restoreToken = view.restoreToken
             onVisiblePaperChange = view.onVisiblePaperChange
             onPreview = view.onPreview
             onSave = view.onSave
             onOpen = view.onOpen
+            return shouldReload
         }
 
         func collectionView(_ collectionView: NSCollectionView, numberOfItemsInSection section: Int) -> Int {
@@ -141,17 +154,26 @@ struct NativeDiscoverCollectionView: NSViewRepresentable {
 
         func reportVisiblePaper() {
             guard let collectionView = containerView?.collectionView else {
-                onVisiblePaperChange(nil)
+                publishVisiblePaper(nil)
                 return
             }
             let visible = collectionView.indexPathsForVisibleItems()
                 .sorted { $0.item < $1.item }
             guard let index = visible.first?.item,
                   cards.indices.contains(index) else {
-                onVisiblePaperChange(nil)
+                publishVisiblePaper(nil)
                 return
             }
-            onVisiblePaperChange(cards[index].id)
+            publishVisiblePaper(cards[index].id)
+        }
+
+        private func publishVisiblePaper(_ paperID: String?) {
+            guard !hasReportedVisiblePaper || lastReportedVisiblePaperID != paperID else {
+                return
+            }
+            hasReportedVisiblePaper = true
+            lastReportedVisiblePaperID = paperID
+            onVisiblePaperChange(paperID)
         }
     }
 }

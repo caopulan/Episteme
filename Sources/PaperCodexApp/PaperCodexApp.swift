@@ -1,14 +1,12 @@
 import SwiftUI
 
-private let routeCacheWarmupDelayNanoseconds: UInt64 = 120_000_000
 private let persistentRouteOrder: [AppRoute] = [.library, .discover, .search, .settings, .reader]
-private let initiallyMountedRoutes: Set<AppRoute> = [.library, .discover, .search]
+private let initiallyMountedRoutes: Set<AppRoute> = []
 
 struct RootView: View {
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var navigation: AppNavigation
     @State private var mountedRoutes: Set<AppRoute> = initiallyMountedRoutes
-    @State private var routeCacheWarmupTask: Task<Void, Never>?
     @State private var isShowingSaveToLibrarySheet = false
 
     var body: some View {
@@ -48,7 +46,6 @@ struct RootView: View {
         }
         .onAppear {
             mountRoute(navigation.route)
-            scheduleRouteCacheWarmup()
             model.refreshMCPActiveContextSnapshot()
         }
         .onChange(of: navigation.route) { _, newRoute in
@@ -63,10 +60,6 @@ struct RootView: View {
         }
         .onChange(of: model.currentSelection) { _, _ in
             model.refreshMCPActiveContextSnapshot()
-        }
-        .onDisappear {
-            routeCacheWarmupTask?.cancel()
-            routeCacheWarmupTask = nil
         }
         .paperCodexNativeSheet(isPresented: $isShowingSaveToLibrarySheet, title: "Save to Library", minimumSize: CGSize(width: 620, height: 520)) {
             if let paper = model.selectedPaper {
@@ -124,26 +117,6 @@ struct RootView: View {
             SettingsView()
         case .reader:
             ReaderView()
-        }
-    }
-
-    private func scheduleRouteCacheWarmup() {
-        routeCacheWarmupTask?.cancel()
-        routeCacheWarmupTask = Task { @MainActor in
-            await Task.yield()
-            for route in persistentRouteOrder {
-                guard !Task.isCancelled else {
-                    return
-                }
-                if !mountedRoutes.contains(route) {
-                    try? await Task.sleep(nanoseconds: routeCacheWarmupDelayNanoseconds)
-                    guard !Task.isCancelled else {
-                        return
-                    }
-                    mountRoute(route)
-                }
-            }
-            routeCacheWarmupTask = nil
         }
     }
 
