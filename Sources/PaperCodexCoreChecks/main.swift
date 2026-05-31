@@ -3738,6 +3738,16 @@ func runUILayoutSourceChecks() throws {
         "reader split preview and add-paper sheet should use AppKit-backed buttons instead of SwiftUI Button styles"
     )
     try check(
+        readerFeatureStoreSource.contains("struct ReaderAddPaperListRequest")
+            && readerFeatureStoreSource.contains("func addPaperListState(")
+            && readerFeatureStoreSource.contains("cachedAddPaperListRequest")
+            && appModelSource.contains("func readerAddPaperListState(query:")
+            && readerViewSource.contains("model.readerAddPaperListState(query: query)")
+            && !readerViewSource.contains("model.papers.filter { paper in")
+            && !readerViewSource.contains("private var filteredPapers"),
+        "reader add-paper sheet should derive and cache candidate rows in ReaderFeatureStore instead of filtering the library in SwiftUI view bodies"
+    )
+    try check(
         readerViewSource.contains("ReaderSplitView(")
             && readerViewSource.contains("ReaderPDFSplitView(")
             && readerSplitSource.contains("NSSplitView")

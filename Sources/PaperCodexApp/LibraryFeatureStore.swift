@@ -33,7 +33,10 @@ struct LibraryPaperListState {
 @MainActor
 final class LibraryFeatureStore: ObservableObject {
     @Published var papers: [Paper] = [] {
-        didSet { invalidatePaperListStateCache() }
+        didSet {
+            paperCollectionVersion += 1
+            invalidatePaperListStateCache()
+        }
     }
     @Published var categories: [PaperCodexCore.Category] = [] {
         didSet { invalidatePaperListStateCache() }
@@ -56,6 +59,7 @@ final class LibraryFeatureStore: ObservableObject {
     @Published var librarySearchText = ""
     @Published var paperThumbnailURLsByID: [String: [URL]] = [:]
     @Published var paperNotesByID: [String: [PaperNote]] = [:]
+    private(set) var paperCollectionVersion = 0
     private var cachedPaperListRequest: LibraryPaperListRequest?
     private var cachedPaperListState: LibraryPaperListState?
 

@@ -26,9 +26,6 @@ struct ReaderView: View {
         }
         .paperCodexNativeSheet(isPresented: $isShowingAddPaperToSessionSheet, title: "Add Paper", minimumSize: CGSize(width: 560, height: 400)) {
             AddPaperToSessionSheet(
-                papers: model.papers.filter { paper in
-                    !paper.isArxivImportPlaceholder && !model.currentSessionPapers.contains(where: { $0.id == paper.id })
-                },
                 onAdd: { paper in
                     model.addPaperToCurrentSession(paper)
                     isShowingAddPaperToSessionSheet = false
@@ -267,22 +264,15 @@ private struct PDFSplitPreparingView: View {
 }
 
 private struct AddPaperToSessionSheet: View {
-    var papers: [Paper]
+    @EnvironmentObject private var model: AppModel
+
     var onAdd: (Paper) -> Void
     var onCancel: () -> Void
 
     @State private var query = ""
 
-    private var filteredPapers: [Paper] {
-        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            return papers
-        }
-        return papers.filter { paper in
-            paper.title.localizedCaseInsensitiveContains(trimmed)
-                || paper.authors.joined(separator: " ").localizedCaseInsensitiveContains(trimmed)
-                || (paper.year.map(String.init) ?? "").contains(trimmed)
-        }
+    private var listState: ReaderAddPaperListState {
+        model.readerAddPaperListState(query: query)
     }
 
     var body: some View {
@@ -291,11 +281,11 @@ private struct AddPaperToSessionSheet: View {
                 .font(.title3.weight(.semibold))
             PaperCodexNativeTextField(text: $query, placeholder: "Search library")
                 .frame(height: 30)
-            if filteredPapers.isEmpty {
+            if listState.papers.isEmpty {
                 PaperCodexNativeEmptyState(title: "No Papers", systemImage: "doc.text.magnifyingglass")
                     .frame(width: 520, height: 220)
             } else {
-                NativeAddPaperToSessionList(papers: filteredPapers, onAdd: onAdd)
+                NativeAddPaperToSessionList(papers: listState.papers, onAdd: onAdd)
                 .frame(width: 520, height: 280)
             }
             HStack {

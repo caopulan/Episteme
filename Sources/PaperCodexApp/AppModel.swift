@@ -513,6 +513,25 @@ final class AppModel: ObservableObject {
         set { readerStore.messages = newValue }
     }
 
+    func readerAddPaperListState(query: String) -> ReaderAddPaperListState {
+        let currentSessionPaperIDs: Set<String>
+        if let selectedSession, !selectedSession.paperIDs.isEmpty {
+            currentSessionPaperIDs = Set(selectedSession.paperIDs)
+        } else if let selectedPaper {
+            currentSessionPaperIDs = [selectedPaper.id]
+        } else {
+            currentSessionPaperIDs = []
+        }
+        return readerStore.addPaperListState(
+            request: ReaderAddPaperListRequest(
+                paperCollectionVersion: libraryStore.paperCollectionVersion,
+                currentSessionPaperIDs: currentSessionPaperIDs,
+                query: query
+            ),
+            papers: papers
+        )
+    }
+
     var currentSelection: PDFSelectionInfo? {
         get { readerStore.currentSelection }
         set { readerStore.currentSelection = newValue }
