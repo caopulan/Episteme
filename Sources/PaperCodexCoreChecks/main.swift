@@ -1933,13 +1933,19 @@ func runUILayoutSourceChecks() throws {
        let cardFooterRange = discoverSource.range(of: "private var cardFooter", range: arxivCardRange.upperBound..<discoverSource.endIndex) {
         let arxivCardSource = String(discoverSource[arxivCardRange.lowerBound..<cardFooterRange.lowerBound])
         try check(
-            arxivCardSource.contains("@State private var isMediaHovering = false")
-                && arxivCardSource.contains(".buttonStyle(DiscoverMediaButtonStyle(")
-                && arxivCardSource.contains("private struct DiscoverMediaButtonStyle: ButtonStyle")
-                && arxivCardSource.contains("configuration.isPressed")
-                && arxivCardSource.contains("PaperCodexMotion.press")
-                && !arxivCardSource.contains(".buttonStyle(.plain)"),
-            "Discover and Search media preview buttons should provide immediate pressed feedback before opening PDFs or previews"
+            actionButtonSource.contains("struct PaperCodexMediaPreviewButton<Content: View>: View")
+                && actionButtonSource.contains("private struct NativePaperCodexMediaPreviewButton: NSViewRepresentable")
+                && actionButtonSource.contains("private final class NativePaperCodexMediaPreviewButtonView: NSButton")
+                && actionButtonSource.components(separatedBy: "override func mouseDown(with event: NSEvent)").count - 1 >= 7
+                && actionButtonSource.components(separatedBy: "setAccessibilityRole(.button)").count - 1 >= 7
+                && actionButtonSource.components(separatedBy: "CATransaction.setAnimationDuration").count - 1 >= 7
+                && arxivCardSource.contains("PaperCodexMediaPreviewButton(")
+                && arxivCardSource.contains("disabled: imageURL == nil && isBusy")
+                && arxivCardSource.contains("help: imageURL == nil ? \"Open cached PDF\" : \"Open image preview\"")
+                && !arxivCardSource.contains("@State private var isMediaHovering = false")
+                && !arxivCardSource.contains("private struct DiscoverMediaButtonStyle: ButtonStyle")
+                && !arxivCardSource.contains(".buttonStyle(DiscoverMediaButtonStyle("),
+            "Discover and Search media preview buttons should use shared native AppKit buttons before opening PDFs or previews"
         )
     } else {
         throw CheckFailure(description: "Discover media preview button source should remain inspectable")

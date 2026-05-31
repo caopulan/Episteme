@@ -176,6 +176,44 @@ struct PaperCodexResourceLinkButton: View {
     }
 }
 
+struct PaperCodexMediaPreviewButton<Content: View>: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var disabled = false
+    var help: String
+    var action: () -> Void
+    @ViewBuilder var content: () -> Content
+
+    init(
+        disabled: Bool = false,
+        help: String,
+        action: @escaping () -> Void,
+        @ViewBuilder content: @escaping () -> Content
+    ) {
+        self.disabled = disabled
+        self.help = help
+        self.action = action
+        self.content = content
+    }
+
+    var body: some View {
+        content()
+            .overlay {
+                NativePaperCodexMediaPreviewButton(
+                    disabled: disabled,
+                    help: help,
+                    reduceMotion: reduceMotion,
+                    action: action
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: NativePaperCodexActionMetrics.mediaPreviewCornerRadius))
+            .contentShape(RoundedRectangle(cornerRadius: NativePaperCodexActionMetrics.mediaPreviewCornerRadius))
+            .help(help)
+            .accessibilityLabel(help)
+    }
+}
+
 struct PaperCodexPathChipButton: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -234,6 +272,7 @@ private enum NativePaperCodexActionMetrics {
     static let resourceLinkIconTextSpacing: CGFloat = 5
     static let resourceLinkFontSize: CGFloat = 13
     static let resourceLinkCornerRadius: CGFloat = 6
+    static let mediaPreviewCornerRadius: CGFloat = 6
 }
 
 private struct NativePaperCodexToolbarButton: NSViewRepresentable {
@@ -398,6 +437,33 @@ private struct NativePaperCodexResourceLinkButton: NSViewRepresentable {
             systemImage: systemImage,
             compact: compact,
             disabled: disabled,
+            reduceMotion: reduceMotion,
+            action: action
+        )
+    }
+}
+
+private struct NativePaperCodexMediaPreviewButton: NSViewRepresentable {
+    var disabled: Bool
+    var help: String
+    var reduceMotion: Bool
+    var action: () -> Void
+
+    func makeNSView(context: Context) -> NativePaperCodexMediaPreviewButtonView {
+        let view = NativePaperCodexMediaPreviewButtonView()
+        view.apply(
+            disabled: disabled,
+            help: help,
+            reduceMotion: reduceMotion,
+            action: action
+        )
+        return view
+    }
+
+    func updateNSView(_ view: NativePaperCodexMediaPreviewButtonView, context: Context) {
+        view.apply(
+            disabled: disabled,
+            help: help,
             reduceMotion: reduceMotion,
             action: action
         )
@@ -881,6 +947,153 @@ private final class NativePaperCodexResourceLinkButtonView: NSButton {
             targetScale = 0.94
         } else {
             targetScale = isHovering ? 1.06 : 1
+        }
+        CATransaction.begin()
+        CATransaction.setDisableActions(reduceMotion)
+        CATransaction.setAnimationDuration(reduceMotion ? 0 : (isPressed ? 0.05 : 0.12))
+        layer?.transform = CATransform3DMakeScale(targetScale, targetScale, 1)
+        CATransaction.commit()
+    }
+}
+
+private final class NativePaperCodexMediaPreviewButtonView: NSButton {
+    private var trackingArea: NSTrackingArea?
+    private var pressHandler: () -> Void = {}
+    private var isHovering = false
+    private var isPressed = false
+    private var isDisabled = false
+    private var reduceMotion = false
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override var isFlipped: Bool {
+        true
+    }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: NSView.noIntrinsicMetric)
+    }
+
+    func apply(disabled: Bool, help: String, reduceMotion: Bool, action: @escaping () -> Void) {
+        pressHandler = action
+        isDisabled = disabled
+        self.reduceMotion = reduceMotion
+        isEnabled = !disabled
+        toolTip = help
+        setAccessibilityLabel(help)
+        updateAppearance()
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea {
+            removeTrackingArea(trackingArea)
+        }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.activeInKeyWindow, .mouseEnteredAndExited, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isHovering = true
+        updateAppearance()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHovering = false
+        updateAppearance()
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard !isDisabled else {
+            return
+        }
+        setPressed(true)
+        super.mouseDown(with: event)
+        setPressed(false)
+    }
+
+    private func setup() {
+        translatesAutoresizingMaskIntoConstraints = false
+        title = ""
+        isBordered = false
+        bezelStyle = .regularSquare
+        imagePosition = .noImage
+        focusRingType = .none
+        setButtonType(.momentaryChange)
+        target = self
+        action = #selector(performPress)
+        setAccessibilityElement(true)
+        setAccessibilityRole(.button)
+        wantsLayer = true
+        layer?.cornerRadius = NativePaperCodexActionMetrics.mediaPreviewCornerRadius
+        layer?.masksToBounds = false
+        updateAppearance()
+    }
+
+    @objc private func performPress() {
+        guard !isDisabled else {
+            return
+        }
+        pressHandler()
+    }
+
+    private func setPressed(_ pressed: Bool) {
+        isPressed = pressed
+        updateAppearance()
+    }
+
+    private func updateAppearance() {
+        let tint = NSColor.controlAccentColor
+        let overlay: NSColor
+        let border: NSColor
+        let shadowOpacity: Float
+
+        if isDisabled {
+            overlay = .textBackgroundColor.withAlphaComponent(0.10)
+            border = .black.withAlphaComponent(0.06)
+            shadowOpacity = 0
+        } else if isPressed {
+            overlay = tint.withAlphaComponent(0.14)
+            border = tint.withAlphaComponent(0.58)
+            shadowOpacity = 0.10
+        } else if isHovering {
+            overlay = tint.withAlphaComponent(0.06)
+            border = tint.withAlphaComponent(0.36)
+            shadowOpacity = 0.16
+        } else {
+            overlay = .clear
+            border = .black.withAlphaComponent(0.08)
+            shadowOpacity = 0
+        }
+
+        layer?.backgroundColor = overlay.cgColor
+        layer?.borderWidth = isPressed || isHovering ? 1.5 : 1
+        layer?.borderColor = border.cgColor
+        layer?.shadowColor = tint.cgColor
+        layer?.shadowOpacity = shadowOpacity
+        layer?.shadowRadius = isPressed ? 4 : 8
+        layer?.shadowOffset = CGSize(width: 0, height: isPressed ? -1 : -3)
+
+        let targetScale: CGFloat
+        if reduceMotion || isDisabled {
+            targetScale = 1
+        } else if isPressed {
+            targetScale = 0.992
+        } else {
+            targetScale = isHovering ? 1.006 : 1
         }
         CATransaction.begin()
         CATransaction.setDisableActions(reduceMotion)
