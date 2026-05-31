@@ -2136,27 +2136,39 @@ private struct DiscoverProcessActionSheet: View {
                         .disabled(isRefreshingModels)
                     }
 
-                    Picker("Model", selection: $draftModelOverride) {
-                        Text(codexDefaultModelLabel).tag("")
-                        ForEach(availableModelIDs, id: \.self) { modelID in
-                            Text(modelID).tag(modelID)
-                        }
-                        if !draftModelOverride.isEmpty,
-                           !availableModelIDs.contains(draftModelOverride) {
-                            Text("\(draftModelOverride) (custom)").tag(draftModelOverride)
-                        }
+                    HStack(spacing: 10) {
+                        Text("Model")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 72, alignment: .leading)
+                        DiscoverProcessModelPopup(
+                            selection: $draftModelOverride,
+                            defaultModelLabel: codexDefaultModelLabel,
+                            availableModelIDs: availableModelIDs
+                        )
+                        .frame(maxWidth: .infinity, minHeight: 30)
                     }
-                    .pickerStyle(.menu)
 
-                    TextField("Custom model override", text: $draftModelOverride)
-                        .textFieldStyle(.roundedBorder)
-
-                    Picker("Thinking", selection: $draftReasoningEffort) {
-                        ForEach(CodexReasoningEffort.allCases, id: \.self) { effort in
-                            Text(effort.displayName).tag(effort)
-                        }
+                    HStack(spacing: 10) {
+                        Text("Override")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 72, alignment: .leading)
+                        DiscoverProcessTextField(
+                            text: $draftModelOverride,
+                            placeholder: "Custom model override"
+                        )
+                        .frame(maxWidth: .infinity, minHeight: 30)
                     }
-                    .pickerStyle(.menu)
+
+                    HStack(spacing: 10) {
+                        Text("Thinking")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 72, alignment: .leading)
+                        DiscoverProcessThinkingPopup(selection: $draftReasoningEffort)
+                            .frame(maxWidth: .infinity, minHeight: 30)
+                    }
                 }
             }
             .padding(20)
@@ -2195,27 +2207,459 @@ private struct DiscoverProcessActionRow: View {
     @Binding var isSelected: Bool
 
     var body: some View {
-        Toggle(isOn: $isSelected) {
-            Label {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(LocalizedStringKey(action.title))
-                        .font(.paperCodexSystem(size: 14, weight: .semibold))
-                    Text(LocalizedStringKey(action.detail))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            } icon: {
-                Image(systemName: action.systemImage)
-                    .font(.paperCodexSystem(size: 15, weight: .semibold))
-                    .foregroundStyle(.indigo)
-                    .frame(width: 24)
+        DiscoverProcessActionToggleRow(action: action, isSelected: $isSelected)
+            .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
+    }
+}
+
+private struct DiscoverProcessModelPopup: NSViewRepresentable {
+    @Binding var selection: String
+    var defaultModelLabel: String
+    var availableModelIDs: [String]
+
+    private var items: [(title: String, value: String)] {
+        var result: [(title: String, value: String)] = [(defaultModelLabel, "")]
+        for modelID in availableModelIDs where !modelID.isEmpty {
+            if !result.contains(where: { $0.value == modelID }) {
+                result.append((modelID, modelID))
             }
-            .contentShape(Rectangle())
         }
-        .toggleStyle(.checkbox)
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+        if !selection.isEmpty,
+           !result.contains(where: { $0.value == selection }) {
+            result.append(("\(selection) (custom)", selection))
+        }
+        return result
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(selection: $selection)
+    }
+
+    func makeNSView(context: Context) -> NativeDiscoverProcessPopupButton {
+        let popup = NativeDiscoverProcessPopupButton()
+        popup.target = context.coordinator
+        popup.action = #selector(Coordinator.selectionChanged(_:))
+        popup.apply(items: items, selection: selection, accessibilityLabel: "Model")
+        return popup
+    }
+
+    func updateNSView(_ popup: NativeDiscoverProcessPopupButton, context: Context) {
+        context.coordinator.selection = $selection
+        popup.apply(items: items, selection: selection, accessibilityLabel: "Model")
+    }
+
+    @MainActor final class Coordinator: NSObject {
+        var selection: Binding<String>
+
+        init(selection: Binding<String>) {
+            self.selection = selection
+            super.init()
+        }
+
+        @objc func selectionChanged(_ sender: NSPopUpButton) {
+            guard let value = sender.selectedItem?.representedObject as? String else {
+                return
+            }
+            selection.wrappedValue = value
+        }
+    }
+}
+
+private struct DiscoverProcessThinkingPopup: NSViewRepresentable {
+    @Binding var selection: CodexReasoningEffort
+
+    private var items: [(title: String, value: String)] {
+        CodexReasoningEffort.allCases.map { effort in
+            (effort.displayName, effort.rawValue)
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(selection: $selection)
+    }
+
+    func makeNSView(context: Context) -> NativeDiscoverProcessPopupButton {
+        let popup = NativeDiscoverProcessPopupButton()
+        popup.target = context.coordinator
+        popup.action = #selector(Coordinator.selectionChanged(_:))
+        popup.apply(items: items, selection: selection.rawValue, accessibilityLabel: "Thinking")
+        return popup
+    }
+
+    func updateNSView(_ popup: NativeDiscoverProcessPopupButton, context: Context) {
+        context.coordinator.selection = $selection
+        popup.apply(items: items, selection: selection.rawValue, accessibilityLabel: "Thinking")
+    }
+
+    @MainActor final class Coordinator: NSObject {
+        var selection: Binding<CodexReasoningEffort>
+
+        init(selection: Binding<CodexReasoningEffort>) {
+            self.selection = selection
+            super.init()
+        }
+
+        @objc func selectionChanged(_ sender: NSPopUpButton) {
+            guard let value = sender.selectedItem?.representedObject as? String,
+                  let effort = CodexReasoningEffort(rawValue: value) else {
+                return
+            }
+            selection.wrappedValue = effort
+        }
+    }
+}
+
+private final class NativeDiscoverProcessPopupButton: NSPopUpButton {
+    private var itemValues: [String] = []
+
+    init() {
+        super.init(frame: .zero, pullsDown: false)
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: 30)
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+
+    func apply(items: [(title: String, value: String)], selection: String, accessibilityLabel: String) {
+        let values = items.map(\.value)
+        if values != itemValues || numberOfItems != items.count {
+            removeAllItems()
+            for item in items {
+                addItem(withTitle: item.title)
+                lastItem?.representedObject = item.value
+            }
+            itemValues = values
+        }
+
+        if let index = values.firstIndex(of: selection) {
+            selectItem(at: index)
+        } else if !items.isEmpty {
+            selectItem(at: 0)
+        }
+        setAccessibilityLabel(accessibilityLabel)
+        setAccessibilityValue(selectedItem?.title ?? "")
+        toolTip = selectedItem?.title
+    }
+
+    private func setup() {
+        translatesAutoresizingMaskIntoConstraints = false
+        controlSize = .regular
+        font = .systemFont(ofSize: 13)
+        focusRingType = .default
+        setContentHuggingPriority(.defaultLow, for: .horizontal)
+        setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    }
+}
+
+private struct DiscoverProcessTextField: NSViewRepresentable {
+    @Binding var text: String
+    var placeholder: String
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(text: $text)
+    }
+
+    func makeNSView(context: Context) -> NativeDiscoverProcessTextFieldView {
+        let textField = NativeDiscoverProcessTextFieldView()
+        textField.delegate = context.coordinator
+        textField.apply(text: text, placeholder: placeholder)
+        return textField
+    }
+
+    func updateNSView(_ textField: NativeDiscoverProcessTextFieldView, context: Context) {
+        context.coordinator.text = $text
+        context.coordinator.isUpdatingFromSwiftUI = true
+        textField.apply(text: text, placeholder: placeholder)
+        context.coordinator.isUpdatingFromSwiftUI = false
+    }
+
+    @MainActor final class Coordinator: NSObject, NSTextFieldDelegate {
+        var text: Binding<String>
+        var isUpdatingFromSwiftUI = false
+
+        init(text: Binding<String>) {
+            self.text = text
+            super.init()
+        }
+
+        func controlTextDidChange(_ notification: Notification) {
+            guard !isUpdatingFromSwiftUI,
+                  let textField = notification.object as? NSTextField else {
+                return
+            }
+            text.wrappedValue = textField.stringValue
+        }
+    }
+}
+
+private final class NativeDiscoverProcessTextFieldView: NSTextField {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: 30)
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+
+    func apply(text: String, placeholder: String) {
+        let fieldEditorHasMarkedText = (currentEditor() as? NSTextView)?.hasMarkedText() == true
+        if stringValue != text && !fieldEditorHasMarkedText {
+            stringValue = text
+        }
+        placeholderString = placeholder
+        toolTip = placeholder
+        setAccessibilityLabel(placeholder)
+    }
+
+    private func setup() {
+        translatesAutoresizingMaskIntoConstraints = false
+        controlSize = .regular
+        font = .systemFont(ofSize: 13)
+        isBordered = true
+        isBezeled = true
+        bezelStyle = .roundedBezel
+        focusRingType = .default
+        usesSingleLineMode = true
+        lineBreakMode = .byTruncatingTail
+        setContentHuggingPriority(.defaultLow, for: .horizontal)
+        setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    }
+}
+
+private struct DiscoverProcessActionToggleRow: NSViewRepresentable {
+    var action: DiscoverProcessAction
+    @Binding var isSelected: Bool
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(isSelected: $isSelected)
+    }
+
+    func makeNSView(context: Context) -> NativeDiscoverProcessActionToggleRowView {
+        let row = NativeDiscoverProcessActionToggleRowView()
+        row.apply(action: action, isSelected: isSelected) { selected in
+            context.coordinator.selectionChanged(selected)
+        }
+        return row
+    }
+
+    func updateNSView(_ row: NativeDiscoverProcessActionToggleRowView, context: Context) {
+        context.coordinator.isSelected = $isSelected
+        row.apply(action: action, isSelected: isSelected) { selected in
+            context.coordinator.selectionChanged(selected)
+        }
+    }
+
+    @MainActor final class Coordinator: NSObject {
+        var isSelected: Binding<Bool>
+
+        init(isSelected: Binding<Bool>) {
+            self.isSelected = isSelected
+            super.init()
+        }
+
+        func selectionChanged(_ selected: Bool) {
+            isSelected.wrappedValue = selected
+        }
+    }
+}
+
+private final class NativeDiscoverProcessActionToggleRowView: NSView {
+    private let checkBox = NativeDiscoverProcessActionToggleButton()
+    private let iconView = NSImageView()
+    private let titleLabel = NSTextField(labelWithString: "")
+    private let detailLabel = NSTextField(labelWithString: "")
+    private var currentIsSelected = false
+    private var toggleHandler: (Bool) -> Void = { _ in }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: 64)
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        updateBackground()
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.06
+            animator().alphaValue = 0.72
+        }
+        setSelected(!currentIsSelected, notify: true)
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.08
+            animator().alphaValue = 1
+        }
+    }
+
+    func apply(action: DiscoverProcessAction, isSelected: Bool, onToggle: @escaping (Bool) -> Void) {
+        currentIsSelected = isSelected
+        toggleHandler = onToggle
+        checkBox.state = isSelected ? .on : .off
+        checkBox.setAccessibilityLabel(action.title)
+        checkBox.setAccessibilityValue(isSelected ? "Selected" : "Not selected")
+        iconView.image = NSImage(systemSymbolName: action.systemImage, accessibilityDescription: action.title)
+        titleLabel.stringValue = NSLocalizedString(action.title, comment: "")
+        detailLabel.stringValue = NSLocalizedString(action.detail, comment: "")
+        toolTip = "\(action.title)\n\(action.detail)"
+        updateBackground()
+    }
+
+    private func setup() {
+        translatesAutoresizingMaskIntoConstraints = false
+        wantsLayer = true
+        layer?.cornerRadius = 8
+        layer?.borderWidth = 1
+
+        checkBox.translatesAutoresizingMaskIntoConstraints = false
+        checkBox.target = self
+        checkBox.action = #selector(checkBoxChanged(_:))
+        checkBox.setContentHuggingPriority(.required, for: .horizontal)
+        checkBox.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+        iconView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
+        iconView.contentTintColor = .controlAccentColor
+        iconView.imageScaling = .scaleProportionallyDown
+
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        titleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+        titleLabel.textColor = .labelColor
+        titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.maximumNumberOfLines = 1
+
+        detailLabel.translatesAutoresizingMaskIntoConstraints = false
+        detailLabel.font = .systemFont(ofSize: 11.5, weight: .regular)
+        detailLabel.textColor = .secondaryLabelColor
+        detailLabel.lineBreakMode = .byTruncatingTail
+        detailLabel.maximumNumberOfLines = 1
+
+        addSubview(checkBox)
+        addSubview(iconView)
+        addSubview(titleLabel)
+        addSubview(detailLabel)
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: 64),
+            checkBox.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            checkBox.centerYAnchor.constraint(equalTo: centerYAnchor),
+            checkBox.widthAnchor.constraint(equalToConstant: 18),
+            checkBox.heightAnchor.constraint(equalToConstant: 18),
+            iconView.leadingAnchor.constraint(equalTo: checkBox.trailingAnchor, constant: 10),
+            iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            iconView.widthAnchor.constraint(equalToConstant: 24),
+            iconView.heightAnchor.constraint(equalToConstant: 24),
+            titleLabel.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 10),
+            titleLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            titleLabel.topAnchor.constraint(equalTo: topAnchor, constant: 12),
+            detailLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+            detailLabel.trailingAnchor.constraint(equalTo: titleLabel.trailingAnchor),
+            detailLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 3),
+            detailLabel.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -10)
+        ])
+        setContentHuggingPriority(.defaultLow, for: .horizontal)
+        setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        updateBackground()
+    }
+
+    @objc private func checkBoxChanged(_ sender: NSButton) {
+        setSelected(sender.state == .on, notify: true)
+    }
+
+    private func setSelected(_ selected: Bool, notify: Bool) {
+        currentIsSelected = selected
+        checkBox.state = selected ? .on : .off
+        checkBox.setAccessibilityValue(selected ? "Selected" : "Not selected")
+        updateBackground()
+        if notify {
+            toggleHandler(selected)
+        }
+    }
+
+    private func updateBackground() {
+        let backgroundColor = currentIsSelected
+            ? NSColor.controlAccentColor.withAlphaComponent(0.10)
+            : NSColor.controlBackgroundColor
+        let borderColor = currentIsSelected
+            ? NSColor.controlAccentColor.withAlphaComponent(0.32)
+            : NSColor.separatorColor.withAlphaComponent(0.40)
+        layer?.backgroundColor = backgroundColor.cgColor
+        layer?.borderColor = borderColor.cgColor
+    }
+}
+
+private final class NativeDiscoverProcessActionToggleButton: NSButton {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: 18, height: 18)
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard isEnabled else {
+            return
+        }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.06
+            animator().alphaValue = 0.72
+        }
+        super.mouseDown(with: event)
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.08
+            animator().alphaValue = 1
+        }
+    }
+
+    private func setup() {
+        translatesAutoresizingMaskIntoConstraints = false
+        title = ""
+        isBordered = false
+        controlSize = .regular
+        focusRingType = .default
+        setButtonType(.switch)
+        setAccessibilityElement(true)
+        setAccessibilityRole(.checkBox)
     }
 }
 

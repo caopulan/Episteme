@@ -2224,6 +2224,10 @@ func runUILayoutSourceChecks() throws {
     if let processSheetRange = discoverSource.range(of: "private struct DiscoverProcessActionSheet: View"),
        let processSheetEndRange = discoverSource.range(of: "private struct DiscoverProcessActionRow", range: processSheetRange.upperBound..<discoverSource.endIndex) {
         let processSheetSource = String(discoverSource[processSheetRange.lowerBound..<processSheetEndRange.lowerBound])
+        guard let actionRowEndRange = discoverSource.range(of: "private struct DiscoverCategoryMenu", range: processSheetEndRange.upperBound..<discoverSource.endIndex) else {
+            throw CheckFailure(description: "Discover process action row source should remain inspectable")
+        }
+        let processActionRowSource = String(discoverSource[processSheetEndRange.lowerBound..<actionRowEndRange.lowerBound])
         try check(
             actionButtonSource.contains("struct PaperCodexPanelButton: View")
                 && actionButtonSource.contains("private struct NativePaperCodexPanelButton: NSViewRepresentable")
@@ -2238,6 +2242,26 @@ func runUILayoutSourceChecks() throws {
                 && !processSheetSource.contains(".buttonStyle(DiscoverProcessFooterButtonStyle(")
                 && !processSheetSource.contains(".buttonStyle(.borderedProminent)"),
             "Discover and Search process confirmation should use native AppKit panel buttons before starting long processing"
+        )
+        try check(
+            processSheetSource.contains("DiscoverProcessModelPopup(")
+                && processSheetSource.contains("DiscoverProcessTextField(")
+                && processSheetSource.contains("DiscoverProcessThinkingPopup(")
+                && processActionRowSource.contains("DiscoverProcessActionToggleRow(")
+                && discoverSource.contains("private struct DiscoverProcessModelPopup: NSViewRepresentable")
+                && discoverSource.contains("private struct DiscoverProcessTextField: NSViewRepresentable")
+                && discoverSource.contains("private struct DiscoverProcessThinkingPopup: NSViewRepresentable")
+                && discoverSource.contains("private final class NativeDiscoverProcessPopupButton: NSPopUpButton")
+                && discoverSource.contains("private struct DiscoverProcessActionToggleRow: NSViewRepresentable")
+                && discoverSource.contains("private final class NativeDiscoverProcessActionToggleButton: NSButton")
+                && discoverSource.contains("setButtonType(.switch)")
+                && discoverSource.contains("setAccessibilityRole(.checkBox)")
+                && !processSheetSource.contains("Picker(\"Model\"")
+                && !processSheetSource.contains("TextField(\"Custom model override\"")
+                && !processSheetSource.contains("Picker(\"Thinking\"")
+                && !processActionRowSource.contains("Toggle(isOn:")
+                && !processActionRowSource.contains(".toggleStyle(.checkbox)"),
+            "Discover and Search process confirmation fields should use native AppKit popups, text fields, and checkbox rows"
         )
     } else {
         throw CheckFailure(description: "Discover process action sheet source should remain inspectable")
