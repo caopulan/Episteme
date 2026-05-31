@@ -464,6 +464,19 @@ final class AppModel: ObservableObject {
         ).rows
     }
 
+    func libraryPaperSelectionState(
+        listState: LibraryPaperListState,
+        selectedPaperIDs: Set<String>
+    ) -> LibraryPaperSelectionState {
+        libraryStore.paperSelectionState(
+            request: LibraryPaperSelectionRequest(
+                paperIDs: listState.paperIDs,
+                readablePaperIDs: listState.readablePaperIDs,
+                selectedPaperIDs: selectedPaperIDs
+            )
+        )
+    }
+
     var selectedLibraryPaper: Paper? {
         get { libraryStore.selectedLibraryPaper }
         set { libraryStore.selectedLibraryPaper = newValue }

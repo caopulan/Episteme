@@ -19,15 +19,37 @@ struct LibraryPaperListRequest: Equatable {
 struct LibraryPaperListState {
     static let empty = LibraryPaperListState(
         papers: [],
+        papersByID: [:],
         paperIDs: [],
         readablePaperIDs: [],
         hasActiveFilters: false
     )
 
     var papers: [Paper]
+    var papersByID: [String: Paper]
     var paperIDs: [String]
     var readablePaperIDs: [String]
     var hasActiveFilters: Bool
+}
+
+struct LibraryPaperSelectionRequest: Equatable {
+    var paperIDs: [String]
+    var readablePaperIDs: [String]
+    var selectedPaperIDs: Set<String>
+}
+
+struct LibraryPaperSelectionState {
+    static let empty = LibraryPaperSelectionState(
+        visiblePaperIDs: [],
+        visiblePaperIDSet: [],
+        selectedPaperIDsInOrder: [],
+        selectedReadablePaperIDsInOrder: []
+    )
+
+    var visiblePaperIDs: [String]
+    var visiblePaperIDSet: Set<String>
+    var selectedPaperIDsInOrder: [String]
+    var selectedReadablePaperIDsInOrder: [String]
 }
 
 struct LibraryPaperTableRowsRequest: Equatable {
@@ -100,6 +122,8 @@ final class LibraryFeatureStore: ObservableObject {
     private(set) var rowMetadataVersion = 0
     private var cachedPaperListRequest: LibraryPaperListRequest?
     private var cachedPaperListState: LibraryPaperListState?
+    private var cachedPaperSelectionRequest: LibraryPaperSelectionRequest?
+    private var cachedPaperSelectionState: LibraryPaperSelectionState?
     private var cachedPaperTableRowsRequest: LibraryPaperTableRowsRequest?
     private var cachedPaperTableRowsState: LibraryPaperTableRowsState?
 
@@ -206,12 +230,32 @@ final class LibraryFeatureStore: ObservableObject {
         let sortedPapers = option.sorted(visiblePapers, ascending: request.sortAscending)
         let state = LibraryPaperListState(
             papers: sortedPapers,
+            papersByID: Dictionary(uniqueKeysWithValues: sortedPapers.map { ($0.id, $0) }),
             paperIDs: sortedPapers.map(\.id),
             readablePaperIDs: sortedPapers.filter { !$0.isArxivImportPlaceholder }.map(\.id),
             hasActiveFilters: request.selectedCategoryID != nil || request.selectedTagID != nil || !query.isEmpty
         )
         cachedPaperListRequest = request
         cachedPaperListState = state
+        return state
+    }
+
+    func paperSelectionState(request: LibraryPaperSelectionRequest) -> LibraryPaperSelectionState {
+        if cachedPaperSelectionRequest == request, let cachedPaperSelectionState {
+            return cachedPaperSelectionState
+        }
+
+        let selectedPaperIDs = request.selectedPaperIDs
+        let readablePaperIDs = Set(request.readablePaperIDs)
+        let selectedPaperIDsInOrder = request.paperIDs.filter { selectedPaperIDs.contains($0) }
+        let state = LibraryPaperSelectionState(
+            visiblePaperIDs: request.paperIDs,
+            visiblePaperIDSet: Set(request.paperIDs),
+            selectedPaperIDsInOrder: selectedPaperIDsInOrder,
+            selectedReadablePaperIDsInOrder: selectedPaperIDsInOrder.filter { readablePaperIDs.contains($0) }
+        )
+        cachedPaperSelectionRequest = request
+        cachedPaperSelectionState = state
         return state
     }
 

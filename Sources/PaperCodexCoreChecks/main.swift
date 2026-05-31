@@ -1133,6 +1133,18 @@ func runUILayoutSourceChecks() throws {
         "library native table row models should be derived and cached in LibraryFeatureStore instead of rebuilt from SwiftUI view bodies"
     )
     try check(
+        libraryFeatureStoreSource.contains("struct LibraryPaperSelectionRequest: Equatable")
+            && libraryFeatureStoreSource.contains("struct LibraryPaperSelectionState")
+            && libraryFeatureStoreSource.contains("func paperSelectionState(")
+            && libraryFeatureStoreSource.contains("cachedPaperSelectionRequest")
+            && appModelSource.contains("func libraryPaperSelectionState(")
+            && librarySource.contains("model.libraryPaperSelectionState(listState: currentPaperListState, selectedPaperIDs: selectedPaperIDs)")
+            && !librarySource.contains("return sortedPapers.map(\\.id).filter")
+            && !librarySource.contains("selectedPaperIDsInOrder.filter { paperID in")
+            && !librarySource.contains("sortedPapers.first(where: { $0.id == paperID })"),
+        "library paper selection ordering and readable subsets should be cached in LibraryFeatureStore instead of rebuilt from SwiftUI view bodies"
+    )
+    try check(
         librarySource.contains("private var sidebarLists: some View") &&
             librarySource.contains("PaperCodexNativeScrollView {") &&
             librarySource.contains("sidebarLists"),
@@ -1205,7 +1217,7 @@ func runUILayoutSourceChecks() throws {
         "library list should expose explicit sort options"
     )
     try check(
-        librarySource.contains("sortedPapers"),
+        libraryFeatureStoreSource.contains("let sortedPapers = option.sorted(visiblePapers, ascending: request.sortAscending)"),
         "library should sort papers after filtering"
     )
     try check(

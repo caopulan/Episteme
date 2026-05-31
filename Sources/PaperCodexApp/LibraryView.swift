@@ -73,8 +73,12 @@ struct LibraryView: View {
         )
     }
 
+    private var currentPaperSelectionState: LibraryPaperSelectionState {
+        model.libraryPaperSelectionState(listState: currentPaperListState, selectedPaperIDs: selectedPaperIDs)
+    }
+
     private var filteredPaperIDs: [String] {
-        currentPaperListState.paperIDs
+        currentPaperSelectionState.visiblePaperIDs
     }
 
     private var activePaperSurfaceFilteredPaperIDs: [String] {
@@ -85,19 +89,12 @@ struct LibraryView: View {
         model.categories
     }
 
-    private var sortedPapers: [Paper] {
-        currentPaperListState.papers
-    }
-
     private var selectedPaperIDsInOrder: [String] {
-        let selected = selectedPaperIDs
-        return sortedPapers.map(\.id).filter { selected.contains($0) }
+        currentPaperSelectionState.selectedPaperIDsInOrder
     }
 
     private var selectedReadablePaperIDsInOrder: [String] {
-        selectedPaperIDsInOrder.filter { paperID in
-            sortedPapers.first(where: { $0.id == paperID })?.isArxivImportPlaceholder == false
-        }
+        currentPaperSelectionState.selectedReadablePaperIDsInOrder
     }
 
     private var selectedRecentSession: PaperSession? {
@@ -1860,7 +1857,7 @@ struct LibraryView: View {
         guard selectedLibrarySurface == .papers else {
             return
         }
-        let visiblePapers = sortedPapers
+        let visiblePapers = currentPaperListState.papers
         guard !visiblePapers.isEmpty else {
             return
         }
@@ -1897,15 +1894,16 @@ struct LibraryView: View {
             return selectedPaperIDs
         }
         guard let focusedPaper = model.selectedLibraryPaper,
-              sortedPapers.contains(where: { $0.id == focusedPaper.id }) else {
+              currentPaperSelectionState.visiblePaperIDSet.contains(focusedPaper.id) else {
             return []
         }
         return [focusedPaper.id]
     }
 
     private func applyPaperSelection(_ paperIDs: Set<String>, focusedPaper: Paper) {
-        let visibleIDs = Set(sortedPapers.map(\.id))
-        let visibleSelection = paperIDs.intersection(visibleIDs)
+        let listState = currentPaperListState
+        let selectionState = currentPaperSelectionState
+        let visibleSelection = paperIDs.intersection(selectionState.visiblePaperIDSet)
         if visibleSelection.count > 1 {
             selectedPaperIDs = visibleSelection
             lastSelectedPaperID = focusedPaper.id
@@ -1915,10 +1913,10 @@ struct LibraryView: View {
 
         clearPaperMultiSelection()
         if let remainingID = visibleSelection.first,
-           let remainingPaper = sortedPapers.first(where: { $0.id == remainingID }) {
+           let remainingPaper = listState.papersByID[remainingID] {
             lastSelectedPaperID = remainingID
             focusLibraryPaper(remainingPaper)
-        } else if visibleIDs.contains(focusedPaper.id) {
+        } else if selectionState.visiblePaperIDSet.contains(focusedPaper.id) {
             lastSelectedPaperID = focusedPaper.id
             focusLibraryPaper(focusedPaper)
         } else {
@@ -1932,7 +1930,7 @@ struct LibraryView: View {
     }
 
     private func selectPaperRange(through paper: Paper) {
-        let visibleIDs = sortedPapers.map(\.id)
+        let visibleIDs = currentPaperSelectionState.visiblePaperIDs
         guard let currentIndex = visibleIDs.firstIndex(of: paper.id) else {
             togglePaperSelection(paper)
             return
@@ -1948,13 +1946,13 @@ struct LibraryView: View {
     }
 
     private func prunePaperSelection() {
-        let visibleIDs = Set(sortedPapers.map(\.id))
-        selectedPaperIDs = selectedPaperIDs.intersection(visibleIDs)
+        let selectionState = currentPaperSelectionState
+        selectedPaperIDs = selectedPaperIDs.intersection(selectionState.visiblePaperIDSet)
         if selectedPaperIDs.count < 2 {
             clearPaperMultiSelection()
         }
         if let lastSelectedPaperID, !selectedPaperIDs.isEmpty, !selectedPaperIDs.contains(lastSelectedPaperID) {
-            self.lastSelectedPaperID = selectedPaperIDsInOrder.last
+            self.lastSelectedPaperID = selectionState.visiblePaperIDs.reversed().first { selectedPaperIDs.contains($0) }
         }
     }
 
