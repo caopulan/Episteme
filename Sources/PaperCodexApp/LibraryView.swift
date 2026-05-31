@@ -564,38 +564,17 @@ struct LibraryView: View {
             if let paper = model.selectedLibraryPaper {
                 PaperCodexNativeScrollView {
                     LazyVStack(alignment: .leading, spacing: 16) {
-                        VStack(alignment: .leading, spacing: 6) {
-                            HStack(alignment: .top, spacing: 8) {
-                                Text(paper.title)
-                                    .font(.headline)
-                                Spacer(minLength: 8)
-                                PaperCodexIconButton(
-                                    title: paper.isStarred ? "Remove Star" : "Star Paper",
-                                    systemImage: paper.isStarred ? "star.fill" : "star",
-                                    tint: paper.isStarred ? .yellow : .secondary,
-                                    disabled: paper.isArxivImportPlaceholder
-                                ) {
-                                    model.togglePaperStar(paper)
-                                }
+                        LibraryPaperInspectorSummaryView(
+                            paper: paper,
+                            placeholderDetail: model.arxivImportPlaceholderDetail(for: paper),
+                            onToggleStar: {
+                                model.togglePaperStar(paper)
+                            },
+                            onRead: {
+                                model.openPaper(paper)
                             }
-                            Text(paper.isArxivImportPlaceholder ? model.arxivImportPlaceholderDetail(for: paper) : (paper.authors.isEmpty ? "Authors not set" : paper.authors.joined(separator: ", ")))
-                                .foregroundStyle(.secondary)
-                            Text(paper.isArxivImportPlaceholder ? (paper.sourceURL ?? paper.title) : paper.filePath)
-                                .font(.caption)
-                                .foregroundStyle(.tertiary)
-                                .lineLimit(2)
-                                .textSelection(.enabled)
-                        }
-
-                        PaperCodexPanelButton(
-                            title: "Read",
-                            systemImage: "book",
-                            kind: .primary,
-                            disabled: paper.isArxivImportPlaceholder,
-                            fillsWidth: true
-                        ) {
-                            model.openPaper(paper)
-                        }
+                        )
+                        .frame(minHeight: 170)
 
                         if inspectorDetailsPaperID == paper.id {
                             Divider()
@@ -624,6 +603,315 @@ struct LibraryView: View {
         }
         .padding(22)
         .background(Color(nsColor: .controlBackgroundColor))
+    }
+
+    private struct LibraryPaperInspectorSummaryView: NSViewRepresentable {
+        var paper: Paper
+        var placeholderDetail: String
+        var onToggleStar: () -> Void
+        var onRead: () -> Void
+
+        func makeCoordinator() -> Coordinator {
+            Coordinator(onToggleStar: onToggleStar, onRead: onRead)
+        }
+
+        func makeNSView(context: Context) -> NativeLibraryPaperInspectorSummaryView {
+            let view = NativeLibraryPaperInspectorSummaryView()
+            view.apply(
+                paper: paper,
+                placeholderDetail: placeholderDetail,
+                onToggleStar: onToggleStar,
+                onRead: onRead
+            )
+            return view
+        }
+
+        func updateNSView(_ view: NativeLibraryPaperInspectorSummaryView, context: Context) {
+            context.coordinator.onToggleStar = onToggleStar
+            context.coordinator.onRead = onRead
+            view.apply(
+                paper: paper,
+                placeholderDetail: placeholderDetail,
+                onToggleStar: context.coordinator.onToggleStar,
+                onRead: context.coordinator.onRead
+            )
+        }
+
+        @MainActor final class Coordinator {
+            var onToggleStar: () -> Void
+            var onRead: () -> Void
+
+            init(onToggleStar: @escaping () -> Void, onRead: @escaping () -> Void) {
+                self.onToggleStar = onToggleStar
+                self.onRead = onRead
+            }
+        }
+    }
+
+    private final class NativeLibraryPaperInspectorSummaryView: NSView {
+        private let titleLabel = NSTextField(labelWithString: "")
+        private let detailLabel = NSTextField(labelWithString: "")
+        private let pathLabel = NSTextField(labelWithString: "")
+        private let starButton = NSButton()
+        private let readButton = NativeInspectorReadButton()
+        private let readButtonTitleLabel = NativeInspectorPassthroughLabel("Read")
+
+        private var onToggleStar: () -> Void = {}
+        private var onRead: () -> Void = {}
+
+        override init(frame frameRect: NSRect) {
+            super.init(frame: frameRect)
+            setup()
+        }
+
+        required init?(coder: NSCoder) {
+            nil
+        }
+
+        func apply(
+            paper: Paper,
+            placeholderDetail: String,
+            onToggleStar: @escaping () -> Void,
+            onRead: @escaping () -> Void
+        ) {
+            self.onToggleStar = onToggleStar
+            self.onRead = onRead
+
+            titleLabel.stringValue = paper.title
+            detailLabel.stringValue = paper.isArxivImportPlaceholder
+                ? placeholderDetail
+                : (paper.authors.isEmpty ? "Authors not set" : paper.authors.joined(separator: ", "))
+            pathLabel.stringValue = paper.isArxivImportPlaceholder ? (paper.sourceURL ?? paper.title) : paper.filePath
+
+            configureSymbolButton(
+                starButton,
+                systemSymbolName: paper.isStarred ? "star.fill" : "star",
+                accessibilityTitle: paper.isStarred ? "Remove Star" : "Star Paper",
+                tint: paper.isStarred ? .systemYellow : .secondaryLabelColor
+            )
+            starButton.isEnabled = !paper.isArxivImportPlaceholder
+            readButton.isEnabled = !paper.isArxivImportPlaceholder
+            readButtonTitleLabel.textColor = paper.isArxivImportPlaceholder ? .secondaryLabelColor : .labelColor
+            alphaValue = paper.isArxivImportPlaceholder ? 0.72 : 1
+        }
+
+        private func setup() {
+            wantsLayer = true
+            layer?.backgroundColor = NSColor.clear.cgColor
+
+            titleLabel.font = .boldSystemFont(ofSize: 13.5)
+            titleLabel.maximumNumberOfLines = 3
+            titleLabel.lineBreakMode = .byTruncatingTail
+            titleLabel.translatesAutoresizingMaskIntoConstraints = false
+
+            detailLabel.font = .systemFont(ofSize: 12.5)
+            detailLabel.textColor = .secondaryLabelColor
+            detailLabel.maximumNumberOfLines = 2
+            detailLabel.lineBreakMode = .byTruncatingTail
+            detailLabel.translatesAutoresizingMaskIntoConstraints = false
+
+            pathLabel.font = .systemFont(ofSize: 11.5)
+            pathLabel.textColor = .tertiaryLabelColor
+            pathLabel.maximumNumberOfLines = 2
+            pathLabel.lineBreakMode = .byTruncatingMiddle
+            pathLabel.isSelectable = true
+            pathLabel.translatesAutoresizingMaskIntoConstraints = false
+
+            configureSymbolButton(
+                starButton,
+                systemSymbolName: "star",
+                accessibilityTitle: "Star Paper",
+                tint: .secondaryLabelColor
+            )
+            starButton.target = self
+            starButton.action = #selector(toggleStar)
+            starButton.translatesAutoresizingMaskIntoConstraints = false
+
+            readButton.target = self
+            readButton.action = #selector(readPaper)
+            readButton.setAccessibilityLabel("Read")
+            readButton.setContentHuggingPriority(.defaultLow, for: .horizontal)
+            readButton.setContentCompressionResistancePriority(.required, for: .horizontal)
+            readButton.translatesAutoresizingMaskIntoConstraints = false
+
+            readButtonTitleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+            readButtonTitleLabel.alignment = .center
+            readButtonTitleLabel.translatesAutoresizingMaskIntoConstraints = false
+
+            addSubview(titleLabel)
+            addSubview(detailLabel)
+            addSubview(pathLabel)
+            addSubview(starButton)
+            addSubview(readButton)
+            addSubview(readButtonTitleLabel)
+
+            NSLayoutConstraint.activate([
+                titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor),
+                titleLabel.topAnchor.constraint(equalTo: topAnchor),
+                titleLabel.trailingAnchor.constraint(equalTo: starButton.leadingAnchor, constant: -8),
+
+                starButton.topAnchor.constraint(equalTo: topAnchor, constant: -2),
+                starButton.trailingAnchor.constraint(equalTo: trailingAnchor),
+                starButton.widthAnchor.constraint(equalToConstant: 30),
+                starButton.heightAnchor.constraint(equalToConstant: 30),
+
+                detailLabel.leadingAnchor.constraint(equalTo: leadingAnchor),
+                detailLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 8),
+                detailLabel.trailingAnchor.constraint(equalTo: trailingAnchor),
+
+                pathLabel.leadingAnchor.constraint(equalTo: leadingAnchor),
+                pathLabel.topAnchor.constraint(equalTo: detailLabel.bottomAnchor, constant: 6),
+                pathLabel.trailingAnchor.constraint(equalTo: trailingAnchor),
+
+                readButton.leadingAnchor.constraint(equalTo: leadingAnchor),
+                readButton.trailingAnchor.constraint(equalTo: trailingAnchor),
+                readButton.topAnchor.constraint(equalTo: pathLabel.bottomAnchor, constant: 14),
+                readButton.heightAnchor.constraint(equalToConstant: 34),
+                readButton.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor),
+
+                readButtonTitleLabel.leadingAnchor.constraint(equalTo: readButton.leadingAnchor, constant: 12),
+                readButtonTitleLabel.trailingAnchor.constraint(equalTo: readButton.trailingAnchor, constant: -12),
+                readButtonTitleLabel.centerYAnchor.constraint(equalTo: readButton.centerYAnchor),
+                readButtonTitleLabel.heightAnchor.constraint(equalToConstant: 18)
+            ])
+        }
+
+        private func configureSymbolButton(
+            _ button: NSButton,
+            systemSymbolName: String,
+            accessibilityTitle: String,
+            tint: NSColor
+        ) {
+            button.isBordered = false
+            button.bezelStyle = .regularSquare
+            button.imagePosition = .imageOnly
+            button.image = NSImage(systemSymbolName: systemSymbolName, accessibilityDescription: accessibilityTitle)
+            button.contentTintColor = tint
+            button.toolTip = accessibilityTitle
+            button.setAccessibilityLabel(accessibilityTitle)
+        }
+
+        @objc private func toggleStar() {
+            onToggleStar()
+        }
+
+        @objc private func readPaper() {
+            onRead()
+        }
+    }
+
+    private final class NativeInspectorPassthroughLabel: NSTextField {
+        init(_ value: String) {
+            super.init(frame: .zero)
+            stringValue = value
+            isEditable = false
+            isSelectable = false
+            isBordered = false
+            drawsBackground = false
+            setAccessibilityElement(false)
+        }
+
+        required init?(coder: NSCoder) {
+            nil
+        }
+
+        override func hitTest(_ point: NSPoint) -> NSView? {
+            nil
+        }
+    }
+
+    private final class NativeInspectorReadButton: NSButton {
+        private let buttonTitleLabel = NSTextField(labelWithString: "Read")
+
+        private var isPressed = false {
+            didSet {
+                updateAppearance()
+            }
+        }
+
+        override var isEnabled: Bool {
+            didSet {
+                updateAppearance()
+            }
+        }
+
+        override var intrinsicContentSize: NSSize {
+            NSSize(width: NSView.noIntrinsicMetric, height: 34)
+        }
+
+        override init(frame frameRect: NSRect) {
+            super.init(frame: frameRect)
+            setup()
+        }
+
+        required init?(coder: NSCoder) {
+            nil
+        }
+
+        override func mouseDown(with event: NSEvent) {
+            guard isEnabled else {
+                return
+            }
+
+            isPressed = true
+            super.mouseDown(with: event)
+            isPressed = false
+        }
+
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+            true
+        }
+
+        private func setup() {
+            translatesAutoresizingMaskIntoConstraints = false
+            title = ""
+            isBordered = false
+            bezelStyle = .regularSquare
+            imagePosition = .noImage
+            focusRingType = .none
+            setButtonType(.momentaryChange)
+            setAccessibilityElement(true)
+            setAccessibilityRole(.button)
+            setAccessibilityLabel("Read")
+            toolTip = "Read"
+            wantsLayer = true
+            layer?.cornerRadius = 7
+            layer?.masksToBounds = false
+
+            buttonTitleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+            buttonTitleLabel.alignment = .center
+            buttonTitleLabel.lineBreakMode = .byClipping
+            buttonTitleLabel.maximumNumberOfLines = 1
+            buttonTitleLabel.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(buttonTitleLabel)
+
+            NSLayoutConstraint.activate([
+                heightAnchor.constraint(equalToConstant: 34),
+                buttonTitleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+                buttonTitleLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+                buttonTitleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+                buttonTitleLabel.heightAnchor.constraint(equalToConstant: 18)
+            ])
+            updateAppearance()
+        }
+
+        private func updateAppearance() {
+            let background: NSColor
+            let border: NSColor
+            if !isEnabled {
+                background = .controlBackgroundColor.withAlphaComponent(0.56)
+                border = .black.withAlphaComponent(0.06)
+                buttonTitleLabel.textColor = .secondaryLabelColor.withAlphaComponent(0.56)
+            } else {
+                background = isPressed ? NSColor.controlAccentColor.withAlphaComponent(0.18) : .controlBackgroundColor
+                border = isPressed ? NSColor.controlAccentColor.withAlphaComponent(0.54) : .black.withAlphaComponent(0.10)
+                buttonTitleLabel.textColor = isPressed ? .controlAccentColor : .labelColor
+            }
+
+            layer?.backgroundColor = background.cgColor
+            layer?.borderWidth = 1
+            layer?.borderColor = border.cgColor
+        }
     }
 
     private func paperMetadataSection(for paper: Paper, metadata: LibraryPaperArxivMetadata) -> some View {
@@ -1891,11 +2179,11 @@ private struct LibraryPaperRowClick: Equatable {
 }
 
 private enum LibraryLayout {
-    static let libraryContentMinimumWidth: CGFloat = 560
+    static let libraryContentMinimumWidth: CGFloat = 860
     static let libraryPrimaryPaneMinimumWidth: CGFloat = 330
-    static let libraryInspectorMinimumWidth: CGFloat = 220
-    static let libraryInspectorIdealWidth: CGFloat = 300
-    static let libraryInspectorMaximumWidth: CGFloat = 380
+    static let libraryInspectorMinimumWidth: CGFloat = 300
+    static let libraryInspectorIdealWidth: CGFloat = 360
+    static let libraryInspectorMaximumWidth: CGFloat = 460
     static let compactContentWidthThreshold: CGFloat = 860
     static let splitPaneTopInset: CGFloat = 0
     static let bulkActionBarOverlayYOffset: CGFloat = 148

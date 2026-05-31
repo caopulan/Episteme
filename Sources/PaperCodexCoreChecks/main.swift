@@ -1025,12 +1025,14 @@ func runUILayoutSourceChecks() throws {
     )
     try check(
         librarySource.contains("SidebarSplitLayout(minContentWidth: LibraryLayout.libraryContentMinimumWidth)")
-            && librarySource.contains("static let libraryContentMinimumWidth: CGFloat = 560")
+            && librarySource.contains("static let libraryContentMinimumWidth: CGFloat = 860")
             && librarySource.contains("static let libraryPrimaryPaneMinimumWidth: CGFloat = 330")
-            && librarySource.contains("static let libraryInspectorMinimumWidth: CGFloat = 220")
+            && librarySource.contains("static let libraryInspectorMinimumWidth: CGFloat = 300")
+            && librarySource.contains("static let libraryInspectorIdealWidth: CGFloat = 360")
+            && librarySource.contains("static let libraryInspectorMaximumWidth: CGFloat = 460")
             && librarySource.contains(".frame(minWidth: LibraryLayout.libraryPrimaryPaneMinimumWidth)")
             && librarySource.contains("minWidth: LibraryLayout.libraryInspectorMinimumWidth"),
-        "library split panes should use compact shared minimum widths so the middle pane is not clipped by side columns in narrow windows"
+        "library split panes should reserve enough outer content width for the native inspector before entering compact mode"
     )
     try check(
         librarySource.contains("LibraryContentSplitView(")
@@ -1164,9 +1166,11 @@ func runUILayoutSourceChecks() throws {
         "library native paper rows should expose a direct AppKit read action disabled for pending imports"
     )
     try check(
-        librarySource.contains("PaperCodexIconButton(\n                                    title: paper.isStarred ? \"Remove Star\" : \"Star Paper\"")
-            && librarySource.contains("tint: paper.isStarred ? .yellow : .secondary"),
-        "library detail star button should use shared immediate press feedback"
+        librarySource.contains("private let starButton = NSButton()")
+            && librarySource.contains("configureSymbolButton(\n                starButton")
+            && librarySource.contains("systemSymbolName: paper.isStarred ? \"star.fill\" : \"star\"")
+            && librarySource.contains("paper.isStarred ? .systemYellow : .secondaryLabelColor"),
+        "library detail star button should use native AppKit immediate press feedback"
     )
     try check(
         librarySource.contains("if left.isStarred != right.isStarred"),
@@ -1526,6 +1530,21 @@ func runUILayoutSourceChecks() throws {
             && librarySource.contains("paperMetadataSection(for paper: Paper, metadata:")
             && appModelSource.contains("func libraryArxivMetadata(for paper: Paper)"),
         "library paper details should surface cached parsed arXiv metadata and Chinese enrichments when available"
+    )
+    try check(
+        librarySource.contains("LibraryPaperInspectorSummaryView(")
+            && librarySource.contains("private struct LibraryPaperInspectorSummaryView: NSViewRepresentable")
+            && librarySource.contains("private final class NativeLibraryPaperInspectorSummaryView: NSView")
+            && librarySource.contains("private let starButton = NSButton()")
+            && librarySource.contains("private let readButton = NativeInspectorReadButton()")
+            && librarySource.contains("private let readButtonTitleLabel = NativeInspectorPassthroughLabel(\"Read\")")
+            && librarySource.contains("private final class NativeInspectorPassthroughLabel: NSTextField")
+            && librarySource.contains("private final class NativeInspectorReadButton: NSButton")
+            && librarySource.contains("private let buttonTitleLabel = NSTextField(labelWithString: \"Read\")")
+            && librarySource.contains("buttonTitleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12)")
+            && librarySource.contains("readButton.isEnabled = !paper.isArxivImportPlaceholder")
+            && librarySource.contains("starButton.isEnabled = !paper.isArxivImportPlaceholder"),
+        "library inspector summary should render selected-paper title, star, path, and read action with native AppKit controls"
     )
     try check(
         interactionFeedbackSource.contains("defaultNoticeDismissDuration")
@@ -2828,18 +2847,13 @@ func runUILayoutSourceChecks() throws {
        let inspectorEndRange = librarySource.range(of: "private func paperMetadataSection", range: inspectorRange.upperBound..<librarySource.endIndex) {
         let inspectorSource = String(librarySource[inspectorRange.lowerBound..<inspectorEndRange.lowerBound])
         try check(
-            actionButtonSource.contains("var fillsWidth = false")
-                && actionButtonSource.contains("private final class NativePaperCodexPanelButtonView: NSButton")
-                && inspectorSource.contains("PaperCodexPanelButton(\n                            title: \"Read\"")
-                && inspectorSource.contains("systemImage: \"book\"")
-                && inspectorSource.contains("kind: .primary")
-                && inspectorSource.contains("disabled: paper.isArxivImportPlaceholder")
-                && inspectorSource.contains("fillsWidth: true")
+            inspectorSource.contains("LibraryPaperInspectorSummaryView(")
+                && !inspectorSource.contains("PaperCodexPanelButton(\n                            title: \"Read\"")
                 && !librarySource.contains("@State private var isInspectorReadButtonHovering = false")
                 && !librarySource.contains("private struct LibraryInspectorReadButtonStyle: ButtonStyle")
                 && !inspectorSource.contains(".buttonStyle(LibraryInspectorReadButtonStyle(")
                 && !inspectorSource.contains(".buttonStyle(.borderedProminent)"),
-            "library inspector Read action should use the shared native AppKit panel button before opening the reader"
+            "library inspector Read action should be owned by the native AppKit summary view before opening the reader"
         )
     } else {
         throw CheckFailure(description: "library inspector source should remain inspectable")
