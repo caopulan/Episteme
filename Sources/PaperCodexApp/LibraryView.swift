@@ -552,88 +552,323 @@ struct LibraryView: View {
     }
 
     private var inspector: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Paper Details")
-                .font(.paperCodexSystem(size: 20, weight: .semibold))
-
-            if let paper = model.selectedLibraryPaper {
-                PaperCodexNativeScrollView {
-                    LazyVStack(alignment: .leading, spacing: 16) {
-                        LibraryPaperInspectorSummaryView(
-                            paper: paper,
-                            placeholderDetail: model.arxivImportPlaceholderDetail(for: paper),
-                            onToggleStar: {
-                                model.togglePaperStar(paper)
-                            },
-                            onRead: {
-                                model.openPaper(paper)
-                            }
-                        )
-                        .frame(minHeight: 170)
-
-                        if inspectorDetailsPaperID == paper.id {
-                            Divider()
-
-                            LibraryPaperInspectorDetailsView(
-                                paper: paper,
-                                metadata: model.libraryArxivMetadata(for: paper),
-                                categories: flattenedCategoryItems(),
-                                assignedCategoryIDs: Set(model.paperCategoryIDsByID[paper.id, default: []]),
-                                tags: model.tags,
-                                assignedTagIDs: Set(model.paperTagsByID[paper.id, default: []].map(\.id)),
-                                notes: model.paperNotesByID[paper.id, default: []],
-                                noteTitle: $noteTitle,
-                                noteBody: $noteBody,
-                                editingNoteID: editingNoteID,
-                                onCreateCategory: {
-                                    newCategoryParentID = ""
-                                    isCreatingCategory = true
-                                },
-                                onSetCategory: { categoryID, isAssigned in
-                                    model.setCategory(categoryID, assigned: isAssigned, for: paper)
-                                },
-                                onCreateTag: {
-                                    isCreatingTag = true
-                                },
-                                onSetTag: { tagID, isAssigned in
-                                    model.setTag(tagID, assigned: isAssigned, for: paper)
-                                },
-                                onCreateNote: {
-                                    clearNoteDraft()
-                                },
-                                onEditNote: { note in
-                                    editingNoteID = note.id
-                                    noteTitle = note.title
-                                    noteBody = note.bodyMarkdown
-                                },
-                                onDeleteNote: { note in
-                                    model.deleteNote(note)
-                                    if editingNoteID == note.id {
-                                        clearNoteDraft()
-                                    }
-                                },
-                                onSaveNote: {
-                                    model.saveNote(paperID: paper.id, noteID: editingNoteID, title: noteTitle, bodyMarkdown: noteBody)
-                                    clearNoteDraft()
-                                },
-                                onCancelNote: {
-                                    clearNoteDraft()
-                                }
-                            )
-                            .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-                    .padding(.trailing, 4)
+        let paper = model.selectedLibraryPaper
+        let showsDetails: Bool
+        if let paper {
+            showsDetails = inspectorDetailsPaperID == paper.id
+        } else {
+            showsDetails = false
+        }
+        return LibraryPaperInspectorPanelView(
+            paper: paper,
+            placeholderDetail: paper.map { model.arxivImportPlaceholderDetail(for: $0) } ?? "",
+            showsDetails: showsDetails,
+            metadata: paper.flatMap { model.libraryArxivMetadata(for: $0) },
+            categories: paper == nil ? [] : flattenedCategoryItems(),
+            assignedCategoryIDs: paper.map { Set(model.paperCategoryIDsByID[$0.id, default: []]) } ?? [],
+            tags: model.tags,
+            assignedTagIDs: paper.map { Set(model.paperTagsByID[$0.id, default: []].map(\.id)) } ?? [],
+            notes: paper.map { model.paperNotesByID[$0.id, default: []] } ?? [],
+            noteTitle: $noteTitle,
+            noteBody: $noteBody,
+            editingNoteID: editingNoteID,
+            onToggleStar: {
+                guard let paper else {
+                    return
                 }
-            } else {
-                PaperCodexNativeEmptyState(title: "Select Paper", systemImage: "sidebar.right")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                model.togglePaperStar(paper)
+            },
+            onRead: {
+                guard let paper else {
+                    return
+                }
+                model.openPaper(paper)
+            },
+            onCreateCategory: {
+                newCategoryParentID = ""
+                isCreatingCategory = true
+            },
+            onSetCategory: { categoryID, isAssigned in
+                guard let paper else {
+                    return
+                }
+                model.setCategory(categoryID, assigned: isAssigned, for: paper)
+            },
+            onCreateTag: {
+                isCreatingTag = true
+            },
+            onSetTag: { tagID, isAssigned in
+                guard let paper else {
+                    return
+                }
+                model.setTag(tagID, assigned: isAssigned, for: paper)
+            },
+            onCreateNote: {
+                clearNoteDraft()
+            },
+            onEditNote: { note in
+                editingNoteID = note.id
+                noteTitle = note.title
+                noteBody = note.bodyMarkdown
+            },
+            onDeleteNote: { note in
+                model.deleteNote(note)
+                if editingNoteID == note.id {
+                    clearNoteDraft()
+                }
+            },
+            onSaveNote: {
+                guard let paper else {
+                    return
+                }
+                model.saveNote(paperID: paper.id, noteID: editingNoteID, title: noteTitle, bodyMarkdown: noteBody)
+                clearNoteDraft()
+            },
+            onCancelNote: {
+                clearNoteDraft()
+            }
+        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private struct LibraryPaperInspectorPanelView: NSViewRepresentable {
+        var paper: Paper?
+        var placeholderDetail: String
+        var showsDetails: Bool
+        var metadata: LibraryPaperArxivMetadata?
+        var categories: [CategoryListItem]
+        var assignedCategoryIDs: Set<String>
+        var tags: [PaperTag]
+        var assignedTagIDs: Set<String>
+        var notes: [PaperNote]
+        @Binding var noteTitle: String
+        @Binding var noteBody: String
+        var editingNoteID: String?
+        var onToggleStar: () -> Void
+        var onRead: () -> Void
+        var onCreateCategory: () -> Void
+        var onSetCategory: (String, Bool) -> Void
+        var onCreateTag: () -> Void
+        var onSetTag: (String, Bool) -> Void
+        var onCreateNote: () -> Void
+        var onEditNote: (PaperNote) -> Void
+        var onDeleteNote: (PaperNote) -> Void
+        var onSaveNote: () -> Void
+        var onCancelNote: () -> Void
+
+        func makeCoordinator() -> LibraryPaperInspectorDetailsView.Coordinator {
+            LibraryPaperInspectorDetailsView.Coordinator(noteTitle: $noteTitle, noteBody: $noteBody)
+        }
+
+        func makeNSView(context: Context) -> NativeLibraryPaperInspectorPanelView {
+            let view = NativeLibraryPaperInspectorPanelView()
+            updateCoordinator(context.coordinator)
+            view.apply(
+                paper: paper,
+                placeholderDetail: placeholderDetail,
+                showsDetails: showsDetails,
+                metadata: metadata,
+                categories: categories,
+                assignedCategoryIDs: assignedCategoryIDs,
+                tags: tags,
+                assignedTagIDs: assignedTagIDs,
+                notes: notes,
+                noteTitle: noteTitle,
+                noteBody: noteBody,
+                editingNoteID: editingNoteID,
+                detailsCoordinator: context.coordinator,
+                onToggleStar: onToggleStar,
+                onRead: onRead
+            )
+            return view
+        }
+
+        func updateNSView(_ view: NativeLibraryPaperInspectorPanelView, context: Context) {
+            context.coordinator.noteTitle = $noteTitle
+            context.coordinator.noteBody = $noteBody
+            updateCoordinator(context.coordinator)
+            view.apply(
+                paper: paper,
+                placeholderDetail: placeholderDetail,
+                showsDetails: showsDetails,
+                metadata: metadata,
+                categories: categories,
+                assignedCategoryIDs: assignedCategoryIDs,
+                tags: tags,
+                assignedTagIDs: assignedTagIDs,
+                notes: notes,
+                noteTitle: noteTitle,
+                noteBody: noteBody,
+                editingNoteID: editingNoteID,
+                detailsCoordinator: context.coordinator,
+                onToggleStar: onToggleStar,
+                onRead: onRead
+            )
+        }
+
+        private func updateCoordinator(_ coordinator: LibraryPaperInspectorDetailsView.Coordinator) {
+            coordinator.onCreateCategory = onCreateCategory
+            coordinator.onSetCategory = onSetCategory
+            coordinator.onCreateTag = onCreateTag
+            coordinator.onSetTag = onSetTag
+            coordinator.onCreateNote = onCreateNote
+            coordinator.onEditNote = onEditNote
+            coordinator.onDeleteNote = onDeleteNote
+            coordinator.onSaveNote = onSaveNote
+            coordinator.onCancelNote = onCancelNote
+        }
+    }
+
+    private final class NativeLibraryPaperInspectorPanelView: NSView {
+        private let titleLabel = NSTextField(labelWithString: "Paper Details")
+        private let scrollView = NSScrollView()
+        private let stackView = NSStackView()
+        private let emptyStateView = NativeLibraryEmptyStateView(title: "Select Paper", systemImage: "sidebar.right")
+        private let summaryView = NativeLibraryPaperInspectorSummaryView()
+        private let separatorView = NSBox()
+        private let detailsView = NativeLibraryPaperInspectorDetailsView()
+
+        override var intrinsicContentSize: NSSize {
+            NSSize(width: NSView.noIntrinsicMetric, height: NSView.noIntrinsicMetric)
+        }
+
+        override init(frame frameRect: NSRect) {
+            super.init(frame: frameRect)
+            setup()
+        }
+
+        required init?(coder: NSCoder) {
+            nil
+        }
+
+        func apply(
+            paper: Paper?,
+            placeholderDetail: String,
+            showsDetails: Bool,
+            metadata: LibraryPaperArxivMetadata?,
+            categories: [CategoryListItem],
+            assignedCategoryIDs: Set<String>,
+            tags: [PaperTag],
+            assignedTagIDs: Set<String>,
+            notes: [PaperNote],
+            noteTitle: String,
+            noteBody: String,
+            editingNoteID: String?,
+            detailsCoordinator: LibraryPaperInspectorDetailsView.Coordinator,
+            onToggleStar: @escaping () -> Void,
+            onRead: @escaping () -> Void
+        ) {
+            guard let paper else {
+                scrollView.isHidden = true
+                emptyStateView.isHidden = false
+                setAccessibilityLabel("Paper Details")
+                return
             }
 
-            Spacer(minLength: 0)
+            emptyStateView.isHidden = true
+            scrollView.isHidden = false
+            setAccessibilityLabel("Paper Details: \(paper.title)")
+            summaryView.apply(
+                paper: paper,
+                placeholderDetail: placeholderDetail,
+                onToggleStar: onToggleStar,
+                onRead: onRead
+            )
+
+            separatorView.isHidden = !showsDetails
+            detailsView.isHidden = !showsDetails
+            if showsDetails {
+                detailsView.apply(
+                    paper: paper,
+                    metadata: metadata,
+                    categories: categories,
+                    assignedCategoryIDs: assignedCategoryIDs,
+                    tags: tags,
+                    assignedTagIDs: assignedTagIDs,
+                    notes: notes,
+                    noteTitle: noteTitle,
+                    noteBody: noteBody,
+                    editingNoteID: editingNoteID,
+                    coordinator: detailsCoordinator
+                )
+            }
+            stackView.layoutSubtreeIfNeeded()
+            detailsView.invalidateIntrinsicContentSize()
         }
-        .padding(22)
-        .background(Color(nsColor: .controlBackgroundColor))
+
+        override func viewDidChangeEffectiveAppearance() {
+            super.viewDidChangeEffectiveAppearance()
+            updateChrome()
+        }
+
+        private func setup() {
+            translatesAutoresizingMaskIntoConstraints = false
+            wantsLayer = true
+            setAccessibilityRole(.group)
+
+            titleLabel.translatesAutoresizingMaskIntoConstraints = false
+            titleLabel.font = .systemFont(ofSize: 20, weight: .semibold)
+            titleLabel.textColor = .labelColor
+            titleLabel.lineBreakMode = .byTruncatingTail
+
+            stackView.translatesAutoresizingMaskIntoConstraints = false
+            stackView.orientation = .vertical
+            stackView.alignment = .width
+            stackView.distribution = .fill
+            stackView.spacing = 16
+            stackView.edgeInsets = NSEdgeInsets(top: 0, left: 0, bottom: 8, right: 4)
+
+            scrollView.translatesAutoresizingMaskIntoConstraints = false
+            scrollView.drawsBackground = false
+            scrollView.hasVerticalScroller = true
+            scrollView.hasHorizontalScroller = false
+            scrollView.autohidesScrollers = true
+            scrollView.borderType = .noBorder
+            scrollView.documentView = stackView
+
+            separatorView.translatesAutoresizingMaskIntoConstraints = false
+            separatorView.boxType = .separator
+
+            emptyStateView.translatesAutoresizingMaskIntoConstraints = false
+            emptyStateView.isHidden = false
+            scrollView.isHidden = true
+
+            stackView.addArrangedSubview(summaryView)
+            stackView.addArrangedSubview(separatorView)
+            stackView.addArrangedSubview(detailsView)
+            separatorView.isHidden = true
+            detailsView.isHidden = true
+
+            [titleLabel, scrollView, emptyStateView].forEach(addSubview(_:))
+            NSLayoutConstraint.activate([
+                titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 22),
+                titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -22),
+                titleLabel.topAnchor.constraint(equalTo: topAnchor, constant: 22),
+
+                scrollView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 22),
+                scrollView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -22),
+                scrollView.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 16),
+                scrollView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -22),
+
+                stackView.leadingAnchor.constraint(equalTo: scrollView.contentView.leadingAnchor),
+                stackView.trailingAnchor.constraint(equalTo: scrollView.contentView.trailingAnchor),
+                stackView.topAnchor.constraint(equalTo: scrollView.contentView.topAnchor),
+                stackView.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor),
+
+                summaryView.heightAnchor.constraint(greaterThanOrEqualToConstant: 170),
+                separatorView.heightAnchor.constraint(equalToConstant: 1),
+
+                emptyStateView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 22),
+                emptyStateView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -22),
+                emptyStateView.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 16),
+                emptyStateView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -22)
+            ])
+            updateChrome()
+        }
+
+        private func updateChrome() {
+            layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
+        }
     }
 
     private struct LibraryPaperInspectorSummaryView: NSViewRepresentable {

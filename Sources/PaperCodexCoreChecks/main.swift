@@ -2942,13 +2942,21 @@ func runUILayoutSourceChecks() throws {
        let inspectorEndRange = librarySource.range(of: "private struct LibraryPaperInspectorDetailsView", range: inspectorRange.upperBound..<librarySource.endIndex) {
         let inspectorSource = String(librarySource[inspectorRange.lowerBound..<inspectorEndRange.lowerBound])
         try check(
-            inspectorSource.contains("LibraryPaperInspectorSummaryView(")
+            inspectorSource.contains("LibraryPaperInspectorPanelView(")
+                && inspectorSource.contains("private struct LibraryPaperInspectorPanelView: NSViewRepresentable")
+                && inspectorSource.contains("private final class NativeLibraryPaperInspectorPanelView: NSView")
+                && inspectorSource.contains("private let scrollView = NSScrollView()")
+                && inspectorSource.contains("private let summaryView = NativeLibraryPaperInspectorSummaryView()")
+                && inspectorSource.contains("private let detailsView = NativeLibraryPaperInspectorDetailsView()")
+                && !inspectorSource.contains("VStack(alignment: .leading, spacing: 16)")
+                && !inspectorSource.contains("PaperCodexNativeScrollView")
+                && !inspectorSource.contains("LazyVStack")
                 && !inspectorSource.contains("PaperCodexPanelButton(\n                            title: \"Read\"")
                 && !librarySource.contains("@State private var isInspectorReadButtonHovering = false")
                 && !librarySource.contains("private struct LibraryInspectorReadButtonStyle: ButtonStyle")
                 && !inspectorSource.contains(".buttonStyle(LibraryInspectorReadButtonStyle(")
                 && !inspectorSource.contains(".buttonStyle(.borderedProminent)"),
-            "library inspector Read action should be owned by the native AppKit summary view before opening the reader"
+            "library inspector shell should be one native AppKit panel owning the title, scroll surface, summary, details, and Read action"
         )
     } else {
         throw CheckFailure(description: "library inspector source should remain inspectable")
