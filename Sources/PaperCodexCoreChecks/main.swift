@@ -1103,9 +1103,9 @@ func runUILayoutSourceChecks() throws {
     )
     try check(
         librarySource.contains("private var sidebarLists: some View") &&
-            librarySource.contains("ScrollView(.vertical") &&
+            librarySource.contains("PaperCodexNativeScrollView {") &&
             librarySource.contains("sidebarLists"),
-        "library sidebar category and tag lists should live inside a vertical scroll view"
+        "library sidebar category and tag lists should live inside a native AppKit scroll view"
     )
     try check(
         librarySource.contains("onCreateChild"),
@@ -1449,6 +1449,8 @@ func runUILayoutSourceChecks() throws {
     let nativeSheetSource = FileManager.default.fileExists(atPath: nativeSheetURL.path) ? try String(contentsOf: nativeSheetURL) : ""
     let nativeStatusViewsURL = root.appendingPathComponent("Sources/PaperCodexApp/PaperCodexNativeStatusViews.swift")
     let nativeStatusViewsSource = FileManager.default.fileExists(atPath: nativeStatusViewsURL.path) ? try String(contentsOf: nativeStatusViewsURL) : ""
+    let nativeScrollViewURL = root.appendingPathComponent("Sources/PaperCodexApp/PaperCodexNativeScrollView.swift")
+    let nativeScrollViewSource = FileManager.default.fileExists(atPath: nativeScrollViewURL.path) ? try String(contentsOf: nativeScrollViewURL) : ""
     let appSourceDirectory = root.appendingPathComponent("Sources/PaperCodexApp")
     let appSwiftSourceFiles = try FileManager.default.contentsOfDirectory(at: appSourceDirectory, includingPropertiesForKeys: nil)
         .filter { $0.pathExtension == "swift" }
@@ -1466,9 +1468,14 @@ func runUILayoutSourceChecks() throws {
         return hasSwiftUIStatusView ? fileURL.lastPathComponent : nil
     }
     let swiftUIFormControlRegex = try NSRegularExpression(pattern: #"\b(TextField|SecureField|TextEditor|Picker|Toggle|Stepper|DatePicker)\("#)
+    let swiftUIScrollViewRegex = try NSRegularExpression(pattern: #"\bScrollView\s*\("#)
     func hasSwiftUIFormControlUse(_ source: String) -> Bool {
         let range = NSRange(source.startIndex..<source.endIndex, in: source)
         return swiftUIFormControlRegex.firstMatch(in: source, range: range) != nil
+    }
+    func hasSwiftUIScrollViewUse(_ source: String) -> Bool {
+        let range = NSRange(source.startIndex..<source.endIndex, in: source)
+        return swiftUIScrollViewRegex.firstMatch(in: source, range: range) != nil
     }
     try check(
         appModelSource.contains("case search")
@@ -1863,6 +1870,21 @@ func runUILayoutSourceChecks() throws {
             && interactionFeedbackSource.contains("PaperCodexNativeSpinner(")
             && appSourcesWithSwiftUIStatusViews.isEmpty,
         "empty states, loading indicators, and remaining lists should use shared AppKit status views instead of SwiftUI ContentUnavailableView/ProgressView/List; remaining files: \(appSourcesWithSwiftUIStatusViews.joined(separator: ", "))"
+    )
+    try check(
+        nativeScrollViewSource.contains("struct PaperCodexNativeScrollView")
+            && nativeScrollViewSource.contains("final class NativePaperCodexHostingScrollView: NSScrollView")
+            && nativeScrollViewSource.contains("NSHostingView(rootView:")
+            && nativeScrollViewSource.contains("documentView = documentContainer")
+            && settingsViewSource.contains("PaperCodexNativeScrollView")
+            && librarySource.contains("PaperCodexNativeScrollView")
+            && saveToLibrarySource.contains("PaperCodexNativeScrollView")
+            && interactionFeedbackSource.contains("PaperCodexNativeScrollView")
+            && !hasSwiftUIScrollViewUse(settingsViewSource)
+            && !hasSwiftUIScrollViewUse(librarySource)
+            && !hasSwiftUIScrollViewUse(saveToLibrarySource)
+            && !hasSwiftUIScrollViewUse(interactionFeedbackSource),
+        "Settings, Library, Save-to-Library, and notice detail scroll regions should use shared AppKit NSScrollView hosting instead of SwiftUI ScrollView"
     )
     try check(
         actionButtonSource.contains("struct PaperCodexToolbarButton")
@@ -2569,7 +2591,7 @@ func runUILayoutSourceChecks() throws {
             && saveToLibrarySource.contains("Choose destination")
             && saveToLibrarySource.contains("New root folder")
             && saveToLibrarySource.contains("destinationChipMaxHeight")
-            && saveToLibrarySource.contains("ScrollView(.vertical) {")
+            && saveToLibrarySource.contains("PaperCodexNativeScrollView {")
             && saveToLibrarySource.contains(".frame(maxHeight: SaveToLibraryLayout.destinationChipMaxHeight)"),
         "save-to-library should bound selected path chips so the folder tree remains usable with many suggested destinations"
     )
@@ -3229,9 +3251,9 @@ func runUILayoutSourceChecks() throws {
     )
     try check(
         interactionSource.contains("@State private var isExpanded")
-            && interactionSource.contains("ScrollView(.vertical")
+            && interactionSource.contains("PaperCodexNativeScrollView")
             && interactionSource.contains(".textSelection(.enabled)"),
-        "long error notices should expand into a scrollable selectable detail view"
+        "long error notices should expand into a native scrollable selectable detail view"
     )
     try check(
         appKitMenuSource.contains("makeMainMenu() -> NSMenu")

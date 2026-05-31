@@ -74,7 +74,7 @@ struct SettingsView: View {
         SidebarSplitLayout(minContentWidth: 760) {
             sidebar
         } content: {
-            ScrollView {
+            PaperCodexNativeScrollView {
                 LazyVStack(alignment: .leading, spacing: 22) {
                     header
                     globalLanguageSettings
@@ -269,7 +269,7 @@ struct SettingsView: View {
                 Text("Similarity categories")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
-                ScrollView(.vertical) {
+                PaperCodexNativeScrollView {
                     LazyVStack(alignment: .leading, spacing: 6) {
                         ForEach(model.categories) { category in
                             similarityCategoryRow(category)

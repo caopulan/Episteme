@@ -194,7 +194,7 @@ private struct InteractionNoticeCard: View {
                 }
             }
             if isExpanded, !notice.message.isEmpty {
-                ScrollView(.vertical) {
+                PaperCodexNativeScrollView {
                     Text(notice.message)
                         .font(.caption.monospaced())
                         .foregroundStyle(.secondary)

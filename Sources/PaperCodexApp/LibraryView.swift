@@ -260,7 +260,7 @@ struct LibraryView: View {
                 .font(.headline)
                 .foregroundStyle(.secondary)
 
-            ScrollView(.vertical) {
+            PaperCodexNativeScrollView {
                 sidebarLists
             }
             .frame(maxHeight: .infinity, alignment: .top)
@@ -578,7 +578,7 @@ struct LibraryView: View {
                 .font(.paperCodexSystem(size: 20, weight: .semibold))
 
             if let paper = model.selectedLibraryPaper {
-                ScrollView {
+                PaperCodexNativeScrollView {
                     LazyVStack(alignment: .leading, spacing: 16) {
                         VStack(alignment: .leading, spacing: 6) {
                             HStack(alignment: .top, spacing: 8) {
@@ -1371,7 +1371,7 @@ private struct WatchedFoldersSheet: View {
                 PaperCodexNativeEmptyState(title: "No Folders", systemImage: "folder")
                     .frame(width: 520, height: 220)
             } else {
-                ScrollView {
+                PaperCodexNativeScrollView {
                     LazyVStack(spacing: 6) {
                         ForEach(model.watchedFolders) { folder in
                             WatchedFolderRow(folder: folder) {
@@ -2405,7 +2405,7 @@ private struct RecentConversationsContent: View {
                 PaperCodexNativeEmptyState(title: "No Conversations", systemImage: "text.bubble")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                ScrollView {
+                PaperCodexNativeScrollView {
                     LazyVStack(spacing: 8) {
                         ForEach(sessions) { session in
                             RecentConversationRow(
@@ -2745,7 +2745,7 @@ private struct RecentConversationDetailPanel: View {
                 .font(.paperCodexSystem(size: 20, weight: .semibold))
 
             if let session {
-                ScrollView {
+                PaperCodexNativeScrollView {
                     VStack(alignment: .leading, spacing: 16) {
                         VStack(alignment: .leading, spacing: 7) {
                             HStack(alignment: .top, spacing: 8) {

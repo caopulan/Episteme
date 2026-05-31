@@ -125,7 +125,7 @@ struct SaveToLibrarySheet: View {
                 }
             }
 
-            ScrollView {
+            PaperCodexNativeScrollView {
                 VStack(alignment: .leading, spacing: 6) {
                     if activeNewCategoryParentID == saveToLibraryRootDraftParentID {
                         newCategoryInlineRow(parentID: nil, depth: 0, connectorContinuations: [])
@@ -522,7 +522,7 @@ private struct SaveToLibraryDestinationHeader: View {
                 .background(Color(nsColor: .controlBackgroundColor))
                 .clipShape(RoundedRectangle(cornerRadius: 8))
             } else {
-                ScrollView(.vertical) {
+                PaperCodexNativeScrollView {
                     SaveToLibraryFlowLayout(spacing: 6) {
                         ForEach(folders) { folder in
                             SaveToLibraryFolderPathChip(folder: folder) {
