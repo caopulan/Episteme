@@ -579,17 +579,53 @@ struct LibraryView: View {
                         if inspectorDetailsPaperID == paper.id {
                             Divider()
 
-                            let metadata = model.libraryArxivMetadata(for: paper)
-                            if let metadata {
-                                paperMetadataSection(for: paper, metadata: metadata)
-                                Divider()
-                            }
-
-                            categoryAssignments(for: paper)
-                            Divider()
-                            tagAssignments(for: paper)
-                            Divider()
-                            paperNotesSection(for: paper)
+                            LibraryPaperInspectorDetailsView(
+                                paper: paper,
+                                metadata: model.libraryArxivMetadata(for: paper),
+                                categories: flattenedCategoryItems(),
+                                assignedCategoryIDs: Set(model.paperCategoryIDsByID[paper.id, default: []]),
+                                tags: model.tags,
+                                assignedTagIDs: Set(model.paperTagsByID[paper.id, default: []].map(\.id)),
+                                notes: model.paperNotesByID[paper.id, default: []],
+                                noteTitle: $noteTitle,
+                                noteBody: $noteBody,
+                                editingNoteID: editingNoteID,
+                                onCreateCategory: {
+                                    newCategoryParentID = ""
+                                    isCreatingCategory = true
+                                },
+                                onSetCategory: { categoryID, isAssigned in
+                                    model.setCategory(categoryID, assigned: isAssigned, for: paper)
+                                },
+                                onCreateTag: {
+                                    isCreatingTag = true
+                                },
+                                onSetTag: { tagID, isAssigned in
+                                    model.setTag(tagID, assigned: isAssigned, for: paper)
+                                },
+                                onCreateNote: {
+                                    clearNoteDraft()
+                                },
+                                onEditNote: { note in
+                                    editingNoteID = note.id
+                                    noteTitle = note.title
+                                    noteBody = note.bodyMarkdown
+                                },
+                                onDeleteNote: { note in
+                                    model.deleteNote(note)
+                                    if editingNoteID == note.id {
+                                        clearNoteDraft()
+                                    }
+                                },
+                                onSaveNote: {
+                                    model.saveNote(paperID: paper.id, noteID: editingNoteID, title: noteTitle, bodyMarkdown: noteBody)
+                                    clearNoteDraft()
+                                },
+                                onCancelNote: {
+                                    clearNoteDraft()
+                                }
+                            )
+                            .fixedSize(horizontal: false, vertical: true)
                         }
                     }
                     .padding(.trailing, 4)
@@ -914,157 +950,845 @@ struct LibraryView: View {
         }
     }
 
-    private func paperMetadataSection(for paper: Paper, metadata: LibraryPaperArxivMetadata) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label("解析信息", systemImage: "sparkles")
-                .font(.headline)
+    private struct LibraryPaperInspectorDetailsView: NSViewRepresentable {
+        var paper: Paper
+        var metadata: LibraryPaperArxivMetadata?
+        var categories: [CategoryListItem]
+        var assignedCategoryIDs: Set<String>
+        var tags: [PaperTag]
+        var assignedTagIDs: Set<String>
+        var notes: [PaperNote]
+        @Binding var noteTitle: String
+        @Binding var noteBody: String
+        var editingNoteID: String?
+        var onCreateCategory: () -> Void
+        var onSetCategory: (String, Bool) -> Void
+        var onCreateTag: () -> Void
+        var onSetTag: (String, Bool) -> Void
+        var onCreateNote: () -> Void
+        var onEditNote: (PaperNote) -> Void
+        var onDeleteNote: (PaperNote) -> Void
+        var onSaveNote: () -> Void
+        var onCancelNote: () -> Void
+
+        func makeCoordinator() -> Coordinator {
+            Coordinator(noteTitle: $noteTitle, noteBody: $noteBody)
+        }
+
+        func makeNSView(context: Context) -> NativeLibraryPaperInspectorDetailsView {
+            let view = NativeLibraryPaperInspectorDetailsView()
+            updateCoordinator(context.coordinator)
+            view.apply(
+                paper: paper,
+                metadata: metadata,
+                categories: categories,
+                assignedCategoryIDs: assignedCategoryIDs,
+                tags: tags,
+                assignedTagIDs: assignedTagIDs,
+                notes: notes,
+                noteTitle: noteTitle,
+                noteBody: noteBody,
+                editingNoteID: editingNoteID,
+                coordinator: context.coordinator
+            )
+            return view
+        }
+
+        func updateNSView(_ view: NativeLibraryPaperInspectorDetailsView, context: Context) {
+            context.coordinator.noteTitle = $noteTitle
+            context.coordinator.noteBody = $noteBody
+            updateCoordinator(context.coordinator)
+            view.apply(
+                paper: paper,
+                metadata: metadata,
+                categories: categories,
+                assignedCategoryIDs: assignedCategoryIDs,
+                tags: tags,
+                assignedTagIDs: assignedTagIDs,
+                notes: notes,
+                noteTitle: noteTitle,
+                noteBody: noteBody,
+                editingNoteID: editingNoteID,
+                coordinator: context.coordinator
+            )
+        }
+
+        private func updateCoordinator(_ coordinator: Coordinator) {
+            coordinator.onCreateCategory = onCreateCategory
+            coordinator.onSetCategory = onSetCategory
+            coordinator.onCreateTag = onCreateTag
+            coordinator.onSetTag = onSetTag
+            coordinator.onCreateNote = onCreateNote
+            coordinator.onEditNote = onEditNote
+            coordinator.onDeleteNote = onDeleteNote
+            coordinator.onSaveNote = onSaveNote
+            coordinator.onCancelNote = onCancelNote
+        }
+
+        @MainActor final class Coordinator: NSObject {
+            var noteTitle: Binding<String>
+            var noteBody: Binding<String>
+            var onCreateCategory: () -> Void = {}
+            var onSetCategory: (String, Bool) -> Void = { _, _ in }
+            var onCreateTag: () -> Void = {}
+            var onSetTag: (String, Bool) -> Void = { _, _ in }
+            var onCreateNote: () -> Void = {}
+            var onEditNote: (PaperNote) -> Void = { _ in }
+            var onDeleteNote: (PaperNote) -> Void = { _ in }
+            var onSaveNote: () -> Void = {}
+            var onCancelNote: () -> Void = {}
+
+            init(noteTitle: Binding<String>, noteBody: Binding<String>) {
+                self.noteTitle = noteTitle
+                self.noteBody = noteBody
+                super.init()
+            }
+        }
+    }
+
+    private final class NativeLibraryPaperInspectorDetailsView: NSView, NSTextFieldDelegate, NSTextViewDelegate {
+        private let stackView = NSStackView()
+        private let noteTitleField = NSTextField()
+        private let noteBodyScrollView = NSScrollView()
+        private let noteBodyTextView = NSTextView()
+        private let saveNoteButton = NSButton()
+        private let cancelNoteButton = NSButton()
+        private let draftContainer = NSStackView()
+        private var lastContentKey = ""
+        private var isUpdatingDraft = false
+        private weak var coordinator: LibraryPaperInspectorDetailsView.Coordinator?
+
+        override var intrinsicContentSize: NSSize {
+            NSSize(width: NSView.noIntrinsicMetric, height: max(stackView.fittingSize.height, 1))
+        }
+
+        override init(frame frameRect: NSRect) {
+            super.init(frame: frameRect)
+            setup()
+        }
+
+        required init?(coder: NSCoder) {
+            nil
+        }
+
+        func apply(
+            paper: Paper,
+            metadata: LibraryPaperArxivMetadata?,
+            categories: [CategoryListItem],
+            assignedCategoryIDs: Set<String>,
+            tags: [PaperTag],
+            assignedTagIDs: Set<String>,
+            notes: [PaperNote],
+            noteTitle: String,
+            noteBody: String,
+            editingNoteID: String?,
+            coordinator: LibraryPaperInspectorDetailsView.Coordinator
+        ) {
+            self.coordinator = coordinator
+            let contentKey = Self.contentKey(
+                paper: paper,
+                metadata: metadata,
+                categories: categories,
+                assignedCategoryIDs: assignedCategoryIDs,
+                tags: tags,
+                assignedTagIDs: assignedTagIDs,
+                notes: notes,
+                editingNoteID: editingNoteID
+            )
+            if contentKey != lastContentKey {
+                lastContentKey = contentKey
+                rebuildContent(
+                    paper: paper,
+                    metadata: metadata,
+                    categories: categories,
+                    assignedCategoryIDs: assignedCategoryIDs,
+                    tags: tags,
+                    assignedTagIDs: assignedTagIDs,
+                    notes: notes,
+                    editingNoteID: editingNoteID
+                )
+            }
+            updateDraft(noteTitle: noteTitle, noteBody: noteBody, editingNoteID: editingNoteID)
+        }
+
+        func controlTextDidChange(_ notification: Notification) {
+            guard !isUpdatingDraft,
+                  let textField = notification.object as? NSTextField,
+                  textField === noteTitleField else {
+                return
+            }
+            coordinator?.noteTitle.wrappedValue = textField.stringValue
+            updateDraftActionState()
+        }
+
+        func textDidChange(_ notification: Notification) {
+            guard !isUpdatingDraft,
+                  let textView = notification.object as? NSTextView,
+                  textView === noteBodyTextView else {
+                return
+            }
+            coordinator?.noteBody.wrappedValue = textView.string
+            updateDraftActionState()
+        }
+
+        private func setup() {
+            translatesAutoresizingMaskIntoConstraints = false
+            stackView.translatesAutoresizingMaskIntoConstraints = false
+            stackView.orientation = .vertical
+            stackView.alignment = .width
+            stackView.spacing = 13
+            stackView.setContentHuggingPriority(.defaultLow, for: .horizontal)
+            stackView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            addSubview(stackView)
+
+            NSLayoutConstraint.activate([
+                stackView.leadingAnchor.constraint(equalTo: leadingAnchor),
+                stackView.trailingAnchor.constraint(equalTo: trailingAnchor),
+                stackView.topAnchor.constraint(equalTo: topAnchor),
+                stackView.bottomAnchor.constraint(equalTo: bottomAnchor)
+            ])
+
+            setupDraftContainer()
+        }
+
+        private func setupDraftContainer() {
+            draftContainer.translatesAutoresizingMaskIntoConstraints = false
+            draftContainer.orientation = .vertical
+            draftContainer.alignment = .width
+            draftContainer.spacing = 8
+
+            noteTitleField.translatesAutoresizingMaskIntoConstraints = false
+            noteTitleField.placeholderString = "Note title"
+            noteTitleField.font = .systemFont(ofSize: 13)
+            noteTitleField.isBordered = true
+            noteTitleField.isBezeled = true
+            noteTitleField.bezelStyle = .roundedBezel
+            noteTitleField.delegate = self
+            noteTitleField.setAccessibilityLabel("Note title")
+
+            noteBodyScrollView.translatesAutoresizingMaskIntoConstraints = false
+            noteBodyScrollView.borderType = .noBorder
+            noteBodyScrollView.hasVerticalScroller = true
+            noteBodyScrollView.drawsBackground = false
+            noteBodyScrollView.wantsLayer = true
+            noteBodyScrollView.layer?.cornerRadius = 7
+            noteBodyScrollView.layer?.borderWidth = 1
+            noteBodyScrollView.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.45).cgColor
+            noteBodyScrollView.layer?.backgroundColor = NSColor.textBackgroundColor.cgColor
+            noteBodyScrollView.setAccessibilityLabel("Note body")
+
+            noteBodyTextView.translatesAutoresizingMaskIntoConstraints = false
+            noteBodyTextView.isRichText = false
+            noteBodyTextView.isAutomaticQuoteSubstitutionEnabled = false
+            noteBodyTextView.isAutomaticDashSubstitutionEnabled = false
+            noteBodyTextView.allowsUndo = true
+            noteBodyTextView.drawsBackground = false
+            noteBodyTextView.font = .systemFont(ofSize: 12.5)
+            noteBodyTextView.textContainerInset = NSSize(width: 8, height: 7)
+            noteBodyTextView.textContainer?.widthTracksTextView = true
+            noteBodyTextView.textContainer?.containerSize = NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude)
+            noteBodyTextView.delegate = self
+            noteBodyTextView.setAccessibilityLabel("Note body")
+            noteBodyScrollView.documentView = noteBodyTextView
+
+            saveNoteButton.translatesAutoresizingMaskIntoConstraints = false
+            configurePanelButton(saveNoteButton, title: "Add Note", systemSymbolName: "checkmark", isPrimary: true)
+            saveNoteButton.target = self
+            saveNoteButton.action = #selector(saveNote)
+
+            cancelNoteButton.translatesAutoresizingMaskIntoConstraints = false
+            configurePanelButton(cancelNoteButton, title: "Cancel", systemSymbolName: "xmark", isPrimary: false)
+            cancelNoteButton.target = self
+            cancelNoteButton.action = #selector(cancelNote)
+
+            let buttonRow = NSStackView()
+            buttonRow.translatesAutoresizingMaskIntoConstraints = false
+            buttonRow.orientation = .horizontal
+            buttonRow.alignment = .centerY
+            buttonRow.spacing = 8
+            buttonRow.addArrangedSubview(saveNoteButton)
+            buttonRow.addArrangedSubview(cancelNoteButton)
+
+            draftContainer.addArrangedSubview(noteTitleField)
+            draftContainer.addArrangedSubview(noteBodyScrollView)
+            draftContainer.addArrangedSubview(buttonRow)
+
+            NSLayoutConstraint.activate([
+                noteTitleField.widthAnchor.constraint(equalTo: draftContainer.widthAnchor),
+                noteTitleField.heightAnchor.constraint(equalToConstant: 30),
+                noteBodyScrollView.widthAnchor.constraint(equalTo: draftContainer.widthAnchor),
+                noteBodyScrollView.heightAnchor.constraint(equalToConstant: 78),
+                saveNoteButton.heightAnchor.constraint(equalToConstant: 30),
+                cancelNoteButton.heightAnchor.constraint(equalToConstant: 30)
+            ])
+        }
+
+        private func rebuildContent(
+            paper: Paper,
+            metadata: LibraryPaperArxivMetadata?,
+            categories: [CategoryListItem],
+            assignedCategoryIDs: Set<String>,
+            tags: [PaperTag],
+            assignedTagIDs: Set<String>,
+            notes: [PaperNote],
+            editingNoteID: String?
+        ) {
+            for arrangedSubview in stackView.arrangedSubviews {
+                stackView.removeArrangedSubview(arrangedSubview)
+                arrangedSubview.removeFromSuperview()
+            }
+
+            let metadataBlocks = Self.metadataBlocks(for: paper, metadata: metadata)
+            if !metadataBlocks.isEmpty {
+                stackView.addArrangedSubview(sectionHeader(title: "解析信息", systemSymbolName: "sparkles"))
+                for block in metadataBlocks {
+                    stackView.addArrangedSubview(metadataBlock(title: block.title, text: block.text))
+                }
+                stackView.addArrangedSubview(separator())
+            }
+
+            stackView.addArrangedSubview(sectionHeader(title: "Categories", systemSymbolName: "folder", buttonTitle: "New Category", buttonSymbol: "plus", action: #selector(createCategory)))
+            if categories.isEmpty {
+                stackView.addArrangedSubview(emptyText("No categories"))
+            } else {
+                for item in categories {
+                    stackView.addArrangedSubview(categoryRow(item: item, isAssigned: assignedCategoryIDs.contains(item.category.id)))
+                }
+            }
+            stackView.addArrangedSubview(separator())
+
+            stackView.addArrangedSubview(sectionHeader(title: "Tags", systemSymbolName: "tag", buttonTitle: "New Tag", buttonSymbol: "plus", action: #selector(createTag)))
+            if tags.isEmpty {
+                stackView.addArrangedSubview(emptyText("No tags"))
+            } else {
+                for tag in tags {
+                    let button = NativeInspectorDetailsTagButton()
+                    button.apply(title: tag.name, tagID: tag.id, isSelected: assignedTagIDs.contains(tag.id))
+                    button.target = self
+                    button.action = #selector(toggleTag(_:))
+                    stackView.addArrangedSubview(button)
+                    button.heightAnchor.constraint(equalToConstant: 30).isActive = true
+                }
+            }
+            stackView.addArrangedSubview(separator())
+
+            stackView.addArrangedSubview(sectionHeader(title: "Notes", systemSymbolName: "note.text", buttonTitle: editingNoteID == nil ? nil : "New Note", buttonSymbol: "plus", action: #selector(createNote)))
+            if notes.isEmpty {
+                stackView.addArrangedSubview(emptyText("No notes"))
+            } else {
+                for note in notes {
+                    let row = NativeInspectorDetailsNoteRowView()
+                    row.apply(note: note)
+                    row.onEdit = { [weak self] note in
+                        self?.coordinator?.onEditNote(note)
+                    }
+                    row.onDelete = { [weak self] note in
+                        self?.coordinator?.onDeleteNote(note)
+                    }
+                    stackView.addArrangedSubview(row)
+                }
+            }
+            stackView.addArrangedSubview(draftContainer)
+
+            needsLayout = true
+            layoutSubtreeIfNeeded()
+            invalidateIntrinsicContentSize()
+        }
+
+        private func updateDraft(noteTitle: String, noteBody: String, editingNoteID: String?) {
+            isUpdatingDraft = true
+            if noteTitleField.stringValue != noteTitle,
+               (noteTitleField.currentEditor() as? NSTextView)?.hasMarkedText() != true {
+                noteTitleField.stringValue = noteTitle
+            }
+            if noteBodyTextView.string != noteBody,
+               !noteBodyTextView.hasMarkedText() {
+                noteBodyTextView.string = noteBody
+            }
+            isUpdatingDraft = false
+
+            saveNoteButton.title = editingNoteID == nil ? "Add Note" : "Save Note"
+            saveNoteButton.toolTip = saveNoteButton.title
+            saveNoteButton.setAccessibilityLabel(saveNoteButton.title)
+            cancelNoteButton.isHidden = editingNoteID == nil
+            updateDraftActionState()
+        }
+
+        private func updateDraftActionState() {
+            let title = noteTitleField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            let body = noteBodyTextView.string.trimmingCharacters(in: .whitespacesAndNewlines)
+            saveNoteButton.isEnabled = !title.isEmpty || !body.isEmpty
+            saveNoteButton.alphaValue = saveNoteButton.isEnabled ? 1 : 0.54
+        }
+
+        private func sectionHeader(
+            title: String,
+            systemSymbolName: String,
+            buttonTitle: String? = nil,
+            buttonSymbol: String? = nil,
+            action: Selector? = nil
+        ) -> NSView {
+            let row = NSStackView()
+            row.translatesAutoresizingMaskIntoConstraints = false
+            row.orientation = .horizontal
+            row.alignment = .centerY
+            row.spacing = 7
+
+            let iconView = NSImageView()
+            iconView.translatesAutoresizingMaskIntoConstraints = false
+            iconView.image = NSImage(systemSymbolName: systemSymbolName, accessibilityDescription: nil)
+            iconView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 13, weight: .semibold)
+            iconView.contentTintColor = .secondaryLabelColor
+            iconView.imageScaling = .scaleProportionallyDown
+
+            let titleLabel = NSTextField(labelWithString: title)
+            titleLabel.font = .systemFont(ofSize: 13.5, weight: .semibold)
+            titleLabel.lineBreakMode = .byTruncatingTail
+
+            let spacer = NSView()
+            spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+            spacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+            row.addArrangedSubview(iconView)
+            row.addArrangedSubview(titleLabel)
+            row.addArrangedSubview(spacer)
+
+            if let buttonTitle, let buttonSymbol, let action {
+                let button = iconButton(title: buttonTitle, systemSymbolName: buttonSymbol, action: action)
+                row.addArrangedSubview(button)
+                button.widthAnchor.constraint(equalToConstant: 28).isActive = true
+                button.heightAnchor.constraint(equalToConstant: 28).isActive = true
+            }
+
+            NSLayoutConstraint.activate([
+                iconView.widthAnchor.constraint(equalToConstant: 16),
+                iconView.heightAnchor.constraint(equalToConstant: 16)
+            ])
+            return row
+        }
+
+        private func metadataBlock(title: String, text: String) -> NSView {
+            let stack = NSStackView()
+            stack.translatesAutoresizingMaskIntoConstraints = false
+            stack.orientation = .vertical
+            stack.alignment = .leading
+            stack.spacing = 4
+
+            let titleLabel = NSTextField(labelWithString: title)
+            titleLabel.font = .systemFont(ofSize: 11.5, weight: .semibold)
+            titleLabel.textColor = .secondaryLabelColor
+
+            let textLabel = NSTextField(wrappingLabelWithString: text)
+            textLabel.font = .systemFont(ofSize: 12.8)
+            textLabel.textColor = .labelColor
+            textLabel.isSelectable = true
+            textLabel.maximumNumberOfLines = 0
+
+            stack.addArrangedSubview(titleLabel)
+            stack.addArrangedSubview(textLabel)
+            textLabel.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+            return stack
+        }
+
+        private func categoryRow(item: CategoryListItem, isAssigned: Bool) -> NSView {
+            let row = NSStackView()
+            row.translatesAutoresizingMaskIntoConstraints = false
+            row.orientation = .horizontal
+            row.alignment = .centerY
+            row.spacing = 0
+
+            if item.depth > 0 {
+                let spacer = NSView()
+                spacer.translatesAutoresizingMaskIntoConstraints = false
+                row.addArrangedSubview(spacer)
+                spacer.widthAnchor.constraint(equalToConstant: CGFloat(item.depth * 14)).isActive = true
+            }
+
+            let checkbox = NSButton(checkboxWithTitle: item.category.name, target: self, action: #selector(toggleCategory(_:)))
+            checkbox.translatesAutoresizingMaskIntoConstraints = false
+            checkbox.identifier = NSUserInterfaceItemIdentifier(item.category.id)
+            checkbox.state = isAssigned ? .on : .off
+            checkbox.font = .systemFont(ofSize: 12.5)
+            checkbox.lineBreakMode = .byTruncatingTail
+            checkbox.setAccessibilityLabel(item.category.name)
+            checkbox.setAccessibilityValue(isAssigned ? "Selected" : "Not selected")
+            row.addArrangedSubview(checkbox)
+            row.heightAnchor.constraint(equalToConstant: 26).isActive = true
+            return row
+        }
+
+        private func emptyText(_ text: String) -> NSTextField {
+            let label = NSTextField(labelWithString: text)
+            label.font = .systemFont(ofSize: 12.5)
+            label.textColor = .secondaryLabelColor
+            return label
+        }
+
+        private func separator() -> NSBox {
+            let box = NSBox()
+            box.translatesAutoresizingMaskIntoConstraints = false
+            box.boxType = .separator
+            return box
+        }
+
+        private func iconButton(title: String, systemSymbolName: String, action: Selector) -> NSButton {
+            let button = NSButton()
+            button.translatesAutoresizingMaskIntoConstraints = false
+            button.isBordered = false
+            button.bezelStyle = .regularSquare
+            button.imagePosition = .imageOnly
+            button.image = NSImage(systemSymbolName: systemSymbolName, accessibilityDescription: title)
+            button.contentTintColor = .secondaryLabelColor
+            button.target = self
+            button.action = action
+            button.toolTip = title
+            button.setAccessibilityLabel(title)
+            return button
+        }
+
+        private func configurePanelButton(_ button: NSButton, title: String, systemSymbolName: String, isPrimary: Bool) {
+            button.title = title
+            button.image = NSImage(systemSymbolName: systemSymbolName, accessibilityDescription: title)
+            button.imagePosition = .imageLeading
+            button.bezelStyle = isPrimary ? .rounded : .regularSquare
+            button.controlSize = .regular
+            button.font = .systemFont(ofSize: 12.5, weight: .medium)
+            button.toolTip = title
+            button.setAccessibilityLabel(title)
+        }
+
+        @objc private func createCategory() {
+            coordinator?.onCreateCategory()
+        }
+
+        @objc private func toggleCategory(_ sender: NSButton) {
+            guard let categoryID = sender.identifier?.rawValue else {
+                return
+            }
+            coordinator?.onSetCategory(categoryID, sender.state == .on)
+        }
+
+        @objc private func createTag() {
+            coordinator?.onCreateTag()
+        }
+
+        @objc private func toggleTag(_ sender: NativeInspectorDetailsTagButton) {
+            coordinator?.onSetTag(sender.tagID, !sender.isSelected)
+        }
+
+        @objc private func createNote() {
+            coordinator?.onCreateNote()
+        }
+
+        @objc private func saveNote() {
+            coordinator?.onSaveNote()
+        }
+
+        @objc private func cancelNote() {
+            coordinator?.onCancelNote()
+        }
+
+        private static func contentKey(
+            paper: Paper,
+            metadata: LibraryPaperArxivMetadata?,
+            categories: [CategoryListItem],
+            assignedCategoryIDs: Set<String>,
+            tags: [PaperTag],
+            assignedTagIDs: Set<String>,
+            notes: [PaperNote],
+            editingNoteID: String?
+        ) -> String {
+            [
+                paper.id,
+                metadata.map(metadataKey) ?? "",
+                categories.map { "\($0.category.id):\($0.category.name):\($0.depth)" }.joined(separator: "|"),
+                assignedCategoryIDs.sorted().joined(separator: ","),
+                tags.map { "\($0.id):\($0.name)" }.joined(separator: "|"),
+                assignedTagIDs.sorted().joined(separator: ","),
+                notes.map { "\($0.id):\($0.title):\($0.bodyMarkdown):\($0.updatedAt.timeIntervalSinceReferenceDate)" }.joined(separator: "|"),
+                editingNoteID ?? ""
+            ].joined(separator: "||")
+        }
+
+        private static func metadataKey(_ metadata: LibraryPaperArxivMetadata) -> String {
+            [
+                metadata.arxivID,
+                metadata.titleZH,
+                metadata.summaryZH,
+                metadata.contribution,
+                metadata.abstractZH,
+                metadata.abstractEN,
+                metadata.tags.joined(separator: ",")
+            ].joined(separator: "|")
+        }
+
+        private static func metadataBlocks(for paper: Paper, metadata: LibraryPaperArxivMetadata?) -> [(title: String, text: String)] {
+            guard let metadata else {
+                return []
+            }
+            var blocks: [(title: String, text: String)] = []
             if !metadata.titleZH.isEmpty, metadata.titleZH != paper.title {
-                LibraryMetadataBlock(title: "中文标题", text: metadata.titleZH)
+                blocks.append(("中文标题", metadata.titleZH))
             }
             if !metadata.summaryZH.isEmpty {
-                LibraryMetadataBlock(title: "中文摘要", text: metadata.summaryZH)
+                blocks.append(("中文摘要", metadata.summaryZH))
             }
             if !metadata.contribution.isEmpty {
-                LibraryMetadataBlock(title: "贡献总结", text: metadata.contribution)
+                blocks.append(("贡献总结", metadata.contribution))
             }
             if !metadata.abstractZH.isEmpty {
-                LibraryMetadataBlock(title: "中文 Abstract", text: metadata.abstractZH)
+                blocks.append(("中文 Abstract", metadata.abstractZH))
             }
             if !metadata.abstractEN.isEmpty {
-                LibraryMetadataBlock(title: "Abstract", text: metadata.abstractEN)
+                blocks.append(("Abstract", metadata.abstractEN))
             }
             if !metadata.tags.isEmpty {
-                FlowLayout(spacing: 6) {
-                    ForEach(metadata.tags.prefix(10), id: \.self) { tag in
-                        SmallChip(title: tag, systemImage: "tag")
-                    }
-                }
+                blocks.append(("Tags", metadata.tags.prefix(10).joined(separator: ", ")))
             }
+            return blocks
         }
     }
 
-    private func categoryAssignments(for paper: Paper) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Label("Categories", systemImage: "folder")
-                    .font(.headline)
-                Spacer()
-                PaperCodexIconButton(title: "New Category", systemImage: "plus") {
-                    newCategoryParentID = ""
-                    isCreatingCategory = true
-                }
-            }
+    private final class NativeInspectorDetailsTagButton: NSButton {
+        private let iconView = NSImageView()
+        private let titleLabel = NSTextField(labelWithString: "")
+        private var trackingAreaToken: NSTrackingArea?
+        private var isHovering = false
+        private var isPressed = false
+        private(set) var tagID = ""
+        private(set) var isSelected = false
 
-            if model.categories.isEmpty {
-                SidebarEmptyText("No categories")
-            } else {
-                VStack(alignment: .leading, spacing: 6) {
-                    ForEach(flattenedCategoryItems()) { item in
-                        PaperCodexNativeCheckboxRow(
-                            isOn: Binding(
-                                get: {
-                                    model.paperCategoryIDsByID[paper.id, default: []].contains(item.category.id)
-                                },
-                                set: { isAssigned in
-                                    model.setCategory(item.category.id, assigned: isAssigned, for: paper)
-                                }
-                            ),
-                            title: item.category.name,
-                            indentation: CGFloat(item.depth * 14)
-                        )
-                        .frame(height: 26)
-                    }
-                }
+        override var intrinsicContentSize: NSSize {
+            NSSize(width: NSView.noIntrinsicMetric, height: 30)
+        }
+
+        override init(frame frameRect: NSRect) {
+            super.init(frame: frameRect)
+            setup()
+        }
+
+        required init?(coder: NSCoder) {
+            nil
+        }
+
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+            true
+        }
+
+        override func updateTrackingAreas() {
+            super.updateTrackingAreas()
+            if let trackingAreaToken {
+                removeTrackingArea(trackingAreaToken)
             }
+            let area = NSTrackingArea(rect: bounds, options: [.activeInKeyWindow, .mouseEnteredAndExited, .inVisibleRect], owner: self, userInfo: nil)
+            addTrackingArea(area)
+            trackingAreaToken = area
+        }
+
+        override func mouseEntered(with event: NSEvent) {
+            isHovering = true
+            updateAppearance()
+        }
+
+        override func mouseExited(with event: NSEvent) {
+            isHovering = false
+            isPressed = false
+            updateAppearance()
+        }
+
+        override func mouseDown(with event: NSEvent) {
+            isPressed = true
+            updateAppearance()
+            super.mouseDown(with: event)
+            isPressed = false
+            updateAppearance()
+        }
+
+        func apply(title: String, tagID: String, isSelected: Bool) {
+            self.tagID = tagID
+            self.isSelected = isSelected
+            titleLabel.stringValue = title
+            toolTip = title
+            setAccessibilityLabel(title)
+            setAccessibilityRole(.checkBox)
+            setAccessibilityValue(isSelected ? "Selected" : "Not selected")
+            updateAppearance()
+        }
+
+        private func setup() {
+            translatesAutoresizingMaskIntoConstraints = false
+            wantsLayer = true
+            isBordered = false
+            title = ""
+            bezelStyle = .regularSquare
+            setButtonType(.momentaryChange)
+            focusRingType = .none
+
+            iconView.translatesAutoresizingMaskIntoConstraints = false
+            iconView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 12.5, weight: .semibold)
+            iconView.imageScaling = .scaleProportionallyDown
+
+            titleLabel.translatesAutoresizingMaskIntoConstraints = false
+            titleLabel.font = .systemFont(ofSize: 12.5, weight: .medium)
+            titleLabel.lineBreakMode = .byTruncatingTail
+            titleLabel.maximumNumberOfLines = 1
+
+            addSubview(iconView)
+            addSubview(titleLabel)
+
+            NSLayoutConstraint.activate([
+                iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 9),
+                iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
+                iconView.widthAnchor.constraint(equalToConstant: 14),
+                iconView.heightAnchor.constraint(equalToConstant: 14),
+                titleLabel.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 6),
+                titleLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -9),
+                titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor)
+            ])
+        }
+
+        private func updateAppearance() {
+            layer?.cornerRadius = 7
+            layer?.masksToBounds = false
+            let accent = NSColor.controlAccentColor
+            let foreground: NSColor
+            let background: NSColor
+            let border: NSColor
+            if isSelected {
+                foreground = accent
+                background = accent.withAlphaComponent(isPressed ? 0.20 : isHovering ? 0.14 : 0.10)
+                border = accent.withAlphaComponent(isHovering || isPressed ? 0.48 : 0.30)
+                iconView.image = NSImage(systemSymbolName: "checkmark.circle.fill", accessibilityDescription: nil)
+            } else {
+                foreground = .secondaryLabelColor
+                background = NSColor.controlBackgroundColor.withAlphaComponent(isHovering ? 0.88 : 0.64)
+                border = NSColor.black.withAlphaComponent(isHovering || isPressed ? 0.16 : 0.08)
+                iconView.image = NSImage(systemSymbolName: "tag", accessibilityDescription: nil)
+            }
+            titleLabel.textColor = foreground
+            iconView.contentTintColor = foreground
+            layer?.backgroundColor = background.cgColor
+            layer?.borderColor = border.cgColor
+            layer?.borderWidth = 1
         }
     }
 
-    private func tagAssignments(for paper: Paper) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Label("Tags", systemImage: "tag")
-                    .font(.headline)
-                Spacer()
-                PaperCodexIconButton(title: "New Tag", systemImage: "plus") {
-                    isCreatingTag = true
-                }
-            }
+    private final class NativeInspectorDetailsNoteRowView: NSView {
+        private let editButton = NSButton()
+        private let deleteButton = NSButton()
+        private let titleLabel = NSTextField(labelWithString: "")
+        private let bodyLabel = NSTextField(labelWithString: "")
+        private let dateLabel = NSTextField(labelWithString: "")
+        private var note: PaperNote?
+        var onEdit: (PaperNote) -> Void = { _ in }
+        var onDelete: (PaperNote) -> Void = { _ in }
 
-            if model.tags.isEmpty {
-                SidebarEmptyText("No tags")
-            } else {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 118), spacing: 8)], alignment: .leading, spacing: 8) {
-                    ForEach(model.tags) { tag in
-                        let assigned = model.paperTagsByID[paper.id, default: []].contains { $0.id == tag.id }
-                        PaperCodexTagToggleButton(title: tag.name, isSelected: assigned) {
-                            model.setTag(tag.id, assigned: !assigned, for: paper)
-                        }
-                        .frame(maxWidth: .infinity, minHeight: 30, maxHeight: 30)
-                    }
-                }
-            }
+        override var intrinsicContentSize: NSSize {
+            NSSize(width: NSView.noIntrinsicMetric, height: bodyLabel.isHidden ? 48 : 62)
         }
-    }
 
-    private func paperNotesSection(for paper: Paper) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Label("Notes", systemImage: "note.text")
-                    .font(.headline)
-                Spacer()
-                if editingNoteID != nil {
-                    PaperCodexIconButton(title: "New Note", systemImage: "plus") {
-                        clearNoteDraft()
-                    }
-                }
+        override init(frame frameRect: NSRect) {
+            super.init(frame: frameRect)
+            setup()
+        }
+
+        required init?(coder: NSCoder) {
+            nil
+        }
+
+        func apply(note: PaperNote) {
+            self.note = note
+            titleLabel.stringValue = note.title
+            bodyLabel.stringValue = note.bodyMarkdown
+            bodyLabel.isHidden = note.bodyMarkdown.isEmpty
+            dateLabel.stringValue = note.updatedAt.formatted(date: .abbreviated, time: .shortened)
+            editButton.toolTip = note.bodyMarkdown.isEmpty ? note.title : "\(note.title)\n\(note.bodyMarkdown)"
+            editButton.setAccessibilityLabel(note.title)
+            editButton.setAccessibilityValue(note.bodyMarkdown)
+            invalidateIntrinsicContentSize()
+        }
+
+        private func setup() {
+            translatesAutoresizingMaskIntoConstraints = false
+            wantsLayer = true
+            layer?.cornerRadius = 7
+            layer?.borderWidth = 1
+            layer?.borderColor = NSColor.black.withAlphaComponent(0.08).cgColor
+            layer?.backgroundColor = NSColor.textBackgroundColor.cgColor
+
+            editButton.translatesAutoresizingMaskIntoConstraints = false
+            editButton.isBordered = false
+            editButton.title = ""
+            editButton.bezelStyle = .regularSquare
+            editButton.target = self
+            editButton.action = #selector(editNote)
+
+            deleteButton.translatesAutoresizingMaskIntoConstraints = false
+            deleteButton.isBordered = false
+            deleteButton.bezelStyle = .regularSquare
+            deleteButton.imagePosition = .imageOnly
+            deleteButton.image = NSImage(systemSymbolName: "trash", accessibilityDescription: "Delete Note")
+            deleteButton.contentTintColor = .systemRed
+            deleteButton.target = self
+            deleteButton.action = #selector(deleteNote)
+            deleteButton.toolTip = "Delete Note"
+            deleteButton.setAccessibilityLabel("Delete Note")
+
+            titleLabel.translatesAutoresizingMaskIntoConstraints = false
+            titleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+            titleLabel.lineBreakMode = .byTruncatingTail
+            bodyLabel.translatesAutoresizingMaskIntoConstraints = false
+            bodyLabel.font = .systemFont(ofSize: 11.5)
+            bodyLabel.textColor = .secondaryLabelColor
+            bodyLabel.lineBreakMode = .byTruncatingTail
+            bodyLabel.maximumNumberOfLines = 2
+            dateLabel.translatesAutoresizingMaskIntoConstraints = false
+            dateLabel.font = .monospacedDigitSystemFont(ofSize: 10.5, weight: .regular)
+            dateLabel.textColor = .tertiaryLabelColor
+
+            addSubview(editButton)
+            addSubview(titleLabel)
+            addSubview(bodyLabel)
+            addSubview(dateLabel)
+            addSubview(deleteButton)
+
+            NSLayoutConstraint.activate([
+                editButton.leadingAnchor.constraint(equalTo: leadingAnchor),
+                editButton.trailingAnchor.constraint(equalTo: deleteButton.leadingAnchor, constant: -6),
+                editButton.topAnchor.constraint(equalTo: topAnchor),
+                editButton.bottomAnchor.constraint(equalTo: bottomAnchor),
+
+                deleteButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
+                deleteButton.topAnchor.constraint(equalTo: topAnchor, constant: 8),
+                deleteButton.widthAnchor.constraint(equalToConstant: 28),
+                deleteButton.heightAnchor.constraint(equalToConstant: 28),
+
+                titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
+                titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: dateLabel.leadingAnchor, constant: -8),
+                titleLabel.topAnchor.constraint(equalTo: topAnchor, constant: 7),
+
+                dateLabel.trailingAnchor.constraint(equalTo: deleteButton.leadingAnchor, constant: -8),
+                dateLabel.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
+
+                bodyLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+                bodyLabel.trailingAnchor.constraint(equalTo: deleteButton.leadingAnchor, constant: -8),
+                bodyLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 3),
+                bodyLabel.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -7)
+            ])
+        }
+
+        @objc private func editNote() {
+            guard let note else {
+                return
             }
+            onEdit(note)
+        }
 
-            let notes = model.paperNotesByID[paper.id, default: []]
-            if notes.isEmpty {
-                SidebarEmptyText("No notes")
-            } else {
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(notes) { note in
-                        PaperNoteRow(note: note) {
-                            editingNoteID = note.id
-                            noteTitle = note.title
-                            noteBody = note.bodyMarkdown
-                        } onDelete: {
-                            model.deleteNote(note)
-                            if editingNoteID == note.id {
-                                clearNoteDraft()
-                            }
-                        }
-                    }
-                }
+        @objc private func deleteNote() {
+            guard let note else {
+                return
             }
-
-            PaperCodexNativeTextField(text: $noteTitle, placeholder: "Note title")
-                .frame(height: 30)
-            PaperCodexNativeTextEditor(
-                text: $noteBody,
-                accessibilityLabel: "Note body",
-                font: .systemFont(ofSize: 12.5),
-                minHeight: 72
-            )
-            .frame(minHeight: 72)
-            HStack {
-                PaperCodexPanelButton(
-                    title: editingNoteID == nil ? "Add Note" : "Save Note",
-                    systemImage: "checkmark",
-                    kind: .primary,
-                    disabled: isNoteDraftEmpty
-                ) {
-                    model.saveNote(paperID: paper.id, noteID: editingNoteID, title: noteTitle, bodyMarkdown: noteBody)
-                    clearNoteDraft()
-                }
-
-                if editingNoteID != nil {
-                    PaperCodexPanelButton(title: "Cancel", systemImage: "xmark") {
-                        clearNoteDraft()
-                    }
-                }
-            }
+            onDelete(note)
         }
     }
 
@@ -2217,24 +2941,6 @@ private struct SmallChip: View {
             .padding(.vertical, 3)
             .background(Color(nsColor: .windowBackgroundColor))
             .clipShape(RoundedRectangle(cornerRadius: 6))
-    }
-}
-
-private struct LibraryMetadataBlock: View {
-    var title: String
-    var text: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-            Text(text)
-                .font(.paperCodexSystem(size: 12.8))
-                .foregroundStyle(.primary)
-                .fixedSize(horizontal: false, vertical: true)
-                .textSelection(.enabled)
-        }
     }
 }
 
@@ -3445,227 +4151,6 @@ private struct TagManagementSheet: View {
         }
         .padding(22)
         .frame(width: 340)
-    }
-}
-
-private struct PaperNoteRow: View {
-    var note: PaperNote
-    var onEdit: () -> Void
-    var onDelete: () -> Void
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 8) {
-            PaperNoteSelectionButton(
-                title: note.title,
-                body: note.bodyMarkdown,
-                updatedAt: note.updatedAt
-            ) {
-                onEdit()
-            }
-            .frame(maxWidth: .infinity, minHeight: note.bodyMarkdown.isEmpty ? 44 : 58, alignment: .leading)
-            PaperCodexIconButton(title: "Delete Note", systemImage: "trash", tint: .red) {
-                onDelete()
-            }
-        }
-        .padding(9)
-        .background(Color(nsColor: .textBackgroundColor))
-        .overlay(
-            RoundedRectangle(cornerRadius: 7)
-                .stroke(Color.black.opacity(0.08), lineWidth: 1)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 7))
-    }
-}
-
-private struct PaperNoteSelectionButton: NSViewRepresentable {
-    var title: String
-    var body: String
-    var updatedAt: Date
-    var action: () -> Void
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(action: action)
-    }
-
-    func makeNSView(context: Context) -> NativePaperNoteSelectionButtonView {
-        let button = NativePaperNoteSelectionButtonView()
-        button.target = context.coordinator
-        button.action = #selector(Coordinator.performAction(_:))
-        button.apply(title: title, body: body, updatedAt: updatedAt)
-        return button
-    }
-
-    func updateNSView(_ button: NativePaperNoteSelectionButtonView, context: Context) {
-        context.coordinator.action = action
-        button.apply(title: title, body: body, updatedAt: updatedAt)
-    }
-
-    @MainActor final class Coordinator: NSObject {
-        var action: () -> Void
-
-        init(action: @escaping () -> Void) {
-            self.action = action
-            super.init()
-        }
-
-        @objc func performAction(_ sender: NSButton) {
-            action()
-        }
-    }
-}
-
-private final class NativePaperNoteSelectionButtonView: NSButton {
-    private let iconView = NSImageView()
-    private let titleLabel = NSTextField(labelWithString: "")
-    private let bodyLabel = NSTextField(labelWithString: "")
-    private let dateLabel = NSTextField(labelWithString: "")
-    private var trackingAreaToken: NSTrackingArea?
-    private var isHovering = false
-    private var isPressed = false
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        setup()
-    }
-
-    required init?(coder: NSCoder) {
-        nil
-    }
-
-    override var intrinsicContentSize: NSSize {
-        NSSize(width: NSView.noIntrinsicMetric, height: 58)
-    }
-
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
-        true
-    }
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let trackingAreaToken {
-            removeTrackingArea(trackingAreaToken)
-        }
-        let area = NSTrackingArea(rect: bounds, options: [.activeInKeyWindow, .mouseEnteredAndExited, .inVisibleRect], owner: self, userInfo: nil)
-        addTrackingArea(area)
-        trackingAreaToken = area
-    }
-
-    override func mouseEntered(with event: NSEvent) {
-        isHovering = true
-        updateAppearance()
-    }
-
-    override func mouseExited(with event: NSEvent) {
-        isHovering = false
-        isPressed = false
-        updateAppearance()
-    }
-
-    override func mouseDown(with event: NSEvent) {
-        isPressed = true
-        updateAppearance()
-        super.mouseDown(with: event)
-        isPressed = false
-        updateAppearance()
-    }
-
-    override func viewDidChangeEffectiveAppearance() {
-        super.viewDidChangeEffectiveAppearance()
-        updateAppearance()
-    }
-
-    func apply(title: String, body: String, updatedAt: Date) {
-        titleLabel.stringValue = title
-        bodyLabel.stringValue = body
-        bodyLabel.isHidden = body.isEmpty
-        dateLabel.stringValue = updatedAt.formatted(date: .abbreviated, time: .shortened)
-        toolTip = body.isEmpty ? title : "\(title)\n\(body)"
-        setAccessibilityLabel(title)
-        setAccessibilityValue(body)
-        updateAppearance()
-    }
-
-    private func setup() {
-        translatesAutoresizingMaskIntoConstraints = false
-        wantsLayer = true
-        isBordered = false
-        title = ""
-        bezelStyle = .regularSquare
-        setButtonType(.momentaryChange)
-        focusRingType = .none
-        setAccessibilityElement(true)
-        setAccessibilityRole(.button)
-
-        iconView.translatesAutoresizingMaskIntoConstraints = false
-        iconView.image = NSImage(systemSymbolName: "note.text", accessibilityDescription: nil)
-        iconView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 13, weight: .semibold)
-        iconView.imageScaling = .scaleProportionallyDown
-
-        titleLabel.translatesAutoresizingMaskIntoConstraints = false
-        titleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
-        titleLabel.lineBreakMode = .byTruncatingTail
-        titleLabel.maximumNumberOfLines = 1
-
-        bodyLabel.translatesAutoresizingMaskIntoConstraints = false
-        bodyLabel.font = .systemFont(ofSize: 11.5, weight: .regular)
-        bodyLabel.lineBreakMode = .byTruncatingTail
-        bodyLabel.maximumNumberOfLines = 2
-
-        dateLabel.translatesAutoresizingMaskIntoConstraints = false
-        dateLabel.font = .monospacedDigitSystemFont(ofSize: 10.5, weight: .regular)
-        dateLabel.lineBreakMode = .byTruncatingTail
-        dateLabel.maximumNumberOfLines = 1
-
-        addSubview(iconView)
-        addSubview(titleLabel)
-        addSubview(bodyLabel)
-        addSubview(dateLabel)
-
-        NSLayoutConstraint.activate([
-            iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
-            iconView.topAnchor.constraint(equalTo: topAnchor, constant: 8),
-            iconView.widthAnchor.constraint(equalToConstant: 15),
-            iconView.heightAnchor.constraint(equalToConstant: 15),
-
-            titleLabel.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 7),
-            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: dateLabel.leadingAnchor, constant: -8),
-            titleLabel.topAnchor.constraint(equalTo: topAnchor, constant: 6),
-
-            dateLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
-            dateLabel.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
-
-            bodyLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
-            bodyLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
-            bodyLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 4),
-            bodyLabel.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -7)
-        ])
-
-        setContentHuggingPriority(.defaultLow, for: .horizontal)
-        setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        updateAppearance()
-    }
-
-    private func updateAppearance() {
-        layer?.cornerRadius = 6
-        layer?.masksToBounds = false
-        let accent = NSColor.controlAccentColor
-        if isPressed {
-            layer?.backgroundColor = accent.withAlphaComponent(0.14).cgColor
-            layer?.borderColor = accent.withAlphaComponent(0.38).cgColor
-            layer?.borderWidth = 1
-        } else if isHovering {
-            layer?.backgroundColor = accent.withAlphaComponent(0.08).cgColor
-            layer?.borderColor = accent.withAlphaComponent(0.22).cgColor
-            layer?.borderWidth = 1
-        } else {
-            layer?.backgroundColor = NSColor.clear.cgColor
-            layer?.borderWidth = 0
-        }
-        iconView.contentTintColor = accent
-        titleLabel.textColor = .labelColor
-        bodyLabel.textColor = .secondaryLabelColor
-        dateLabel.textColor = .tertiaryLabelColor
-        alphaValue = isPressed ? 0.82 : 1
     }
 }
 

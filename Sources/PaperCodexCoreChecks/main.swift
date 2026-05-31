@@ -1527,9 +1527,17 @@ func runUILayoutSourceChecks() throws {
     )
     try check(
         librarySource.contains("LibraryPaperArxivMetadata")
-            && librarySource.contains("paperMetadataSection(for paper: Paper, metadata:")
+            && librarySource.contains("LibraryPaperInspectorDetailsView(")
+            && librarySource.contains("private struct LibraryPaperInspectorDetailsView: NSViewRepresentable")
+            && librarySource.contains("private final class NativeLibraryPaperInspectorDetailsView: NSView")
+            && librarySource.contains("private final class NativeInspectorDetailsTagButton: NSButton")
+            && librarySource.contains("private final class NativeInspectorDetailsNoteRowView: NSView")
+            && !librarySource.contains("private func paperMetadataSection(")
+            && !librarySource.contains("private func categoryAssignments(for paper: Paper)")
+            && !librarySource.contains("private func tagAssignments(for paper: Paper)")
+            && !librarySource.contains("private func paperNotesSection(for paper: Paper)")
             && appModelSource.contains("func libraryArxivMetadata(for paper: Paper)"),
-        "library paper details should surface cached parsed arXiv metadata and Chinese enrichments when available"
+        "library inspector details should surface metadata, categories, tags, and notes through a native AppKit view instead of SwiftUI stacks and grids"
     )
     try check(
         librarySource.contains("LibraryPaperInspectorSummaryView(")
@@ -1861,10 +1869,10 @@ func runUILayoutSourceChecks() throws {
             && chatSource.contains("PaperCodexNativeTextField(")
             && saveToLibrarySource.contains("PaperCodexNativeTextField(")
             && readerViewSource.contains("PaperCodexNativeTextField(")
-            && librarySource.contains("PaperCodexNativeTextField(")
-            && librarySource.contains("PaperCodexNativeTextEditor(")
+            && (librarySource.contains("PaperCodexNativeTextField(") || librarySource.contains("private let noteTitleField = NSTextField()"))
+            && (librarySource.contains("PaperCodexNativeTextEditor(") || librarySource.contains("private let noteBodyTextView = NSTextView()"))
             && librarySource.contains("PaperCodexNativePopupButton(")
-            && librarySource.contains("PaperCodexNativeCheckboxRow(")
+            && (librarySource.contains("PaperCodexNativeCheckboxRow(") || librarySource.contains("NSButton(checkboxWithTitle:"))
             && !hasSwiftUIFormControlUse(chatSource)
             && !hasSwiftUIFormControlUse(saveToLibrarySource)
             && !hasSwiftUIFormControlUse(readerViewSource)
@@ -1999,23 +2007,24 @@ func runUILayoutSourceChecks() throws {
             && !actionButtonSource.contains(".buttonStyle(.plain)"),
         "shared toolbar and icon actions should use native AppKit buttons with immediate pressed feedback"
     )
-    if let categoryAssignmentsRange = librarySource.range(of: "private func categoryAssignments(for paper: Paper) -> some View"),
-       let filterButtonRange = librarySource.range(of: "private func filterButton(", range: categoryAssignmentsRange.upperBound..<librarySource.endIndex) {
-        let libraryInspectorActionSource = String(librarySource[categoryAssignmentsRange.lowerBound..<filterButtonRange.lowerBound])
+    if let detailsViewRange = librarySource.range(of: "private struct LibraryPaperInspectorDetailsView: NSViewRepresentable"),
+       let sidebarHeaderRange = librarySource.range(of: "private func sidebarHeader(", range: detailsViewRange.upperBound..<librarySource.endIndex) {
+        let libraryInspectorActionSource = String(librarySource[detailsViewRange.lowerBound..<sidebarHeaderRange.lowerBound])
         try check(
-            libraryInspectorActionSource.contains("PaperCodexIconButton(title: \"New Category\"")
-                && libraryInspectorActionSource.contains("PaperCodexIconButton(title: \"New Tag\"")
-                && libraryInspectorActionSource.contains("PaperCodexIconButton(title: \"New Note\"")
-                && libraryInspectorActionSource.contains("PaperCodexPanelButton(")
-                && libraryInspectorActionSource.contains("title: editingNoteID == nil ? \"Add Note\" : \"Save Note\"")
-                && libraryInspectorActionSource.contains("PaperCodexPanelButton(title: \"Cancel\", systemImage: \"xmark\")")
-                && librarySource.contains("PaperCodexTagToggleButton(")
-                && librarySource.contains("private struct PaperCodexTagToggleButton: NSViewRepresentable")
-                && librarySource.contains("private final class NativePaperCodexTagToggleButtonView: NSButton")
+            libraryInspectorActionSource.contains("onCreateCategory")
+                && libraryInspectorActionSource.contains("onCreateTag")
+                && libraryInspectorActionSource.contains("onCreateNote")
+                && libraryInspectorActionSource.contains("onSaveNote")
+                && libraryInspectorActionSource.contains("onCancelNote")
+                && libraryInspectorActionSource.contains("NativeInspectorDetailsTagButton")
+                && libraryInspectorActionSource.contains("NativeInspectorDetailsNoteRowView")
+                && libraryInspectorActionSource.contains("NSButton(checkboxWithTitle:")
+                && libraryInspectorActionSource.contains("NSTextField()")
+                && libraryInspectorActionSource.contains("NSTextView()")
                 && !libraryInspectorActionSource.contains("\n                Button")
                 && !libraryInspectorActionSource.contains("\n                    Button")
                 && !libraryInspectorActionSource.contains(".buttonStyle("),
-            "library inspector category, tag, and note actions should use native AppKit-backed buttons instead of SwiftUI Button styles"
+            "library inspector category, tag, and note actions should use native AppKit controls instead of SwiftUI buttons, grids, and text editors"
         )
     } else {
         throw CheckFailure(description: "library inspector action source should remain inspectable")
@@ -2104,10 +2113,9 @@ func runUILayoutSourceChecks() throws {
                 && managementSheetsSource.contains("title: \"Delete\"")
                 && managementSheetsSource.contains("title: \"Cancel\"")
                 && managementSheetsSource.contains("title: \"Save\"")
-                && managementSheetsSource.contains("PaperNoteSelectionButton(")
-                && librarySource.contains("private struct PaperNoteSelectionButton: NSViewRepresentable")
-                && librarySource.contains("private final class NativePaperNoteSelectionButtonView: NSButton")
-                && librarySource.contains("PaperCodexIconButton(title: \"Delete Note\"")
+                && librarySource.contains("private final class NativeInspectorDetailsNoteRowView: NSView")
+                && librarySource.contains("private let deleteButton = NSButton()")
+                && librarySource.contains("deleteButton.image = NSImage(systemSymbolName: \"trash\"")
                 && !managementSheetsSource.contains("\n                Button")
                 && !managementSheetsSource.contains("\n            Button")
                 && !managementSheetsSource.contains(".buttonStyle("),
@@ -2844,7 +2852,7 @@ func runUILayoutSourceChecks() throws {
         throw CheckFailure(description: "recent conversation detail source should remain inspectable")
     }
     if let inspectorRange = librarySource.range(of: "private var inspector: some View"),
-       let inspectorEndRange = librarySource.range(of: "private func paperMetadataSection", range: inspectorRange.upperBound..<librarySource.endIndex) {
+       let inspectorEndRange = librarySource.range(of: "private struct LibraryPaperInspectorDetailsView", range: inspectorRange.upperBound..<librarySource.endIndex) {
         let inspectorSource = String(librarySource[inspectorRange.lowerBound..<inspectorEndRange.lowerBound])
         try check(
             inspectorSource.contains("LibraryPaperInspectorSummaryView(")
@@ -3539,7 +3547,10 @@ func runUILayoutSourceChecks() throws {
         "library sidebar rows should show category and tag counts"
     )
     try check(
-        librarySource.contains("paperNotesSection"),
+        librarySource.contains("NativeInspectorDetailsNoteRowView")
+            && librarySource.contains("onEditNote")
+            && librarySource.contains("onDeleteNote")
+            && librarySource.contains("onSaveNote"),
         "library inspector should expose per-paper notes"
     )
     try check(
