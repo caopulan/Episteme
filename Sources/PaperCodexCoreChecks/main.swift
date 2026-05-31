@@ -2016,13 +2016,19 @@ func runUILayoutSourceChecks() throws {
        let processSheetEndRange = discoverSource.range(of: "private struct DiscoverProcessActionRow", range: processSheetRange.upperBound..<discoverSource.endIndex) {
         let processSheetSource = String(discoverSource[processSheetRange.lowerBound..<processSheetEndRange.lowerBound])
         try check(
-            processSheetSource.contains("@State private var isProcessButtonHovering = false")
-                && processSheetSource.contains("private struct DiscoverProcessFooterButtonStyle: ButtonStyle")
-                && processSheetSource.contains(".buttonStyle(DiscoverProcessFooterButtonStyle(")
-                && processSheetSource.contains("configuration.isPressed")
-                && processSheetSource.contains("PaperCodexMotion.press")
+            actionButtonSource.contains("struct PaperCodexPanelButton: View")
+                && actionButtonSource.contains("private struct NativePaperCodexPanelButton: NSViewRepresentable")
+                && actionButtonSource.contains("private final class NativePaperCodexPanelButtonView: NSButton")
+                && processSheetSource.contains("PaperCodexPanelButton(title: \"Cancel\", systemImage: \"xmark\")")
+                && processSheetSource.contains("PaperCodexPanelButton(\n                    title: \"Process Results\"")
+                && processSheetSource.contains("kind: .primary")
+                && processSheetSource.contains("disabled: !canProcessResults")
+                && !processSheetSource.contains("@State private var isProcessButtonHovering = false")
+                && !processSheetSource.contains("@State private var isCancelButtonHovering = false")
+                && !processSheetSource.contains("private struct DiscoverProcessFooterButtonStyle: ButtonStyle")
+                && !processSheetSource.contains(".buttonStyle(DiscoverProcessFooterButtonStyle(")
                 && !processSheetSource.contains(".buttonStyle(.borderedProminent)"),
-            "Discover and Search process confirmation should provide immediate pressed feedback before starting long processing"
+            "Discover and Search process confirmation should use native AppKit panel buttons before starting long processing"
         )
     } else {
         throw CheckFailure(description: "Discover process action sheet source should remain inspectable")

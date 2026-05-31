@@ -87,6 +87,8 @@ struct PaperCodexPanelButton: View {
     var kind: PaperCodexPanelButtonKind = .secondary
     var disabled = false
     var role: ButtonRole?
+    var keyEquivalent = ""
+    var keyEquivalentModifierMask: NSEvent.ModifierFlags = []
     var action: () -> Void
 
     var body: some View {
@@ -96,6 +98,8 @@ struct PaperCodexPanelButton: View {
             kind: kind,
             disabled: disabled,
             role: role,
+            keyEquivalent: keyEquivalent,
+            keyEquivalentModifierMask: keyEquivalentModifierMask,
             reduceMotion: reduceMotion,
             action: action
         )
@@ -338,6 +342,8 @@ private struct NativePaperCodexPanelButton: NSViewRepresentable {
     var kind: PaperCodexPanelButtonKind
     var disabled: Bool
     var role: ButtonRole?
+    var keyEquivalent: String
+    var keyEquivalentModifierMask: NSEvent.ModifierFlags
     var reduceMotion: Bool
     var action: () -> Void
 
@@ -349,6 +355,8 @@ private struct NativePaperCodexPanelButton: NSViewRepresentable {
             kind: kind,
             disabled: disabled,
             role: role,
+            keyEquivalent: keyEquivalent,
+            keyEquivalentModifierMask: keyEquivalentModifierMask,
             reduceMotion: reduceMotion,
             action: action
         )
@@ -362,6 +370,8 @@ private struct NativePaperCodexPanelButton: NSViewRepresentable {
             kind: kind,
             disabled: disabled,
             role: role,
+            keyEquivalent: keyEquivalent,
+            keyEquivalentModifierMask: keyEquivalentModifierMask,
             reduceMotion: reduceMotion,
             action: action
         )
@@ -1369,6 +1379,8 @@ private final class NativePaperCodexPanelButtonView: NSButton {
         kind: PaperCodexPanelButtonKind,
         disabled: Bool,
         role: ButtonRole?,
+        keyEquivalent: String,
+        keyEquivalentModifierMask: NSEvent.ModifierFlags,
         reduceMotion: Bool,
         action: @escaping () -> Void
     ) {
@@ -1378,6 +1390,8 @@ private final class NativePaperCodexPanelButtonView: NSButton {
         isDisabled = disabled
         self.reduceMotion = reduceMotion
         isEnabled = !disabled
+        self.keyEquivalent = keyEquivalent
+        self.keyEquivalentModifierMask = keyEquivalentModifierMask
         hasIcon = systemImage != nil
         titleLabel.stringValue = localizedTitle
         iconView.image = systemImage.flatMap { NSImage(systemSymbolName: $0, accessibilityDescription: localizedTitle) }
