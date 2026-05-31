@@ -1,3 +1,4 @@
+import AppKit
 import PaperCodexCore
 import SwiftUI
 
@@ -1010,85 +1011,252 @@ private struct ChatAppearancePreview: View {
 }
 
 private struct SettingsCategoryToggleRow: View {
-    @State private var isHovering = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var title: String
     var selected: Bool
     var action: () -> Void
 
     var body: some View {
-        Button(action: action) {
-            HStack(spacing: 8) {
-                Image(systemName: selected ? "checkmark.square.fill" : "square")
-                    .foregroundStyle(selected ? Color.accentColor : Color.secondary)
-                Image(systemName: "folder")
-                    .foregroundStyle(.secondary)
-                Text(title)
-                    .lineLimit(1)
-                Spacer(minLength: 0)
-            }
-            .font(.paperCodexSystem(size: 12, weight: .medium))
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(SettingsSelectableRowButtonStyle(selected: selected, isHovering: isHovering))
-        .onHover { hovering in
-            withAnimation(PaperCodexMotion.hover) {
-                isHovering = hovering
-            }
-        }
+        NativeSettingsCategoryToggleButton(
+            title: title,
+            selected: selected,
+            reduceMotion: reduceMotion,
+            action: action
+        )
+        .frame(maxWidth: .infinity, minHeight: 30, maxHeight: 30)
+        .help(title)
     }
 }
 
-private struct SettingsSelectableRowButtonStyle: ButtonStyle {
+private struct NativeSettingsCategoryToggleButton: NSViewRepresentable {
+    var title: String
     var selected: Bool
-    var isHovering: Bool
+    var reduceMotion: Bool
+    var action: () -> Void
 
-    func makeBody(configuration: Configuration) -> some View {
-        let isPressed = configuration.isPressed
-        configuration.label
-            .foregroundStyle(labelColor(isPressed: isPressed))
-            .background(
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(backgroundColor(isPressed: isPressed))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 6)
-                    .stroke(borderColor(isPressed: isPressed), lineWidth: 1)
-            )
-            .scaleEffect(isPressed ? 0.985 : (isHovering ? 1.01 : 1), anchor: .center)
-            .animation(PaperCodexMotion.press, value: configuration.isPressed)
-            .animation(PaperCodexMotion.hover, value: isHovering)
-            .animation(PaperCodexMotion.selection, value: selected)
+    func makeNSView(context: Context) -> NativeSettingsCategoryToggleButtonView {
+        let view = NativeSettingsCategoryToggleButtonView()
+        view.apply(title: title, selected: selected, reduceMotion: reduceMotion, action: action)
+        return view
     }
 
-    private func labelColor(isPressed: Bool) -> Color {
-        if selected || isPressed || isHovering {
-            return Color.primary.opacity(0.92)
+    func updateNSView(_ view: NativeSettingsCategoryToggleButtonView, context: Context) {
+        view.apply(title: title, selected: selected, reduceMotion: reduceMotion, action: action)
+    }
+}
+
+private final class NativeSettingsCategoryToggleButtonView: NSButton {
+    private enum Metrics {
+        static let rowHeight: CGFloat = 30
+        static let horizontalPadding: CGFloat = 8
+        static let iconSize: CGFloat = 15
+        static let folderSize: CGFloat = 14
+        static let checkFolderSpacing: CGFloat = 7
+        static let folderTitleSpacing: CGFloat = 8
+        static let cornerRadius: CGFloat = 6
+    }
+
+    private let checkImageView = NSImageView()
+    private let folderImageView = NSImageView()
+    private let titleLabel = NSTextField(labelWithString: "")
+    private var trackingArea: NSTrackingArea?
+    private var pressHandler: () -> Void = {}
+    private var isHovering = false
+    private var isPressed = false
+    private var isSelectedRow = false
+    private var reduceMotion = false
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override var isFlipped: Bool {
+        true
+    }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: Metrics.rowHeight)
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+
+    override var acceptsFirstResponder: Bool {
+        true
+    }
+
+    override func accessibilityValue() -> Any? {
+        isSelectedRow ? NSLocalizedString("Selected", comment: "") : NSLocalizedString("Not selected", comment: "")
+    }
+
+    override func accessibilityPerformPress() -> Bool {
+        pressHandler()
+        return true
+    }
+
+    func apply(title: String, selected: Bool, reduceMotion: Bool, action: @escaping () -> Void) {
+        pressHandler = action
+        isSelectedRow = selected
+        self.reduceMotion = reduceMotion
+        self.title = ""
+        state = selected ? .on : .off
+        toolTip = title
+        titleLabel.stringValue = title
+        checkImageView.image = NSImage(
+            systemSymbolName: selected ? "checkmark.square.fill" : "square",
+            accessibilityDescription: selected ? NSLocalizedString("Selected", comment: "") : NSLocalizedString("Not selected", comment: "")
+        )
+        folderImageView.image = NSImage(systemSymbolName: "folder", accessibilityDescription: title)
+        setAccessibilityLabel(title)
+        updateAppearance()
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea {
+            removeTrackingArea(trackingArea)
         }
-        return Color.primary.opacity(0.82)
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.activeInKeyWindow, .mouseEnteredAndExited, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        trackingArea = area
     }
 
-    private func backgroundColor(isPressed: Bool) -> Color {
+    override func mouseEntered(with event: NSEvent) {
+        isHovering = true
+        updateAppearance()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHovering = false
+        isPressed = false
+        updateAppearance()
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        setPressed(true)
+        pressHandler()
+        DispatchQueue.main.async { [weak self] in
+            self?.setPressed(false)
+        }
+    }
+
+    override func keyDown(with event: NSEvent) {
+        if event.keyCode == 36 || event.keyCode == 49 {
+            setPressed(true)
+            pressHandler()
+            DispatchQueue.main.async { [weak self] in
+                self?.setPressed(false)
+            }
+            return
+        }
+        super.keyDown(with: event)
+    }
+
+    private func setup() {
+        translatesAutoresizingMaskIntoConstraints = false
+        isBordered = false
+        bezelStyle = .regularSquare
+        imagePosition = .noImage
+        focusRingType = .none
+        setButtonType(.switch)
+        setAccessibilityElement(true)
+        setAccessibilityRole(.checkBox)
+        wantsLayer = true
+        layer?.cornerRadius = Metrics.cornerRadius
+        layer?.masksToBounds = false
+
+        checkImageView.translatesAutoresizingMaskIntoConstraints = false
+        checkImageView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 13, weight: .semibold)
+        checkImageView.imageScaling = .scaleProportionallyDown
+
+        folderImageView.translatesAutoresizingMaskIntoConstraints = false
+        folderImageView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 12, weight: .medium)
+        folderImageView.imageScaling = .scaleProportionallyDown
+
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        titleLabel.font = .systemFont(ofSize: 12, weight: .medium)
+        titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.maximumNumberOfLines = 1
+        titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        [checkImageView, folderImageView, titleLabel].forEach(addSubview(_:))
+
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: Metrics.rowHeight),
+            checkImageView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Metrics.horizontalPadding),
+            checkImageView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            checkImageView.widthAnchor.constraint(equalToConstant: Metrics.iconSize),
+            checkImageView.heightAnchor.constraint(equalToConstant: Metrics.iconSize),
+            folderImageView.leadingAnchor.constraint(equalTo: checkImageView.trailingAnchor, constant: Metrics.checkFolderSpacing),
+            folderImageView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            folderImageView.widthAnchor.constraint(equalToConstant: Metrics.folderSize),
+            folderImageView.heightAnchor.constraint(equalToConstant: Metrics.folderSize),
+            titleLabel.leadingAnchor.constraint(equalTo: folderImageView.trailingAnchor, constant: Metrics.folderTitleSpacing),
+            titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -Metrics.horizontalPadding)
+        ])
+        updateAppearance()
+    }
+
+    private func setPressed(_ pressed: Bool) {
+        isPressed = pressed
+        updateAppearance()
+    }
+
+    private func updateAppearance() {
+        let accent = NSColor.controlAccentColor
+        checkImageView.contentTintColor = isSelectedRow ? accent : NSColor.secondaryLabelColor
+        folderImageView.contentTintColor = isSelectedRow ? accent.withAlphaComponent(0.86) : NSColor.secondaryLabelColor
+        titleLabel.textColor = (isSelectedRow || isPressed || isHovering)
+            ? NSColor.labelColor.withAlphaComponent(0.92)
+            : NSColor.labelColor.withAlphaComponent(0.82)
+
+        let background: NSColor
+        let border: NSColor
         if isPressed {
-            return Color.accentColor.opacity(0.16)
+            background = accent.withAlphaComponent(0.16)
+            border = accent.withAlphaComponent(0.44)
+        } else if isSelectedRow {
+            background = accent.withAlphaComponent(0.10)
+            border = accent.withAlphaComponent(0.26)
+        } else if isHovering {
+            background = accent.withAlphaComponent(0.07)
+            border = accent.withAlphaComponent(0.22)
+        } else {
+            background = .controlBackgroundColor
+            border = .clear
         }
-        if selected {
-            return Color.accentColor.opacity(0.10)
-        }
-        return isHovering ? Color.accentColor.opacity(0.07) : Color(nsColor: .controlBackgroundColor)
-    }
 
-    private func borderColor(isPressed: Bool) -> Color {
-        if isPressed {
-            return Color.accentColor.opacity(0.44)
+        layer?.backgroundColor = background.cgColor
+        layer?.borderWidth = border == .clear ? 0 : 1
+        layer?.borderColor = border.cgColor
+
+        let targetScale: CGFloat
+        if reduceMotion {
+            targetScale = 1
+        } else if isPressed {
+            targetScale = 0.985
+        } else {
+            targetScale = isHovering ? 1.01 : 1
         }
-        if selected {
-            return Color.accentColor.opacity(0.26)
-        }
-        return isHovering ? Color.accentColor.opacity(0.22) : Color.clear
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(reduceMotion)
+        CATransaction.setAnimationDuration(reduceMotion ? 0 : (isPressed ? 0.05 : 0.12))
+        layer?.transform = CATransform3DMakeScale(targetScale, targetScale, 1)
+        CATransaction.commit()
     }
 }
 

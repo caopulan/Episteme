@@ -2276,18 +2276,29 @@ func runUILayoutSourceChecks() throws {
             && !settingsViewSource.contains("private final class NativeSettingsActionButtonView: NSButton")
             && !settingsViewSource.contains("private struct SettingsActionButtonStyle: ButtonStyle")
             && !settingsViewSource.contains(".buttonStyle(SettingsActionButtonStyle(")
-            && settingsViewSource.contains("private struct SettingsCategoryToggleRow: View")
-            && settingsViewSource.contains("private struct SettingsSelectableRowButtonStyle: ButtonStyle")
-            && settingsViewSource.contains(".buttonStyle(SettingsSelectableRowButtonStyle(")
             && settingsViewSource.contains("PaperCodexIconButton(title: \"Move Up\"")
             && settingsViewSource.contains("PaperCodexIconButton(title: \"Reveal in Finder\"")
-            && settingsViewSource.contains("configuration.isPressed")
-            && settingsViewSource.contains("PaperCodexMotion.press")
             && !settingsViewSource.contains(".buttonStyle(.borderedProminent)")
             && !settingsViewSource.contains(".buttonStyle(.bordered)")
             && !settingsViewSource.contains(".buttonStyle(.borderless)")
             && !settingsViewSource.contains(".buttonStyle(.plain)"),
         "Settings action buttons should use native AppKit buttons with immediate pressed feedback instead of system default delayed button chrome"
+    )
+    try check(
+        settingsViewSource.contains("private struct SettingsCategoryToggleRow: View")
+            && settingsViewSource.contains("NativeSettingsCategoryToggleButton(")
+            && settingsViewSource.contains("private struct NativeSettingsCategoryToggleButton: NSViewRepresentable")
+            && settingsViewSource.contains("private final class NativeSettingsCategoryToggleButtonView: NSButton")
+            && settingsViewSource.contains("override func mouseDown(with event: NSEvent)")
+            && settingsViewSource.contains("override func accessibilityValue() -> Any?")
+            && settingsViewSource.contains("setAccessibilityRole(.checkBox)")
+            && settingsViewSource.contains("setButtonType(.switch)")
+            && !settingsViewSource.contains("setButtonType(.toggle)")
+            && settingsViewSource.contains("CATransaction.setAnimationDuration")
+            && !settingsViewSource.contains("private struct SettingsSelectableRowButtonStyle: ButtonStyle")
+            && !settingsViewSource.contains(".buttonStyle(SettingsSelectableRowButtonStyle(")
+            && !settingsViewSource.contains("@State private var isHovering = false"),
+        "Settings category rows should use native AppKit checkbox buttons with immediate selection feedback"
     )
     try check(
         homeChromeSource.contains("static let sidebarTopPadding: CGFloat = 28")
