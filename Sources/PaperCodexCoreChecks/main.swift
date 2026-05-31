@@ -1928,6 +1928,29 @@ func runUILayoutSourceChecks() throws {
     } else {
         throw CheckFailure(description: "settings chat appearance section source should remain inspectable")
     }
+    if let arxivFeedRange = settingsViewSource.range(of: "private var arxivFeedSettings: some View"),
+       let arxivFeedEndRange = settingsViewSource.range(of: "private var globalLanguageSettings: some View", range: arxivFeedRange.upperBound..<settingsViewSource.endIndex) {
+        let arxivFeedSettingsSource = String(settingsViewSource[arxivFeedRange.lowerBound..<arxivFeedEndRange.lowerBound])
+        try check(
+            !arxivFeedSettingsSource.contains("\n            TextField(")
+                && settingsViewSource.contains("SettingsTextField(")
+                && !arxivFeedSettingsSource.contains(".textFieldStyle(.roundedBorder)"),
+            "arXiv settings controls should use native SettingsTextField instead of SwiftUI text fields"
+        )
+    } else {
+        throw CheckFailure(description: "settings arXiv section source should remain inspectable")
+    }
+    if let localRankingRange = settingsViewSource.range(of: "private var localRankingSettings: some View"),
+       let localRankingEndRange = settingsViewSource.range(of: "private var codexEnrichmentSettings: some View", range: localRankingRange.upperBound..<settingsViewSource.endIndex) {
+        let localRankingSettingsSource = String(settingsViewSource[localRankingRange.lowerBound..<localRankingEndRange.lowerBound])
+        try check(
+            !localRankingSettingsSource.contains("\n            TextField(")
+                && !localRankingSettingsSource.contains(".textFieldStyle(.roundedBorder)"),
+            "Local ranking settings controls should use native SettingsTextField instead of SwiftUI text fields"
+        )
+    } else {
+        throw CheckFailure(description: "settings local ranking section source should remain inspectable")
+    }
     if let codexEnrichmentRange = settingsViewSource.range(of: "private var codexEnrichmentSettings: some View"),
        let codexEnrichmentEndRange = settingsViewSource.range(of: "private var discoverCodexProcessingSettings: some View", range: codexEnrichmentRange.upperBound..<settingsViewSource.endIndex) {
         let codexEnrichmentSettingsSource = String(settingsViewSource[codexEnrichmentRange.lowerBound..<codexEnrichmentEndRange.lowerBound])
@@ -1956,6 +1979,8 @@ func runUILayoutSourceChecks() throws {
             discoverProcessingSource.components(separatedBy: "SettingsModelPopup(").count - 1 == 1
                 && discoverProcessingSource.contains("SettingsReasoningEffortPopup(")
                 && discoverProcessingSource.contains("SettingsIntegerStepper(")
+                && !discoverProcessingSource.contains("\n            TextField(")
+                && !discoverProcessingSource.contains(".textFieldStyle(.roundedBorder)")
                 && settingsViewSource.contains("private struct SettingsModelPopup: View")
                 && settingsViewSource.contains("private struct SettingsReasoningEffortPopup: View")
                 && settingsViewSource.contains("private struct NativeSettingsPopupButton: NSViewRepresentable")
@@ -2000,11 +2025,25 @@ func runUILayoutSourceChecks() throws {
                 && !agentRuntimeSource.contains(".toggleStyle(.checkbox)")
                 && !agentRuntimeSource.contains(".pickerStyle(.menu)")
                 && !embeddingSource.contains("\n            Toggle(")
-                && !embeddingSource.contains(".toggleStyle(.checkbox)"),
+                && !embeddingSource.contains(".toggleStyle(.checkbox)")
+                && !embeddingSource.contains("\n            TextField(")
+                && !embeddingSource.contains("\n            SecureField(")
+                && !embeddingSource.contains(".textFieldStyle(.roundedBorder)"),
             "Settings service and runtime controls should use native AppKit checkbox and popup controls"
         )
     } else {
         throw CheckFailure(description: "settings service and runtime sections source should remain inspectable")
+    }
+    if let quickPromptRange = settingsViewSource.range(of: "private var quickPromptSettings: some View"),
+       let quickPromptEndRange = settingsViewSource.range(of: "private var storageRules: some View", range: quickPromptRange.upperBound..<settingsViewSource.endIndex) {
+        let quickPromptSettingsSource = String(settingsViewSource[quickPromptRange.lowerBound..<quickPromptEndRange.lowerBound])
+        try check(
+            !quickPromptSettingsSource.contains("\n            TextField(")
+                && !quickPromptSettingsSource.contains(".textFieldStyle(.roundedBorder)"),
+            "Quick prompt main settings controls should use native SettingsTextField"
+        )
+    } else {
+        throw CheckFailure(description: "quick prompt section source should remain inspectable")
     }
     if let storageRulesRange = settingsViewSource.range(of: "private var storageRules: some View"),
        let storageRulesEndRange = settingsViewSource.range(of: "private var cacheControls: some View", range: storageRulesRange.upperBound..<settingsViewSource.endIndex) {

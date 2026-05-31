@@ -151,8 +151,11 @@ struct SettingsView: View {
 
     private var arxivFeedSettings: some View {
         settingsSection(title: "arXiv Feed", systemImage: "network") {
-            TextField("Categories, comma separated", text: $draftArxivCategories)
-                .textFieldStyle(.roundedBorder)
+            SettingsTextField(
+                title: "Categories, comma separated",
+                text: $draftArxivCategories,
+                placeholder: "Categories, comma separated"
+            )
             HStack {
                 SettingsActionButton(
                     title: isArxivFeedDirty ? "Save Categories" : "Saved",
@@ -261,10 +264,16 @@ struct SettingsView: View {
 
     private var localRankingSettings: some View {
         settingsSection(title: "Local Ranking", systemImage: "slider.horizontal.3") {
-            TextField("Whitelist tags, comma separated", text: $draftWhitelistTags)
-                .textFieldStyle(.roundedBorder)
-            TextField("Blacklist tags, comma separated", text: $draftBlacklistTags)
-                .textFieldStyle(.roundedBorder)
+            SettingsTextField(
+                title: "Whitelist tags, comma separated",
+                text: $draftWhitelistTags,
+                placeholder: "Whitelist tags, comma separated"
+            )
+            SettingsTextField(
+                title: "Blacklist tags, comma separated",
+                text: $draftBlacklistTags,
+                placeholder: "Blacklist tags, comma separated"
+            )
             VStack(alignment: .leading, spacing: 8) {
                 Text("Similarity categories")
                     .font(.caption.weight(.semibold))
@@ -366,8 +375,11 @@ struct SettingsView: View {
                 }
             }
 
-            TextField("Custom model override", text: $draftDiscoverCodexModel)
-                .textFieldStyle(.roundedBorder)
+            SettingsTextField(
+                title: "Custom model override",
+                text: $draftDiscoverCodexModel,
+                placeholder: "Custom model override"
+            )
 
             SettingsIntegerStepper(
                 title: "Concurrent Codex processes",
@@ -585,19 +597,25 @@ struct SettingsView: View {
 
             HStack(spacing: 10) {
                 if profile.backend == .hermes || profile.backend == .pi {
-                    TextField("Provider", text: Binding(
+                    SettingsTextField(
+                        title: "Provider",
+                        text: Binding(
                         get: { model.agentRuntimeProviderOverride(for: profile.id) },
                         set: { model.setAgentRuntimeProviderOverride($0, for: profile.id) }
-                    ))
-                    .textFieldStyle(.roundedBorder)
+                    ),
+                        placeholder: "Provider"
+                    )
                     .frame(maxWidth: 150)
                 }
 
-                TextField(profile.defaultModelID ?? "Model override", text: Binding(
-                    get: { model.agentRuntimeModelOverride(for: profile.id) },
-                    set: { model.setAgentRuntimeModelOverride($0, for: profile.id) }
-                ))
-                .textFieldStyle(.roundedBorder)
+                SettingsTextField(
+                    title: profile.defaultModelID ?? "Model override",
+                    text: Binding(
+                        get: { model.agentRuntimeModelOverride(for: profile.id) },
+                        set: { model.setAgentRuntimeModelOverride($0, for: profile.id) }
+                    ),
+                    placeholder: profile.defaultModelID ?? "Model override"
+                )
                 .frame(maxWidth: 220)
 
                 SettingsMCPModePopup(selection: model.agentRuntimeMCPMode(for: profile.id)) { mode in
@@ -622,12 +640,21 @@ struct SettingsView: View {
             ) { isOn in
                 draftEmbeddingEnabled = isOn
             }
-            TextField("Base URL", text: $draftEmbeddingBaseURL)
-                .textFieldStyle(.roundedBorder)
-            SecureField("API key (leave blank to keep saved)", text: $draftEmbeddingAPIKey)
-                .textFieldStyle(.roundedBorder)
-            TextField("Model", text: $draftEmbeddingModel)
-                .textFieldStyle(.roundedBorder)
+            SettingsTextField(
+                title: "Base URL",
+                text: $draftEmbeddingBaseURL,
+                placeholder: "Base URL"
+            )
+            SettingsSecureField(
+                title: "API key (leave blank to keep saved)",
+                text: $draftEmbeddingAPIKey,
+                placeholder: "API key (leave blank to keep saved)"
+            )
+            SettingsTextField(
+                title: "Model",
+                text: $draftEmbeddingModel,
+                placeholder: "Model"
+            )
             HStack {
                 SettingsActionButton(
                     title: isEmbeddingDirty ? "Save Embedding" : "Saved",
@@ -700,8 +727,11 @@ struct SettingsView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                 }
 
-                TextField("Prompt title", text: $newPromptTitle)
-                    .textFieldStyle(.roundedBorder)
+                SettingsTextField(
+                    title: "Prompt title",
+                    text: $newPromptTitle,
+                    placeholder: "Prompt title"
+                )
                 TextEditor(text: $newPromptContent)
                     .font(.paperCodexSystem(size: 13))
                     .frame(minHeight: 78)
@@ -1626,7 +1656,222 @@ private extension NSPopUpButton {
     }
 }
 
-private struct SettingsIntegerStepper: View {
+    private struct SettingsTextField: View {
+        var title: String
+        @Binding var text: String
+        var placeholder: String
+        var onCommit: () -> Void = {}
+
+        var body: some View {
+            NativeSettingsTextField(
+                title: title,
+                text: $text,
+                placeholder: placeholder,
+                onCommit: onCommit
+            )
+            .frame(maxWidth: .infinity, minHeight: 28, maxHeight: 28, alignment: .leading)
+            .help(title)
+        }
+    }
+
+    private struct SettingsSecureField: View {
+        var title: String
+        @Binding var text: String
+        var placeholder: String
+        var onCommit: () -> Void = {}
+
+        var body: some View {
+            NativeSettingsSecureField(
+                title: title,
+                text: $text,
+                placeholder: placeholder,
+                onCommit: onCommit
+            )
+            .frame(maxWidth: .infinity, minHeight: 28, maxHeight: 28, alignment: .leading)
+            .help(title)
+        }
+    }
+
+    private struct NativeSettingsTextField: NSViewRepresentable {
+        var title: String
+        @Binding var text: String
+        var placeholder: String
+        var onCommit: () -> Void = {}
+
+        func makeNSView(context: Context) -> NativeSettingsTextFieldView {
+            let view = NativeSettingsTextFieldView()
+            context.coordinator.update(text: $text, onCommit: onCommit)
+            view.delegate = context.coordinator
+            view.apply(
+                title: title,
+                text: text,
+                placeholder: placeholder
+            )
+            return view
+        }
+
+        func updateNSView(_ view: NativeSettingsTextFieldView, context: Context) {
+            context.coordinator.update(text: $text, onCommit: onCommit)
+            view.delegate = context.coordinator
+            view.apply(
+                title: title,
+                text: text,
+                placeholder: placeholder
+            )
+        }
+
+        func makeCoordinator() -> SettingsTextFieldCoordinator {
+            SettingsTextFieldCoordinator(text: $text, onCommit: onCommit)
+        }
+    }
+
+    private struct NativeSettingsSecureField: NSViewRepresentable {
+        var title: String
+        @Binding var text: String
+        var placeholder: String
+        var onCommit: () -> Void = {}
+
+        func makeNSView(context: Context) -> NativeSettingsSecureFieldView {
+            let view = NativeSettingsSecureFieldView()
+            context.coordinator.update(text: $text, onCommit: onCommit)
+            view.delegate = context.coordinator
+            view.apply(
+                title: title,
+                text: text,
+                placeholder: placeholder
+            )
+            return view
+        }
+
+        func updateNSView(_ view: NativeSettingsSecureFieldView, context: Context) {
+            context.coordinator.update(text: $text, onCommit: onCommit)
+            view.delegate = context.coordinator
+            view.apply(
+                title: title,
+                text: text,
+                placeholder: placeholder
+            )
+        }
+
+        func makeCoordinator() -> SettingsTextFieldCoordinator {
+            SettingsTextFieldCoordinator(text: $text, onCommit: onCommit)
+        }
+    }
+
+    private final class SettingsTextFieldCoordinator: NSObject, NSTextFieldDelegate {
+        private var text: Binding<String>
+        private var onCommit: () -> Void
+
+        init(text: Binding<String>, onCommit: @escaping () -> Void) {
+            self.text = text
+            self.onCommit = onCommit
+            super.init()
+        }
+
+        func update(text: Binding<String>, onCommit: @escaping () -> Void) {
+            self.text = text
+            self.onCommit = onCommit
+        }
+
+        func controlTextDidChange(_ obj: Notification) {
+            guard let textField = obj.object as? NSTextField else {
+                return
+            }
+            text.wrappedValue = textField.stringValue
+        }
+
+        func controlTextDidEndEditing(_ obj: Notification) {
+            onCommit()
+        }
+    }
+
+    private final class NativeSettingsTextFieldView: NSTextField {
+        override init(frame frameRect: NSRect) {
+            super.init(frame: frameRect)
+            setup()
+        }
+
+        required init?(coder: NSCoder) {
+            nil
+        }
+
+        override var intrinsicContentSize: NSSize {
+            NSSize(width: NSView.noIntrinsicMetric, height: 28)
+        }
+
+        override var isFlipped: Bool {
+            true
+        }
+
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+            true
+        }
+
+        func apply(title: String, text: String, placeholder: String) {
+            setAccessibilityLabel(title)
+            setAccessibilityValue(text)
+            font = .systemFont(ofSize: 13)
+            stringValue = text
+            placeholderString = placeholder
+            toolTip = title
+        }
+
+        private func setup() {
+            translatesAutoresizingMaskIntoConstraints = false
+            isBordered = true
+            bezelStyle = .roundedBezel
+            isBezeled = true
+            usesSingleLineMode = true
+            lineBreakMode = .byTruncatingTail
+            focusRingType = .default
+            font = .systemFont(ofSize: 13)
+            setAccessibilityRole(.textField)
+        }
+    }
+
+    private final class NativeSettingsSecureFieldView: NSSecureTextField {
+        override init(frame frameRect: NSRect) {
+            super.init(frame: frameRect)
+            setup()
+        }
+
+        required init?(coder: NSCoder) {
+            nil
+        }
+
+        override var intrinsicContentSize: NSSize {
+            NSSize(width: NSView.noIntrinsicMetric, height: 28)
+        }
+
+        override var isFlipped: Bool {
+            true
+        }
+
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+            true
+        }
+
+        func apply(title: String, text: String, placeholder: String) {
+            setAccessibilityLabel(title)
+            setAccessibilityValue(text.isEmpty ? "" : "\(text.count) characters")
+            font = .systemFont(ofSize: 13)
+            stringValue = text
+            placeholderString = placeholder
+            toolTip = title
+        }
+
+        private func setup() {
+            translatesAutoresizingMaskIntoConstraints = false
+            isBordered = true
+            usesSingleLineMode = true
+            lineBreakMode = .byTruncatingTail
+            focusRingType = .default
+            font = .systemFont(ofSize: 13)
+            setAccessibilityRole(.textField)
+        }
+    }
+
+    private struct SettingsIntegerStepper: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var title: String
