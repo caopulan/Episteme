@@ -288,8 +288,8 @@ private struct AddPaperToSessionSheet: View {
         VStack(alignment: .leading, spacing: 14) {
             Label("Add Paper", systemImage: "plus")
                 .font(.title3.weight(.semibold))
-            TextField("Search library", text: $query)
-                .textFieldStyle(.roundedBorder)
+            PaperCodexNativeTextField(text: $query, placeholder: "Search library")
+                .frame(height: 30)
             if filteredPapers.isEmpty {
                 ContentUnavailableView("No Papers", systemImage: "doc.text.magnifyingglass")
                     .frame(width: 520, height: 220)

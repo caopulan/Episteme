@@ -749,18 +749,19 @@ struct LibraryView: View {
             } else {
                 VStack(alignment: .leading, spacing: 6) {
                     ForEach(flattenedCategoryItems()) { item in
-                        Toggle(isOn: Binding(
-                            get: {
-                                model.paperCategoryIDsByID[paper.id, default: []].contains(item.category.id)
-                            },
-                            set: { isAssigned in
-                                model.setCategory(item.category.id, assigned: isAssigned, for: paper)
-                            }
-                        )) {
-                            Text(item.category.name)
-                                .padding(.leading, CGFloat(item.depth * 14))
-                        }
-                        .toggleStyle(.checkbox)
+                        PaperCodexNativeCheckboxRow(
+                            isOn: Binding(
+                                get: {
+                                    model.paperCategoryIDsByID[paper.id, default: []].contains(item.category.id)
+                                },
+                                set: { isAssigned in
+                                    model.setCategory(item.category.id, assigned: isAssigned, for: paper)
+                                }
+                            ),
+                            title: item.category.name,
+                            indentation: CGFloat(item.depth * 14)
+                        )
+                        .frame(height: 26)
                     }
                 }
             }
@@ -831,18 +832,15 @@ struct LibraryView: View {
                 }
             }
 
-            TextField("Note title", text: $noteTitle)
-                .textFieldStyle(.roundedBorder)
-            TextEditor(text: $noteBody)
-                .font(.paperCodexSystem(size: 12.5))
-                .frame(minHeight: 72)
-                .scrollContentBackground(.hidden)
-                .background(Color(nsColor: .textBackgroundColor))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 7)
-                        .stroke(Color.black.opacity(0.08), lineWidth: 1)
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 7))
+            PaperCodexNativeTextField(text: $noteTitle, placeholder: "Note title")
+                .frame(height: 30)
+            PaperCodexNativeTextEditor(
+                text: $noteBody,
+                accessibilityLabel: "Note body",
+                font: .systemFont(ofSize: 12.5),
+                minHeight: 72
+            )
+            .frame(minHeight: 72)
             HStack {
                 Button {
                     model.saveNote(paperID: paper.id, noteID: editingNoteID, title: noteTitle, bodyMarkdown: noteBody)
@@ -2749,19 +2747,28 @@ private struct LibraryBulkCopySheet: View {
 
     @State private var targetCategoryID = ""
 
+    private var destinationItems: [PaperCodexNativePopupItem] {
+        [PaperCodexNativePopupItem(title: "No folder", value: "")]
+            + categoryItems.map { item in
+                PaperCodexNativePopupItem(
+                    title: String(repeating: "  ", count: item.depth) + item.category.name,
+                    value: item.category.id
+                )
+            }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Label("Copy Papers", systemImage: "doc.on.doc")
                 .font(.title3.weight(.semibold))
             Text("\(selectedCount) selected papers")
                 .foregroundStyle(.secondary)
-            Picker("Destination", selection: $targetCategoryID) {
-                Text("No folder").tag("")
-                ForEach(categoryItems) { item in
-                    Text(String(repeating: "  ", count: item.depth) + item.category.name)
-                        .tag(item.category.id)
-                }
-            }
+            PaperCodexNativePopupButton(
+                selection: $targetCategoryID,
+                items: destinationItems,
+                accessibilityLabel: "Destination"
+            )
+            .frame(height: 30)
             HStack {
                 Spacer()
                 Button("Cancel", action: onCancel)
@@ -2941,7 +2948,8 @@ private struct LibraryArxivImportSheet: View {
 
     @State private var inputText = ""
     @State private var targetCategoryID: String
-    @FocusState private var isInputFocused: Bool
+    @State private var inputFocusRequestID = UUID()
+    @State private var shouldFocusInput = false
 
     init(categoryItems: [CategoryListItem], initialCategoryID: String?, onClose: @escaping () -> Void) {
         self.categoryItems = categoryItems
@@ -2951,6 +2959,16 @@ private struct LibraryArxivImportSheet: View {
 
     private var parsedIDs: [String] {
         ArxivIDExtractor.extractVersionedIDs(from: inputText)
+    }
+
+    private var folderItems: [PaperCodexNativePopupItem] {
+        [PaperCodexNativePopupItem(title: "No folder", value: "")]
+            + categoryItems.map { item in
+                PaperCodexNativePopupItem(
+                    title: String(repeating: "  ", count: item.depth) + item.category.name,
+                    value: item.category.id
+                )
+            }
     }
 
     var body: some View {
@@ -2963,14 +2981,15 @@ private struct LibraryArxivImportSheet: View {
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                TextEditor(text: $inputText)
-                    .font(.paperCodexSystem(size: 13, design: .monospaced))
-                    .frame(minHeight: 110)
-                    .focused($isInputFocused)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(Color.secondary.opacity(0.25), lineWidth: 1)
-                    )
+                PaperCodexNativeTextEditor(
+                    text: $inputText,
+                    accessibilityLabel: "arXiv IDs",
+                    font: .monospacedSystemFont(ofSize: 13, weight: .regular),
+                    minHeight: 110,
+                    focusRequestID: inputFocusRequestID,
+                    isActiveForFocus: shouldFocusInput
+                )
+                .frame(minHeight: 110)
                 if parsedIDs.isEmpty {
                     Text("Paste arXiv IDs, links, PDFs, or any text containing one or more IDs.")
                         .font(.caption)
@@ -2988,13 +3007,12 @@ private struct LibraryArxivImportSheet: View {
                 }
             }
 
-            Picker("Folder", selection: $targetCategoryID) {
-                Text("No folder").tag("")
-                ForEach(categoryItems) { item in
-                    Text(String(repeating: "  ", count: item.depth) + item.category.name)
-                        .tag(item.category.id)
-                }
-            }
+            PaperCodexNativePopupButton(
+                selection: $targetCategoryID,
+                items: folderItems,
+                accessibilityLabel: "Folder"
+            )
+            .frame(height: 30)
 
             HStack {
                 Spacer()
@@ -3016,7 +3034,8 @@ private struct LibraryArxivImportSheet: View {
         .padding(22)
         .frame(width: 540)
         .onAppear {
-            isInputFocused = true
+            shouldFocusInput = true
+            inputFocusRequestID = UUID()
         }
     }
 
@@ -3169,19 +3188,28 @@ private struct CategoryManagementSheet: View {
         _parentID = State(initialValue: category.parentID ?? "")
     }
 
+    private var parentItems: [PaperCodexNativePopupItem] {
+        [PaperCodexNativePopupItem(title: "Top Level", value: "")]
+            + categoryItems.map { item in
+                PaperCodexNativePopupItem(
+                    title: String(repeating: "  ", count: item.depth) + item.category.name,
+                    value: item.category.id
+                )
+            }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Label("Manage Category", systemImage: "folder")
                 .font(.title3.weight(.semibold))
-            TextField("Name", text: $name)
-                .textFieldStyle(.roundedBorder)
-            Picker("Parent", selection: $parentID) {
-                Text("Top Level").tag("")
-                ForEach(categoryItems) { item in
-                    Text(String(repeating: "  ", count: item.depth) + item.category.name)
-                        .tag(item.category.id)
-                }
-            }
+            PaperCodexNativeTextField(text: $name, placeholder: "Name")
+                .frame(height: 30)
+            PaperCodexNativePopupButton(
+                selection: $parentID,
+                items: parentItems,
+                accessibilityLabel: "Parent"
+            )
+            .frame(height: 30)
             HStack {
                 Button(role: .destructive, action: onDelete) {
                     Label("Delete", systemImage: "trash")
@@ -3221,8 +3249,8 @@ private struct TagManagementSheet: View {
         VStack(alignment: .leading, spacing: 16) {
             Label("Manage Tag", systemImage: "tag")
                 .font(.title3.weight(.semibold))
-            TextField("Name", text: $name)
-                .textFieldStyle(.roundedBorder)
+            PaperCodexNativeTextField(text: $name, placeholder: "Name")
+                .frame(height: 30)
             HStack {
                 Button(role: .destructive, action: onDelete) {
                     Label("Delete", systemImage: "trash")
@@ -3287,22 +3315,36 @@ private struct CategoryEditorSheet: View {
     @Binding var parentID: String
     var onCreate: (String, String) -> Void
     var onCancel: () -> Void
-    @FocusState private var isNameFocused: Bool
+    @State private var nameFocusRequestID = UUID()
+    @State private var shouldFocusName = false
+
+    private var parentItems: [PaperCodexNativePopupItem] {
+        [PaperCodexNativePopupItem(title: "Top Level", value: "")]
+            + categoryItems.map { item in
+                PaperCodexNativePopupItem(
+                    title: String(repeating: "  ", count: item.depth) + item.category.name,
+                    value: item.category.id
+                )
+            }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("New Category")
                 .font(.title3.weight(.semibold))
-            TextField("Name", text: $name)
-                .textFieldStyle(.roundedBorder)
-                .focused($isNameFocused)
-            Picker("Parent", selection: $parentID) {
-                Text("Top Level").tag("")
-                ForEach(categoryItems) { item in
-                    Text(String(repeating: "  ", count: item.depth) + item.category.name)
-                        .tag(item.category.id)
-                }
-            }
+            PaperCodexNativeTextField(
+                text: $name,
+                placeholder: "Name",
+                focusRequestID: nameFocusRequestID,
+                isActiveForFocus: shouldFocusName
+            )
+            .frame(height: 30)
+            PaperCodexNativePopupButton(
+                selection: $parentID,
+                items: parentItems,
+                accessibilityLabel: "Parent"
+            )
+            .frame(height: 30)
             HStack {
                 Spacer()
                 Button("Cancel", action: onCancel)
@@ -3316,7 +3358,8 @@ private struct CategoryEditorSheet: View {
         .padding(22)
         .frame(width: 360)
         .onAppear {
-            isNameFocused = true
+            shouldFocusName = true
+            nameFocusRequestID = UUID()
         }
     }
 }
@@ -3330,8 +3373,8 @@ private struct TagEditorSheet: View {
         VStack(alignment: .leading, spacing: 16) {
             Text("New Tag")
                 .font(.title3.weight(.semibold))
-            TextField("Name", text: $name)
-                .textFieldStyle(.roundedBorder)
+            PaperCodexNativeTextField(text: $name, placeholder: "Name")
+                .frame(height: 30)
             HStack {
                 Spacer()
                 Button("Cancel", action: onCancel)

@@ -186,8 +186,8 @@ struct SaveToLibrarySheet: View {
             Image(systemName: "folder.badge.plus")
                 .frame(width: SaveToLibraryLayout.folderIconWidth)
                 .foregroundStyle(Color.accentColor)
-            TextField("New folder", text: $newCategoryName)
-                .textFieldStyle(.roundedBorder)
+            PaperCodexNativeTextField(text: $newCategoryName, placeholder: "New folder")
+                .frame(height: 30)
             PaperCodexIconButton(
                 title: "Add Folder",
                 systemImage: "checkmark",

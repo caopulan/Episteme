@@ -1116,7 +1116,9 @@ func runUILayoutSourceChecks() throws {
         "hover category add buttons should preselect the hovered category as parent"
     )
     try check(
-        librarySource.contains("@FocusState private var isNameFocused"),
+        librarySource.contains("nameFocusRequestID")
+            && librarySource.contains("isActiveForFocus: shouldFocusName")
+            && librarySource.contains("shouldFocusName = true"),
         "category creation sheet should focus the name field for fast child folder creation"
     )
     try check(
@@ -1439,6 +1441,13 @@ func runUILayoutSourceChecks() throws {
     let arxivIDExtractorSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexCore/ArxivIDExtractor.swift"))
     let interactionFeedbackSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/InteractionFeedback.swift"))
     let localArxivClientSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexCore/LocalArxivClient.swift"))
+    let nativeFormControlsURL = root.appendingPathComponent("Sources/PaperCodexApp/PaperCodexNativeFormControls.swift")
+    let nativeFormControlsSource = FileManager.default.fileExists(atPath: nativeFormControlsURL.path) ? try String(contentsOf: nativeFormControlsURL) : ""
+    let swiftUIFormControlRegex = try NSRegularExpression(pattern: #"\b(TextField|SecureField|TextEditor|Picker|Toggle|Stepper|DatePicker)\("#)
+    func hasSwiftUIFormControlUse(_ source: String) -> Bool {
+        let range = NSRange(source.startIndex..<source.endIndex, in: source)
+        return swiftUIFormControlRegex.firstMatch(in: source, range: range) != nil
+    }
     try check(
         appModelSource.contains("case search")
             && appSource.contains("ArxivSearchView()")
@@ -1759,6 +1768,32 @@ func runUILayoutSourceChecks() throws {
             && !chatSource.contains("Stop Codex")
             && !chatSource.contains("ask Codex in this session"),
         "reader chat controls should present runtime-neutral agent labels instead of Codex-only labels"
+    )
+    try check(
+        nativeFormControlsSource.contains("struct PaperCodexNativeTextField: NSViewRepresentable")
+            && nativeFormControlsSource.contains("struct PaperCodexNativeTextEditor: NSViewRepresentable")
+            && nativeFormControlsSource.contains("struct PaperCodexNativePopupButton: NSViewRepresentable")
+            && nativeFormControlsSource.contains("struct PaperCodexNativeCheckboxRow: NSViewRepresentable")
+            && nativeFormControlsSource.contains("final class PaperCodexNativeTextFieldView: NSTextField")
+            && nativeFormControlsSource.contains("final class PaperCodexNativeTextEditorContainerView: NSView")
+            && nativeFormControlsSource.contains("final class PaperCodexNativePopupButtonView: NSPopUpButton")
+            && nativeFormControlsSource.contains("final class PaperCodexNativeCheckboxRowView: NSView")
+            && nativeFormControlsSource.contains("setButtonType(.switch)")
+            && nativeFormControlsSource.contains("setAccessibilityRole(.checkBox)")
+            && nativeFormControlsSource.contains("NSTextView")
+            && nativeFormControlsSource.contains("NSScrollView")
+            && chatSource.contains("PaperCodexNativeTextField(")
+            && saveToLibrarySource.contains("PaperCodexNativeTextField(")
+            && readerViewSource.contains("PaperCodexNativeTextField(")
+            && librarySource.contains("PaperCodexNativeTextField(")
+            && librarySource.contains("PaperCodexNativeTextEditor(")
+            && librarySource.contains("PaperCodexNativePopupButton(")
+            && librarySource.contains("PaperCodexNativeCheckboxRow(")
+            && !hasSwiftUIFormControlUse(chatSource)
+            && !hasSwiftUIFormControlUse(saveToLibrarySource)
+            && !hasSwiftUIFormControlUse(readerViewSource)
+            && !hasSwiftUIFormControlUse(librarySource),
+        "remaining app form inputs should use shared native AppKit text, popup, editor, and checkbox controls"
     )
     try check(
         actionButtonSource.contains("struct PaperCodexToolbarButton")

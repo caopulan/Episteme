@@ -223,8 +223,8 @@ struct ChatView: View {
         VStack(alignment: .leading, spacing: 16) {
             Label("Rename Session", systemImage: "pencil")
                 .font(.title3.weight(.semibold))
-            TextField("Session title", text: $renameSessionTitle)
-                .textFieldStyle(.roundedBorder)
+            PaperCodexNativeTextField(text: $renameSessionTitle, placeholder: "Session title")
+                .frame(height: 30)
             HStack {
                 Spacer()
                 PaperCodexPanelButton(title: "Cancel") {
