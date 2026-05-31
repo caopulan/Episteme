@@ -3329,20 +3329,38 @@ func runUILayoutSourceChecks() throws {
         pdfKitSource.contains("centerPDFPagePointInViewport"),
         "PDF citation jumps should scroll the target point into the middle of the viewport"
     )
-    if let pdfLinkPreviewRange = pdfKitSource.range(of: "private struct PDFLinkPreviewCard: View"),
-       let pdfLinkPreviewEndRange = pdfKitSource.range(of: "private struct ReferenceEntryCard: View", range: pdfLinkPreviewRange.upperBound..<pdfKitSource.endIndex) {
+    if let pdfLinkPreviewRange = pdfKitSource.range(of: "private final class NativePDFLinkPreviewPopoverView: NSView"),
+       let pdfLinkPreviewEndRange = pdfKitSource.range(of: "private final class NativeReferenceEntryPopoverView: NSView", range: pdfLinkPreviewRange.upperBound..<pdfKitSource.endIndex) {
         let pdfLinkPreviewSource = String(pdfKitSource[pdfLinkPreviewRange.lowerBound..<pdfLinkPreviewEndRange.lowerBound])
         try check(
-            pdfLinkPreviewSource.contains("PaperCodexPanelButton(")
-                && pdfLinkPreviewSource.contains("title: preview.actionTitle")
+            pdfLinkPreviewSource.contains("NativePDFPopoverActionButton")
+                && pdfLinkPreviewSource.contains("actionButton.apply(title: preview.actionTitle")
                 && pdfLinkPreviewSource.contains("systemImage: \"arrow.up.right\"")
+                && pdfKitSource.contains("setAccessibilityRole(.button)")
+                && !pdfLinkPreviewSource.contains("PaperCodexPanelButton(")
                 && !pdfLinkPreviewSource.contains("\n                Button")
                 && !pdfLinkPreviewSource.contains(".buttonStyle("),
-            "PDF link preview cards should use the shared native panel button for open actions"
+            "PDF link preview cards should use a native AppKit action button for open actions"
         )
     } else {
         throw CheckFailure(description: "PDF link preview source should remain inspectable")
     }
+    try check(
+        pdfKitSource.contains("private final class NativePDFPopoverViewController: NSViewController")
+            && pdfKitSource.contains("private final class NativeInTextCitationPreviewView: NSView")
+            && pdfKitSource.contains("private final class NativePDFLinkPreviewPopoverView: NSView")
+            && pdfKitSource.contains("private final class NativeReferenceEntryPopoverView: NSView")
+            && pdfKitSource.contains("private final class NativePDFPopoverActionButton: NSButton")
+            && pdfKitSource.contains("popover.contentViewController = NativePDFPopoverViewController")
+            && pdfKitSource.contains("NativeInTextCitationPreviewView(preview: preview)")
+            && pdfKitSource.contains("NativeReferenceEntryPopoverView(entry: entry)")
+            && pdfKitSource.contains("NativePDFLinkPreviewPopoverView(preview: preview")
+            && !pdfKitSource.contains("NSHostingController(rootView:")
+            && !pdfKitSource.contains("private struct InTextCitationPreview: View")
+            && !pdfKitSource.contains("private struct PDFLinkPreviewCard: View")
+            && !pdfKitSource.contains("private struct ReferenceEntryCard: View"),
+        "PDF citation, reference, and link popovers should render with native AppKit views instead of temporary SwiftUI hosting controllers"
+    )
     try check(
         !pdfKitSource.contains("first.y + first.height"),
         "PDF citation jumps should not align the highlight top edge to the viewport top"
@@ -3732,20 +3750,20 @@ func runUILayoutSourceChecks() throws {
         "PDFKit view should show a popup preview for in-text citations"
     )
     try check(
-        pdfKitSource.contains("ReferenceEntryCard"),
-        "PDFKit view should render clicked reference-list entries as a card"
+        pdfKitSource.contains("NativeReferenceEntryPopoverView"),
+        "PDFKit view should render clicked reference-list entries as a native card"
     )
     try check(
-        pdfKitSource.contains("InTextCitationPreview"),
-        "PDFKit view should render non-reference citations as a lightweight preview popup"
+        pdfKitSource.contains("NativeInTextCitationPreviewView"),
+        "PDFKit view should render non-reference citations as a lightweight native preview popup"
     )
     try check(
         pdfKitSource.contains("showPDFLinkPreviewPopover"),
         "PDFKit view should preview PDF hyperlinks before following them"
     )
     try check(
-        pdfKitSource.contains("PDFLinkPreviewCard"),
-        "PDFKit view should render PDF hyperlink previews as a card"
+        pdfKitSource.contains("NativePDFLinkPreviewPopoverView"),
+        "PDFKit view should render PDF hyperlink previews as a native card"
     )
     try check(
         pdfKitSource.contains("PDFActionURL") && pdfKitSource.contains("PDFActionGoTo"),

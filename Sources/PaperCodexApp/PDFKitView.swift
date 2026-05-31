@@ -585,7 +585,7 @@ struct PDFKitView: NSViewRepresentable {
                 at: point,
                 in: pdfView,
                 contentSize: NSSize(width: 380, height: preview.references.isEmpty ? 118 : 220),
-                rootView: InTextCitationPreview(preview: preview)
+                contentView: NativeInTextCitationPreviewView(preview: preview)
             )
         }
 
@@ -595,7 +595,7 @@ struct PDFKitView: NSViewRepresentable {
                 at: point,
                 in: pdfView,
                 contentSize: NSSize(width: 420, height: 230),
-                rootView: ReferenceEntryCard(entry: entry)
+                contentView: NativeReferenceEntryPopoverView(entry: entry)
             )
         }
 
@@ -605,7 +605,7 @@ struct PDFKitView: NSViewRepresentable {
                 at: point,
                 in: pdfView,
                 contentSize: NSSize(width: 400, height: preview.sourceText == nil ? 156 : 196),
-                rootView: PDFLinkPreviewCard(preview: preview) { [weak self, weak pdfView] in
+                contentView: NativePDFLinkPreviewPopoverView(preview: preview) { [weak self, weak pdfView] in
                     guard let pdfView else {
                         return
                     }
@@ -633,18 +633,18 @@ struct PDFKitView: NSViewRepresentable {
         }
 
         @MainActor
-        private func showPopover<Content: View>(
+        private func showPopover(
             at point: NSPoint,
             in pdfView: PDFView,
             contentSize: NSSize,
-            rootView: Content
+            contentView: NSView
         ) {
             closeCitationPopover()
             let popover = NSPopover()
             popover.behavior = .transient
             popover.animates = true
             popover.contentSize = contentSize
-            popover.contentViewController = NSHostingController(rootView: rootView)
+            popover.contentViewController = NativePDFPopoverViewController(contentView: contentView, contentSize: contentSize)
             let anchor = NSRect(x: point.x - 1, y: point.y - 1, width: 2, height: 2)
             popover.show(relativeTo: anchor, of: pdfView, preferredEdge: .maxX)
             citationPopover = popover
@@ -878,44 +878,244 @@ private struct PDFLinkPreview {
     var internalTarget: PDFInternalLinkTarget?
 }
 
-private struct InTextCitationPreview: View {
-    var preview: PDFCitationPreview
+private final class NativePDFPopoverViewController: NSViewController {
+    private let hostedContentView: NSView
+    private let hostedContentSize: NSSize
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                Image(systemName: "quote.bubble")
-                    .foregroundStyle(Color.accentColor)
-                Text(preview.citationText)
-                    .font(.headline)
-                Spacer()
-            }
-            if preview.references.isEmpty {
-                Text("No matching reference found in the paper's reference list.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            } else {
-                ForEach(preview.references.prefix(3)) { reference in
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(referenceTitle(reference))
-                            .font(.paperCodexSystem(size: 13.5, weight: .semibold))
-                            .lineLimit(2)
-                        Text(reference.text)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(3)
-                    }
-                    if reference.id != preview.references.prefix(3).last?.id {
-                        Divider()
-                    }
+    init(contentView: NSView, contentSize: NSSize) {
+        hostedContentView = contentView
+        hostedContentSize = contentSize
+        super.init(nibName: nil, bundle: nil)
+        preferredContentSize = contentSize
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override func loadView() {
+        let container = NSView(frame: NSRect(origin: .zero, size: hostedContentSize))
+        hostedContentView.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(hostedContentView)
+        NSLayoutConstraint.activate([
+            hostedContentView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            hostedContentView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            hostedContentView.topAnchor.constraint(equalTo: container.topAnchor),
+            hostedContentView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            container.widthAnchor.constraint(equalToConstant: hostedContentSize.width),
+            container.heightAnchor.constraint(equalToConstant: hostedContentSize.height)
+        ])
+        view = container
+    }
+}
+
+private final class NativeInTextCitationPreviewView: NSView {
+    private let stackView = NSStackView()
+
+    init(preview: PDFCitationPreview) {
+        super.init(frame: .zero)
+        setup(preview: preview)
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    private func setup(preview: PDFCitationPreview) {
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+
+        configureStack(spacing: 10)
+        addSubview(stackView)
+        NSLayoutConstraint.activate([
+            stackView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
+            stackView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
+            stackView.topAnchor.constraint(equalTo: topAnchor, constant: 14),
+            stackView.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -14)
+        ])
+
+        stackView.addArrangedSubview(Self.header(title: preview.citationText, systemImage: "quote.bubble"))
+        if preview.references.isEmpty {
+            let emptyLabel = Self.label(
+                "No matching reference found in the paper's reference list.",
+                font: .systemFont(ofSize: 13, weight: .regular),
+                color: .secondaryLabelColor,
+                lines: 3
+            )
+            stackView.addArrangedSubview(emptyLabel)
+        } else {
+            let references = Array(preview.references.prefix(3))
+            for (index, reference) in references.enumerated() {
+                stackView.addArrangedSubview(NativePDFReferenceSummaryView(reference: reference))
+                if index < references.count - 1 {
+                    stackView.addArrangedSubview(Self.separator())
                 }
             }
         }
-        .padding(14)
-        .frame(width: 380, alignment: .leading)
     }
 
-    private func referenceTitle(_ reference: PDFReferenceEntry) -> String {
+    private func configureStack(spacing: CGFloat) {
+        stackView.orientation = .vertical
+        stackView.alignment = .leading
+        stackView.distribution = .fill
+        stackView.spacing = spacing
+        stackView.translatesAutoresizingMaskIntoConstraints = false
+    }
+}
+
+private final class NativePDFLinkPreviewPopoverView: NSView {
+    private let stackView = NSStackView()
+    private let actionButton = NativePDFPopoverActionButton()
+
+    init(preview: PDFLinkPreview, onOpen: @escaping () -> Void) {
+        super.init(frame: .zero)
+        setup(preview: preview, onOpen: onOpen)
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    private func setup(preview: PDFLinkPreview, onOpen: @escaping () -> Void) {
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+
+        stackView.orientation = .vertical
+        stackView.alignment = .leading
+        stackView.distribution = .fill
+        stackView.spacing = 12
+        stackView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stackView)
+
+        stackView.addArrangedSubview(Self.header(title: preview.title, systemImage: preview.systemImage))
+        stackView.addArrangedSubview(Self.label(
+            preview.target,
+            font: .systemFont(ofSize: 13.5, weight: .semibold),
+            color: .labelColor,
+            lines: 3,
+            selectable: true
+        ))
+        if let sourceText = preview.sourceText {
+            stackView.addArrangedSubview(Self.label(
+                sourceText,
+                font: .systemFont(ofSize: 11.5, weight: .regular),
+                color: .secondaryLabelColor,
+                lines: 3
+            ))
+        }
+
+        actionButton.apply(title: preview.actionTitle, systemImage: "arrow.up.right", onPress: onOpen)
+        let actionRow = NSStackView()
+        actionRow.orientation = .horizontal
+        actionRow.alignment = .centerY
+        actionRow.distribution = .fill
+        actionRow.translatesAutoresizingMaskIntoConstraints = false
+        actionRow.addArrangedSubview(NSView())
+        actionRow.addArrangedSubview(actionButton)
+        stackView.addArrangedSubview(actionRow)
+
+        NSLayoutConstraint.activate([
+            stackView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 15),
+            stackView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -15),
+            stackView.topAnchor.constraint(equalTo: topAnchor, constant: 15),
+            stackView.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -15),
+            actionRow.widthAnchor.constraint(equalTo: stackView.widthAnchor)
+        ])
+    }
+}
+
+private final class NativeReferenceEntryPopoverView: NSView {
+    private let stackView = NSStackView()
+
+    init(entry: PDFReferenceEntry) {
+        super.init(frame: .zero)
+        setup(entry: entry)
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    private func setup(entry: PDFReferenceEntry) {
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+
+        stackView.orientation = .vertical
+        stackView.alignment = .leading
+        stackView.distribution = .fill
+        stackView.spacing = 12
+        stackView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stackView)
+
+        stackView.addArrangedSubview(Self.header(
+            title: entry.marker.map { "Reference \($0)" } ?? "Reference",
+            systemImage: "text.book.closed"
+        ))
+        stackView.addArrangedSubview(Self.label(
+            entry.title,
+            font: .systemFont(ofSize: 15, weight: .semibold),
+            color: .labelColor,
+            lines: 3
+        ))
+        stackView.addArrangedSubview(Self.label(
+            entry.text,
+            font: .systemFont(ofSize: 12.5, weight: .regular),
+            color: .secondaryLabelColor,
+            lines: 8,
+            selectable: true
+        ))
+
+        NSLayoutConstraint.activate([
+            stackView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 15),
+            stackView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -15),
+            stackView.topAnchor.constraint(equalTo: topAnchor, constant: 15),
+            stackView.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -15)
+        ])
+    }
+}
+
+private final class NativePDFReferenceSummaryView: NSView {
+    private let stackView = NSStackView()
+
+    init(reference: PDFReferenceEntry) {
+        super.init(frame: .zero)
+        setup(reference: reference)
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    private func setup(reference: PDFReferenceEntry) {
+        stackView.orientation = .vertical
+        stackView.alignment = .leading
+        stackView.distribution = .fill
+        stackView.spacing = 4
+        stackView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stackView)
+
+        stackView.addArrangedSubview(Self.label(
+            Self.referenceTitle(reference),
+            font: .systemFont(ofSize: 13.5, weight: .semibold),
+            color: .labelColor,
+            lines: 2
+        ))
+        stackView.addArrangedSubview(Self.label(
+            reference.text,
+            font: .systemFont(ofSize: 11.5, weight: .regular),
+            color: .secondaryLabelColor,
+            lines: 3
+        ))
+
+        NSLayoutConstraint.activate([
+            stackView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            stackView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            stackView.topAnchor.constraint(equalTo: topAnchor),
+            stackView.bottomAnchor.constraint(equalTo: bottomAnchor)
+        ])
+    }
+
+    private static func referenceTitle(_ reference: PDFReferenceEntry) -> String {
         if let marker = reference.marker {
             return "[\(marker)] \(reference.title)"
         }
@@ -923,59 +1123,108 @@ private struct InTextCitationPreview: View {
     }
 }
 
-private struct PDFLinkPreviewCard: View {
-    var preview: PDFLinkPreview
-    var onOpen: () -> Void
+private final class NativePDFPopoverActionButton: NSButton {
+    private var onPress: () -> Void = {}
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label(preview.title, systemImage: preview.systemImage)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(Color.accentColor)
-            Text(preview.target)
-                .font(.paperCodexSystem(size: 13.5, weight: .semibold))
-                .lineLimit(3)
-                .textSelection(.enabled)
-            if let sourceText = preview.sourceText {
-                Text(sourceText)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(3)
-            }
-            HStack {
-                Spacer()
-                PaperCodexPanelButton(
-                    title: preview.actionTitle,
-                    systemImage: "arrow.up.right",
-                    kind: .primary
-                ) {
-                    onOpen()
-                }
-            }
-        }
-        .padding(15)
-        .frame(width: 400, alignment: .leading)
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        alphaValue = 0.76
+        super.mouseDown(with: event)
+        alphaValue = 1
+    }
+
+    func apply(title: String, systemImage: String, onPress: @escaping () -> Void) {
+        self.title = title
+        self.onPress = onPress
+        image = NSImage(systemSymbolName: systemImage, accessibilityDescription: title)
+        setAccessibilityLabel(title)
+    }
+
+    private func setup() {
+        target = self
+        action = #selector(performPress(_:))
+        bezelStyle = .rounded
+        controlSize = .small
+        imagePosition = .imageLeading
+        font = .systemFont(ofSize: 12.5, weight: .semibold)
+        setButtonType(.momentaryPushIn)
+        setAccessibilityRole(.button)
+        setContentHuggingPriority(.required, for: .horizontal)
+        setContentCompressionResistancePriority(.required, for: .horizontal)
+    }
+
+    @objc private func performPress(_ sender: NSButton) {
+        onPress()
     }
 }
 
-private struct ReferenceEntryCard: View {
-    var entry: PDFReferenceEntry
+private extension NSView {
+    static func header(title: String, systemImage: String) -> NSView {
+        let row = NSStackView()
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.distribution = .fill
+        row.spacing = 8
+        row.translatesAutoresizingMaskIntoConstraints = false
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label(entry.marker.map { "Reference \($0)" } ?? "Reference", systemImage: "text.book.closed")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(Color.accentColor)
-            Text(entry.title)
-                .font(.paperCodexSystem(size: 15, weight: .semibold))
-                .lineLimit(3)
-            Text(entry.text)
-                .font(.paperCodexSystem(size: 12.5))
-                .foregroundStyle(.secondary)
-                .lineLimit(8)
-                .textSelection(.enabled)
-        }
-        .padding(15)
-        .frame(width: 420, alignment: .leading)
+        let imageView = NSImageView()
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        imageView.image = NSImage(systemSymbolName: systemImage, accessibilityDescription: title)
+        imageView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 13, weight: .semibold)
+        imageView.contentTintColor = .controlAccentColor
+        imageView.setContentHuggingPriority(.required, for: .horizontal)
+
+        let label = Self.label(
+            title,
+            font: .systemFont(ofSize: 13, weight: .semibold),
+            color: .controlAccentColor,
+            lines: 2
+        )
+
+        row.addArrangedSubview(imageView)
+        row.addArrangedSubview(label)
+        NSLayoutConstraint.activate([
+            imageView.widthAnchor.constraint(equalToConstant: 16),
+            imageView.heightAnchor.constraint(equalToConstant: 16)
+        ])
+        return row
+    }
+
+    static func label(
+        _ text: String,
+        font: NSFont,
+        color: NSColor,
+        lines: Int,
+        selectable: Bool = false
+    ) -> NSTextField {
+        let label = NSTextField(labelWithString: text)
+        label.font = font
+        label.textColor = color
+        label.maximumNumberOfLines = lines
+        label.lineBreakMode = .byWordWrapping
+        label.isSelectable = selectable
+        label.allowsDefaultTighteningForTruncation = true
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        return label
+    }
+
+    static func separator() -> NSBox {
+        let separator = NSBox()
+        separator.boxType = .separator
+        separator.translatesAutoresizingMaskIntoConstraints = false
+        separator.heightAnchor.constraint(equalToConstant: 1).isActive = true
+        return separator
     }
 }
