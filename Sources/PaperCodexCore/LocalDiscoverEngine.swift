@@ -567,7 +567,7 @@ public final class LocalDiscoverCache {
         guard fileManager.fileExists(atPath: url.path) else {
             return nil
         }
-        return try decoder.decode(DiscoverQueryResult.self, from: Data(contentsOf: url))
+        return validQueryResult(try decoder.decode(DiscoverQueryResult.self, from: Data(contentsOf: url)))
     }
 
     public func loadQueryResults(containedIn query: DiscoverQuery) throws -> [DiscoverQueryResult] {
@@ -588,7 +588,9 @@ public final class LocalDiscoverCache {
             guard values.isRegularFile == true else {
                 continue
             }
-            var result = try decoder.decode(DiscoverQueryResult.self, from: Data(contentsOf: url))
+            guard var result = validQueryResult(try decoder.decode(DiscoverQueryResult.self, from: Data(contentsOf: url))) else {
+                continue
+            }
             let cachedQuery = result.query.normalized
             guard cachedQuery.matchesDiscoverCacheFragments(for: target),
                   target.dateRange.contains(cachedQuery.dateRange),
@@ -621,7 +623,7 @@ public final class LocalDiscoverCache {
         guard fileManager.fileExists(atPath: url.path) else {
             return nil
         }
-        return try decoder.decode(DiscoverQueryResult.self, from: Data(contentsOf: url))
+        return validQueryResult(try decoder.decode(DiscoverQueryResult.self, from: Data(contentsOf: url)))
     }
 
     public func saveEnrichment(_ enrichment: DiscoverPaperEnrichment) throws {
@@ -664,6 +666,19 @@ public final class LocalDiscoverCache {
 
     private func lastQueryResultURL() -> URL {
         queryResultsRootURL().appendingPathComponent("last.json")
+    }
+
+    private func validQueryResult(_ result: DiscoverQueryResult) -> DiscoverQueryResult? {
+        var normalizedResult = result
+        normalizedResult.query = result.query.normalized
+        guard let feed = normalizedResult.feed else {
+            return normalizedResult
+        }
+        guard let feedRange = try? DiscoverDateRange(cacheLabel: feed.date),
+              feedRange.contains(normalizedResult.query.dateRange) else {
+            return nil
+        }
+        return normalizedResult
     }
 
     private func queryResultsRootURL() -> URL {

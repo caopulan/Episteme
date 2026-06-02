@@ -607,12 +607,18 @@ final class AppModel: ObservableObject {
 
     var discoverStartDate: String {
         get { discoverStore.discoverStartDate }
-        set { discoverStore.discoverStartDate = newValue }
+        set {
+            discoverStore.discoverStartDate = newValue
+            selectedArxivDate = nil
+        }
     }
 
     var discoverEndDate: String {
         get { discoverStore.discoverEndDate }
-        set { discoverStore.discoverEndDate = newValue }
+        set {
+            discoverStore.discoverEndDate = newValue
+            selectedArxivDate = nil
+        }
     }
 
     var discoverSelectedCategories: [String] {
@@ -1080,6 +1086,7 @@ final class AppModel: ObservableObject {
     deinit {
         watchedFolderAutoScanTask?.cancel()
         watchedFolderScanTask?.cancel()
+        activeDiscoverSearchTask?.cancel()
         activeArxivSearchTask?.cancel()
         activeDiscoverPDFCacheTask?.cancel()
         discoverCacheWarmupTask?.cancel()
@@ -1632,6 +1639,8 @@ final class AppModel: ObservableObject {
             discoverEndDate = query.dateRange.end
             discoverSelectedCategories = query.categories
             discoverSelectedSimilaritySourceIDs = query.similaritySourceIDs
+        } else {
+            syncDiscoverControlsFromCachedDateIfNeeded(state.selectedDate)
         }
         arxivDates = state.arxivDates
         selectedArxivDate = state.selectedDate
@@ -1653,6 +1662,16 @@ final class AppModel: ObservableObject {
             completed: state.assetCacheSummary.cached,
             total: state.assetCacheSummary.total
         )
+    }
+
+    private func syncDiscoverControlsFromCachedDateIfNeeded(_ cachedDate: String) {
+        do {
+            let range = try DiscoverDateRange(cacheLabel: cachedDate)
+            discoverStore.discoverStartDate = range.start
+            discoverStore.discoverEndDate = range.end
+        } catch {
+            errorMessage = String(describing: error)
+        }
     }
 
     func showRecentConversations() {
@@ -1931,28 +1950,46 @@ final class AppModel: ObservableObject {
         }
     }
 
+    private func resetStaleDiscoverSearchTaskIfNeeded() {
+        guard activeDiscoverSearchTask != nil, !isSearchingDiscover else {
+            return
+        }
+        activeDiscoverSearchTask?.cancel()
+        activeDiscoverSearchTask = nil
+    }
+
+    private func resetStaleArxivSearchTaskIfNeeded() {
+        guard activeArxivSearchTask != nil, !isSearchingArxivSearch else {
+            return
+        }
+        activeArxivSearchTask?.cancel()
+        activeArxivSearchTask = nil
+    }
+
     func startDiscoverSearch() {
+        resetStaleDiscoverSearchTaskIfNeeded()
         guard activeDiscoverSearchTask == nil, !isSearchingDiscover else {
             return
         }
         cancelDiscoverCacheWarmup()
-        activeDiscoverSearchTask = Task { [weak self] in
-            await self?.searchDiscover()
-            await MainActor.run {
+        activeDiscoverSearchTask = Task { @MainActor [weak self] in
+            defer {
                 self?.activeDiscoverSearchTask = nil
             }
+            await self?.searchDiscover()
         }
     }
 
     func startArxivSearch() {
+        resetStaleArxivSearchTaskIfNeeded()
         guard activeArxivSearchTask == nil, !isSearchingArxivSearch else {
             return
         }
-        activeArxivSearchTask = Task { [weak self] in
-            await self?.searchArxiv()
-            await MainActor.run {
+        activeArxivSearchTask = Task { @MainActor [weak self] in
+            defer {
                 self?.activeArxivSearchTask = nil
             }
+            await self?.searchArxiv()
         }
     }
 

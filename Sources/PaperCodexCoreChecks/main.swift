@@ -2998,6 +2998,19 @@ func runUILayoutSourceChecks() throws {
         "Discover search should hit cached non-empty query results before network fetch and immediately load cached enrichments"
     )
     try check(
+        appModelSource.contains("resetStaleDiscoverSearchTaskIfNeeded()")
+            && appModelSource.contains("resetStaleArxivSearchTaskIfNeeded()")
+            && appModelSource.contains("defer {\n                self?.activeDiscoverSearchTask = nil\n            }")
+            && appModelSource.contains("defer {\n                self?.activeArxivSearchTask = nil\n            }"),
+        "Discover and arXiv search buttons should recover if a stale task reference blocks a new search"
+    )
+    try check(
+        appModelSource.contains("selectedArxivDate = nil")
+            && appModelSource.contains("syncDiscoverControlsFromCachedDateIfNeeded(state.selectedDate)")
+            && appModelSource.contains("DiscoverDateRange(cacheLabel: cachedDate)"),
+        "Discover cached range restores and manual date edits should keep the visible date controls aligned with the next search"
+    )
+    try check(
         appModelSource.contains("allowPartialFragments: true")
             && appModelSource.contains("localDiscoverCache.loadQueryResults(containedIn: query)")
             && appModelSource.contains("\"Partial cached search\"")
@@ -5917,6 +5930,51 @@ func runLocalDiscoverEngineChecks() throws {
             "2026-04-27...2026-04-29"
         ],
         "discover query cache should find reusable cached fragments contained by a broader search"
+    )
+
+    let invalidCacheRoot = FileManager.default.temporaryDirectory
+        .appendingPathComponent("paper-codex-invalid-discover-cache-\(UUID().uuidString)", isDirectory: true)
+    let invalidCache = LocalDiscoverCache(root: invalidCacheRoot)
+    let futureQuery = DiscoverQuery(
+        keyword: "",
+        dateRange: try DiscoverDateRange(start: "2026-06-02", end: "2026-06-02"),
+        categories: ["cs.CV"],
+        similaritySourceIDs: [],
+        rankingVersion: "rank-v1"
+    ).normalized
+    try invalidCache.saveQueryResult(
+        DiscoverQueryResult(
+            query: futureQuery,
+            arxivIDs: ["2605.13155"],
+            generatedAt: Date(timeIntervalSince1970: 1_777_300_300),
+            feed: ArxivFeedResponse(
+                date: "2026-05-11...2026-05-17",
+                count: 1,
+                papers: [
+                    cachedDiscoverPaper(
+                        id: "2605.13155",
+                        listDate: "2026-05-11",
+                        categories: ["cs.CV"],
+                        title: "Stale cache result"
+                    )
+                ]
+            )
+        )
+    )
+    let invalidDirectQuery = try invalidCache.loadQueryResult(cacheKey: futureQuery.cacheKey)
+    let invalidLastQuery = try invalidCache.loadLastQueryResult()
+    let invalidFragments = try invalidCache.loadQueryResults(containedIn: futureQuery)
+    try check(
+        invalidDirectQuery == nil,
+        "discover query cache should reject direct query hits whose feed date does not cover the query range"
+    )
+    try check(
+        invalidLastQuery == nil,
+        "discover last-query cache should reject stale feed/query date mismatches"
+    )
+    try check(
+        invalidFragments.isEmpty,
+        "discover fragment cache should ignore stale feed/query date mismatches"
     )
 
     let embeddingText = "Recursive multi-agent systems coordinate latent-state reasoning."
