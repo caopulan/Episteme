@@ -2927,8 +2927,9 @@ func runUILayoutSourceChecks() throws {
         appModelSource.contains("enum DiscoverProcessAction")
             && appModelSource.contains("case translate")
             && appModelSource.contains("case summarize")
+            && appModelSource.contains("case embedding")
             && appModelSource.contains("case cachePDFThumbnails"),
-        "Discover processing should model selectable processing actions instead of paper selection"
+        "Discover processing should model selectable processing actions, including embedding, instead of paper selection"
     )
     try check(
         discoverSource.contains("Set(DiscoverProcessAction.allCases)")
@@ -2937,10 +2938,19 @@ func runUILayoutSourceChecks() throws {
         "Discover processing actions should default to all selected and should not render per-paper selection rows"
     )
     try check(
+        appModelSource.contains("var defaultDiscoverProcessActions: Set<DiscoverProcessAction>")
+            && appModelSource.contains("actions.remove(.embedding)")
+            && discoverSource.contains("defaultSelectedActions: model.defaultDiscoverProcessActions")
+            && discoverSource.contains("_selectedActions = State(initialValue: defaultSelectedActions)"),
+        "Discover processing should only default-select embedding when the local embedding provider is ready"
+    )
+    try check(
         appModelSource.contains("processCurrentDiscoverResults(_ papers: [ArxivFeedPaper], actions:")
+            && appModelSource.contains("actions.contains(.embedding)")
+            && appModelSource.contains("await processDiscoverEmbeddings(visiblePapers)")
             && appModelSource.contains("actions.contains(.cachePDFThumbnails)")
             && appModelSource.contains("await cacheDiscoverPDFs(visiblePapers)"),
-        "Discover processing should run selected actions, including PDF download and thumbnail generation"
+        "Discover processing should run selected actions, including embedding, PDF download, and thumbnail generation"
     )
     try check(
         appModelSource.contains("discoverCodexReasoningEffort")

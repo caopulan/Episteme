@@ -64,6 +64,7 @@ enum ArxivSaveOrganization: String, CaseIterable, Identifiable {
 }
 
 enum DiscoverProcessAction: String, CaseIterable, Identifiable {
+    case embedding
     case translate
     case summarize
     case cachePDFThumbnails = "cache-pdf-thumbnails"
@@ -72,6 +73,8 @@ enum DiscoverProcessAction: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
+        case .embedding:
+            "Embeddings"
         case .translate:
             "Translate"
         case .summarize:
@@ -83,6 +86,8 @@ enum DiscoverProcessAction: String, CaseIterable, Identifiable {
 
     var detail: String {
         switch self {
+        case .embedding:
+            "Generate and cache vectors for the visible results"
         case .translate:
             "Chinese title translation for each result"
         case .summarize:
@@ -94,6 +99,8 @@ enum DiscoverProcessAction: String, CaseIterable, Identifiable {
 
     var systemImage: String {
         switch self {
+        case .embedding:
+            "point.3.connected.trianglepath.dotted"
         case .translate:
             "character.book.closed"
         case .summarize:
@@ -175,6 +182,11 @@ private enum DiscoverPaperProcessingState: Sendable {
     case cached
     case failed
     case cancelled
+}
+
+private enum EmbeddingProgressDestination {
+    case arxivCache
+    case discoverProcessing
 }
 
 private struct DiscoverPaperProcessingResult: Sendable {
@@ -1284,6 +1296,24 @@ final class AppModel: ObservableObject {
         return value
     }
 
+    var defaultDiscoverProcessActions: Set<DiscoverProcessAction> {
+        var actions = Set(DiscoverProcessAction.allCases)
+        if !isEmbeddingProviderReadyForProcessing {
+            actions.remove(.embedding)
+        }
+        return actions
+    }
+
+    private var isEmbeddingProviderReadyForProcessing: Bool {
+        let embeddingSettings = localDiscoverPreferences.normalized.embedding
+        let model = embeddingSettings.model.trimmingCharacters(in: .whitespacesAndNewlines)
+        let apiKey = embeddingProviderAPIKeyValue().trimmingCharacters(in: .whitespacesAndNewlines)
+        return embeddingSettings.enabled
+            && !embeddingSettings.baseURL.isEmpty
+            && !model.isEmpty
+            && !apiKey.isEmpty
+    }
+
     func refreshCacheStorageSummary() {
         cacheStorageSummaryTask?.cancel()
         let supportRoot = supportRoot
@@ -2185,6 +2215,12 @@ final class AppModel: ObservableObject {
             discoverPaperInteractionStateByID[paper.id] = .queued
         }
 
+        if actions.contains(.embedding),
+           !isCancellingDiscoverProcessing,
+           !Task.isCancelled {
+            await processDiscoverEmbeddings(visiblePapers)
+        }
+
         if actions.contains(.translate) || actions.contains(.summarize) {
             let total = visiblePapers.count
             var completed = 0
@@ -2287,6 +2323,94 @@ final class AppModel: ObservableObject {
         isCancellingDiscoverProcessing = true
         for runHandle in activeDiscoverCodexRunHandles {
             runHandle.cancel()
+        }
+    }
+
+    private func processDiscoverEmbeddings(_ papers: [ArxivFeedPaper]) async {
+        let visiblePapers = uniqueArxivPapers(papers)
+        guard !visiblePapers.isEmpty else {
+            return
+        }
+
+        let embeddingSettings = localDiscoverPreferences.normalized.embedding
+        let model = embeddingSettings.model.trimmingCharacters(in: .whitespacesAndNewlines)
+        let apiKey = embeddingProviderAPIKeyValue().trimmingCharacters(in: .whitespacesAndNewlines)
+        guard embeddingSettings.enabled, !embeddingSettings.baseURL.isEmpty, !model.isEmpty, !apiKey.isEmpty else {
+            let message = "Embedding provider is disabled or missing Base URL, API key, or model."
+            errorMessage = message
+            discoverProcessingProgress = ArxivCacheProgress(
+                date: discoverProcessingDateLabel(for: visiblePapers),
+                title: "Embedding unavailable",
+                detail: message,
+                completed: 0,
+                total: visiblePapers.count
+            )
+            for paper in visiblePapers {
+                discoverPaperInteractionStateByID[paper.id] = .failed
+            }
+            postNotice(kind: .error, title: "Embedding Unavailable", message: message)
+            return
+        }
+
+        do {
+            for paper in visiblePapers {
+                discoverPaperInteractionStateByID[paper.id] = .processing
+            }
+            let client = try OpenAICompatibleEmbeddingClient(settings: embeddingSettings, apiKey: apiKey)
+            let inputs = visiblePapers.map { paper in
+                DiscoverEmbeddingInput(
+                    sourceID: "arxiv:\(paper.id)",
+                    text: trimmedEmbeddingText(DiscoverEmbeddingText.arxivPaperText(paper))
+                )
+            }
+            let vectors = try await cachedEmbeddings(
+                inputs: inputs,
+                model: model,
+                client: client,
+                progressDate: discoverProcessingDateLabel(for: visiblePapers),
+                progressTitle: "Embedding results",
+                totalOffset: 0,
+                progressDestination: .discoverProcessing
+            )
+            let vectorsByID = Dictionary(uniqueKeysWithValues: zip(inputs.map(\.sourceID), vectors))
+            let embeddedPapers = visiblePapers.map { paper -> ArxivFeedPaper in
+                var embeddedPaper = paper
+                embeddedPaper.embedding = vectorsByID["arxiv:\(paper.id)"]
+                return embeddedPaper
+            }
+            mergeDiscoverEmbeddings(from: embeddedPapers)
+            let embeddedCount = embeddedPapers.filter { $0.embedding != nil }.count
+            for paper in embeddedPapers {
+                discoverPaperInteractionStateByID[paper.id] = paper.embedding == nil ? .failed : .processed
+            }
+            discoverProcessingProgress = ArxivCacheProgress(
+                date: discoverProcessingDateLabel(for: visiblePapers),
+                title: "Embedding results ready",
+                detail: "\(embeddedCount)/\(visiblePapers.count) vectors ready",
+                completed: embeddedCount,
+                total: visiblePapers.count
+            )
+            postNotice(kind: .success, title: "Embeddings Ready", message: "\(embeddedCount)/\(visiblePapers.count) vectors")
+        } catch {
+            if isCancellingDiscoverProcessing || Task.isCancelled || isCancellationError(error) {
+                for paper in visiblePapers {
+                    discoverPaperInteractionStateByID[paper.id] = .cancelled
+                }
+                return
+            }
+            let message = String(describing: error)
+            errorMessage = message
+            for paper in visiblePapers {
+                discoverPaperInteractionStateByID[paper.id] = .failed
+            }
+            discoverProcessingProgress = ArxivCacheProgress(
+                date: discoverProcessingDateLabel(for: visiblePapers),
+                title: "Embedding failed",
+                detail: message,
+                completed: 0,
+                total: visiblePapers.count
+            )
+            postNotice(kind: .error, title: "Embedding Failed", message: message)
         }
     }
 
@@ -5066,6 +5190,27 @@ final class AppModel: ObservableObject {
         discoverEnrichmentsByID = enrichments
     }
 
+    private func mergeDiscoverEmbeddings(from papers: [ArxivFeedPaper]) {
+        let vectorsByID = Dictionary(uniqueKeysWithValues: papers.compactMap { paper in
+            paper.embedding.map { (paper.id, $0) }
+        })
+        guard !vectorsByID.isEmpty else {
+            return
+        }
+        if let feed = arxivFeed {
+            arxivFeed = feed.mergingEmbeddings(vectorsByID)
+        }
+        if let feed = arxivSearchFeed {
+            arxivSearchFeed = feed.mergingEmbeddings(vectorsByID)
+        }
+    }
+
+    private func discoverProcessingDateLabel(for papers: [ArxivFeedPaper]) -> String {
+        selectedArxivDate
+            ?? papers.compactMap(\.listDate).first
+            ?? "\(discoverStartDate)...\(discoverEndDate)"
+    }
+
     private func updateDiscoverProcessingProgress(
         completed: Int,
         cached: Int,
@@ -5539,7 +5684,8 @@ final class AppModel: ObservableObject {
         client: OpenAICompatibleEmbeddingClient,
         progressDate: String,
         progressTitle: String,
-        totalOffset: Int
+        totalOffset: Int,
+        progressDestination: EmbeddingProgressDestination = .arxivCache
     ) async throws -> [[Double]] {
         guard !inputs.isEmpty else {
             return []
@@ -5554,7 +5700,8 @@ final class AppModel: ObservableObject {
             }
         }
 
-        arxivCacheProgress = ArxivCacheProgress(
+        updateEmbeddingProgress(
+            destination: progressDestination,
             date: progressDate,
             title: progressTitle,
             detail: "\(inputs.count - missing.count)/\(inputs.count) cached",
@@ -5579,7 +5726,8 @@ final class AppModel: ObservableObject {
                     vectorsBySourceID[input.sourceID] = vector
                 }
                 generatedCount += batch.count
-                arxivCacheProgress = ArxivCacheProgress(
+                updateEmbeddingProgress(
+                    destination: progressDestination,
                     date: progressDate,
                     title: progressTitle,
                     detail: "\(cachedCount + generatedCount)/\(inputs.count) ready",
@@ -5589,7 +5737,8 @@ final class AppModel: ObservableObject {
             }
         }
 
-        arxivCacheProgress = ArxivCacheProgress(
+        updateEmbeddingProgress(
+            destination: progressDestination,
             date: progressDate,
             title: progressTitle,
             detail: "\(inputs.count)/\(inputs.count) ready",
@@ -5597,6 +5746,29 @@ final class AppModel: ObservableObject {
             total: totalOffset + inputs.count
         )
         return inputs.compactMap { vectorsBySourceID[$0.sourceID] }
+    }
+
+    private func updateEmbeddingProgress(
+        destination: EmbeddingProgressDestination,
+        date: String,
+        title: String,
+        detail: String,
+        completed: Int,
+        total: Int
+    ) {
+        let progress = ArxivCacheProgress(
+            date: date,
+            title: title,
+            detail: detail,
+            completed: completed,
+            total: total
+        )
+        switch destination {
+        case .arxivCache:
+            arxivCacheProgress = progress
+        case .discoverProcessing:
+            discoverProcessingProgress = progress
+        }
     }
 
     private func effectiveDiscoverSimilaritySourceIDs() -> [String] {
@@ -6207,6 +6379,26 @@ final class AppModel: ObservableObject {
         } catch {
             errorMessage = "Codex stopped, but the cancellation note could not be saved: \(error)"
         }
+    }
+}
+
+private extension ArxivFeedResponse {
+    func mergingEmbeddings(_ vectorsByID: [String: [Double]]) -> ArxivFeedResponse {
+        let embeddedPapers = papers.map { paper -> ArxivFeedPaper in
+            guard let vector = vectorsByID[paper.id] else {
+                return paper
+            }
+            var embeddedPaper = paper
+            embeddedPaper.embedding = vector
+            return embeddedPaper
+        }
+        return ArxivFeedResponse(
+            date: date,
+            count: count,
+            papers: embeddedPapers,
+            groups: groups,
+            tagOptions: tagOptions
+        )
     }
 }
 

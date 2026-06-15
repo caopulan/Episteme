@@ -172,6 +172,7 @@ struct DiscoverView: View {
                     defaultModelID: model.codexDefaultModelID,
                     defaultModelOverride: model.discoverCodexModelOverride,
                     defaultReasoningEffort: model.discoverCodexReasoningEffort,
+                    defaultSelectedActions: model.defaultDiscoverProcessActions,
                     isRefreshingModels: model.isRefreshingCodexModels,
                     onRefreshModels: {
                         Task {
@@ -747,6 +748,7 @@ struct ArxivSearchView: View {
                 defaultModelID: model.codexDefaultModelID,
                 defaultModelOverride: model.discoverCodexModelOverride,
                 defaultReasoningEffort: model.discoverCodexReasoningEffort,
+                defaultSelectedActions: model.defaultDiscoverProcessActions,
                 isRefreshingModels: model.isRefreshingCodexModels,
                 onRefreshModels: {
                     Task {
@@ -984,8 +986,11 @@ struct ArxivSearchView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            if (model.isSearchingArxivSearch || model.isProcessingDiscoverResults),
-               let progress = model.arxivCacheProgress {
+            if model.isProcessingDiscoverResults,
+               let progress = model.discoverProcessingProgress {
+                ArxivCacheProgressStrip(progress: progress)
+            } else if model.isSearchingArxivSearch,
+                      let progress = model.arxivCacheProgress {
                 ArxivCacheProgressStrip(progress: progress)
             }
         }
@@ -1700,6 +1705,7 @@ private struct DiscoverProcessActionSheet: View {
     var defaultModelID: String
     var defaultModelOverride: String
     var defaultReasoningEffort: CodexReasoningEffort
+    var defaultSelectedActions: Set<DiscoverProcessAction>
     var isRefreshingModels: Bool
     var onRefreshModels: () -> Void
     var onConfirm: ([DiscoverProcessAction], String, CodexReasoningEffort) -> Void
@@ -1717,6 +1723,7 @@ private struct DiscoverProcessActionSheet: View {
         defaultModelID: String,
         defaultModelOverride: String,
         defaultReasoningEffort: CodexReasoningEffort,
+        defaultSelectedActions: Set<DiscoverProcessAction>,
         isRefreshingModels: Bool,
         onRefreshModels: @escaping () -> Void,
         onConfirm: @escaping ([DiscoverProcessAction], String, CodexReasoningEffort) -> Void,
@@ -1727,11 +1734,12 @@ private struct DiscoverProcessActionSheet: View {
         self.defaultModelID = defaultModelID
         self.defaultModelOverride = defaultModelOverride
         self.defaultReasoningEffort = defaultReasoningEffort
+        self.defaultSelectedActions = defaultSelectedActions
         self.isRefreshingModels = isRefreshingModels
         self.onRefreshModels = onRefreshModels
         self.onConfirm = onConfirm
         self.onCancel = onCancel
-        _selectedActions = State(initialValue: Set(DiscoverProcessAction.allCases))
+        _selectedActions = State(initialValue: defaultSelectedActions)
         _draftModelOverride = State(initialValue: defaultModelOverride)
         _draftReasoningEffort = State(initialValue: defaultReasoningEffort)
     }
