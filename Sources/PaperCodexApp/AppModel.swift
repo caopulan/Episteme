@@ -2379,18 +2379,23 @@ final class AppModel: ObservableObject {
                 return embeddedPaper
             }
             mergeDiscoverEmbeddings(from: embeddedPapers)
+            let sortedCount = try await rerankDiscoverFeedsAfterEmbeddingProcess(
+                visiblePapers: embeddedPapers,
+                model: model,
+                client: client
+            )
             let embeddedCount = embeddedPapers.filter { $0.embedding != nil }.count
             for paper in embeddedPapers {
                 discoverPaperInteractionStateByID[paper.id] = paper.embedding == nil ? .failed : .processed
             }
             discoverProcessingProgress = ArxivCacheProgress(
                 date: discoverProcessingDateLabel(for: visiblePapers),
-                title: "Embedding results ready",
-                detail: "\(embeddedCount)/\(visiblePapers.count) vectors ready",
+                title: "Embedding results sorted",
+                detail: "\(embeddedCount)/\(visiblePapers.count) vectors ready · \(sortedCount) scored",
                 completed: embeddedCount,
                 total: visiblePapers.count
             )
-            postNotice(kind: .success, title: "Embeddings Ready", message: "\(embeddedCount)/\(visiblePapers.count) vectors")
+            postNotice(kind: .success, title: "Embeddings Sorted", message: "\(embeddedCount)/\(visiblePapers.count) vectors · \(sortedCount) scored")
         } catch {
             if isCancellingDiscoverProcessing || Task.isCancelled || isCancellationError(error) {
                 for paper in visiblePapers {
@@ -2412,6 +2417,54 @@ final class AppModel: ObservableObject {
             )
             postNotice(kind: .error, title: "Embedding Failed", message: message)
         }
+    }
+
+    @discardableResult
+    private func rerankDiscoverFeedsAfterEmbeddingProcess(
+        visiblePapers: [ArxivFeedPaper],
+        model: String,
+        client: OpenAICompatibleEmbeddingClient
+    ) async throws -> Int {
+        let visibleIDs = Set(visiblePapers.map(\.id))
+        var scoredIDs: Set<String> = []
+
+        if let feed = arxivFeed,
+           feed.papers.contains(where: { visibleIDs.contains($0.id) }) {
+            let previousSelectionID = selectedArxivPaper?.id
+            let rankedFeed = try await rerankEmbeddedDiscoverFeed(
+                feed,
+                model: model,
+                client: client,
+                progressDate: discoverProcessingDateLabel(for: visiblePapers),
+                progressTitle: "Sorting Explore results"
+            )
+            arxivFeed = rankedFeed
+            discoverResultIDs = rankedFeed.papers.map(\.id)
+            selectedArxivPaper = rankedFeed.papers.first { $0.id == previousSelectionID } ?? rankedFeed.papers.first
+            try loadDiscoverEnrichments(for: rankedFeed.papers)
+            reloadCachedArxivAssets()
+            scoredIDs.formUnion(rankedFeed.papers.compactMap { paper in
+                paper.similarity == nil ? nil : paper.id
+            })
+        }
+
+        if let feed = arxivSearchFeed,
+           feed.papers.contains(where: { visibleIDs.contains($0.id) }) {
+            let rankedFeed = try await rerankEmbeddedDiscoverFeed(
+                feed,
+                model: model,
+                client: client,
+                progressDate: discoverProcessingDateLabel(for: visiblePapers),
+                progressTitle: "Sorting Search results"
+            )
+            arxivSearchFeed = rankedFeed
+            mergeDiscoverEnrichments(for: rankedFeed.papers)
+            scoredIDs.formUnion(rankedFeed.papers.compactMap { paper in
+                paper.similarity == nil ? nil : paper.id
+            })
+        }
+
+        return scoredIDs.count
     }
 
     private func cacheDiscoverPDFs(_ papers: [ArxivFeedPaper]) async {
@@ -5668,6 +5721,80 @@ final class AppModel: ObservableObject {
         return ArxivFeedResponse(
             date: feed.date,
             count: rankedPapers.count,
+            papers: rankedPapers,
+            groups: [
+                ArxivFeedGroup(key: "white", count: rankedPapers.filter { $0.filterGroup == "white" }.count),
+                ArxivFeedGroup(key: "neutral", count: rankedPapers.filter { $0.filterGroup == "neutral" }.count),
+                ArxivFeedGroup(key: "black", count: rankedPapers.filter { $0.filterGroup == "black" }.count)
+            ],
+            tagOptions: Array(Set(rankedPapers.flatMap(\.tags))).sorted()
+        )
+    }
+
+    private func rerankEmbeddedDiscoverFeed(
+        _ feed: ArxivFeedResponse,
+        model: String,
+        client: OpenAICompatibleEmbeddingClient,
+        progressDate: String,
+        progressTitle: String
+    ) async throws -> ArxivFeedResponse {
+        let preferences = localDiscoverPreferences.normalized
+        let sourceIDs = effectiveDiscoverSimilaritySourceIDs()
+        guard preferences.embedding.enabled, !sourceIDs.isEmpty else {
+            return applyLocalDiscoverPreferences(to: feed)
+        }
+
+        let categorySources = similarityCategorySources(for: sourceIDs)
+        let sourcePapers = uniquePapers(categorySources.flatMap(\.papers))
+        guard !categorySources.isEmpty, !sourcePapers.isEmpty else {
+            return applyLocalDiscoverPreferences(to: feed)
+        }
+
+        guard let repository else {
+            throw AppModelError.repositoryUnavailable
+        }
+
+        let sourceInputs = try sourcePapers.map { paper in
+            DiscoverEmbeddingInput(
+                sourceID: "paper:\(paper.id)",
+                text: try libraryEmbeddingText(for: paper, repository: repository)
+            )
+        }
+        let sourceVectors = try await cachedEmbeddings(
+            inputs: sourceInputs,
+            model: model,
+            client: client,
+            progressDate: progressDate,
+            progressTitle: progressTitle,
+            totalOffset: 0,
+            progressDestination: .discoverProcessing
+        )
+        let sourceVectorsByID = Dictionary(uniqueKeysWithValues: zip(sourceInputs.map(\.sourceID), sourceVectors))
+        let interestVectorGroups = categorySources.map { source in
+            source.papers.compactMap { paper in
+                sourceVectorsByID["paper:\(paper.id)"]
+            }
+        }
+        guard !interestVectorGroups.flatMap({ $0 }).isEmpty else {
+            return applyLocalDiscoverPreferences(to: feed)
+        }
+
+        let rankedPapers = SimilarityRanker.rank(
+            papers: feed.papers,
+            whitelistTags: preferences.whitelistTags,
+            blacklistTags: preferences.blacklistTags,
+            interestVectorGroups: interestVectorGroups
+        )
+        discoverProcessingProgress = ArxivCacheProgress(
+            date: progressDate,
+            title: progressTitle,
+            detail: "\(rankedPapers.filter { $0.similarity != nil }.count)/\(rankedPapers.count) scored",
+            completed: rankedPapers.count,
+            total: rankedPapers.count
+        )
+        return ArxivFeedResponse(
+            date: feed.date,
+            count: feed.count,
             papers: rankedPapers,
             groups: [
                 ArxivFeedGroup(key: "white", count: rankedPapers.filter { $0.filterGroup == "white" }.count),

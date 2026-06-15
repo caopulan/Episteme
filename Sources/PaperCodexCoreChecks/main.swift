@@ -2948,9 +2948,12 @@ func runUILayoutSourceChecks() throws {
         appModelSource.contains("processCurrentDiscoverResults(_ papers: [ArxivFeedPaper], actions:")
             && appModelSource.contains("actions.contains(.embedding)")
             && appModelSource.contains("await processDiscoverEmbeddings(visiblePapers)")
+            && appModelSource.contains("try await rerankDiscoverFeedsAfterEmbeddingProcess(")
+            && appModelSource.contains("private func rerankEmbeddedDiscoverFeed(")
+            && appModelSource.contains("SimilarityRanker.rank(")
             && appModelSource.contains("actions.contains(.cachePDFThumbnails)")
             && appModelSource.contains("await cacheDiscoverPDFs(visiblePapers)"),
-        "Discover processing should run selected actions, including embedding, PDF download, and thumbnail generation"
+        "Discover processing should run selected actions, including embedding reranking, PDF download, and thumbnail generation"
     )
     try check(
         appModelSource.contains("discoverCodexReasoningEffort")
