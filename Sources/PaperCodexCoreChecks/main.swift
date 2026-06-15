@@ -3102,9 +3102,11 @@ func runUILayoutSourceChecks() throws {
         "settings should avoid exposing full long prompt editor contents as route-level accessibility text"
     )
     try check(
-        appModelSource.contains("embeddingProviderAPIKeyDefaultsKey")
-            && appModelSource.contains("loadEmbeddingProviderAPIKeyFromDefaults()")
-            && appModelSource.contains("saveEmbeddingProviderAPIKeyToDefaults")
+        appModelSource.contains("LocalEmbeddingProviderCredentialStore")
+            && appModelSource.contains("private let embeddingProviderCredentialStore = LocalEmbeddingProviderCredentialStore()")
+            && appModelSource.contains("embeddingProviderCredentialStore.loadAPIKey()")
+            && appModelSource.contains("embeddingProviderCredentialStore.saveAPIKey(trimmedAPIKey)")
+            && appModelSource.contains("UserDefaults.standard")
             && appModelSource.contains("private func embeddingProviderAPIKeyValue() -> String")
             && !appModelSource.contains("import Security")
             && !appModelSource.contains("SecItem")

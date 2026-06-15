@@ -218,7 +218,6 @@ private let discoverCodexModelOverrideDefaultsKey = "PaperCodexDiscoverCodexMode
 private let discoverCodexReasoningEffortDefaultsKey = "PaperCodexDiscoverCodexReasoningEffort"
 private let discoverCodexConcurrencyDefaultsKey = "PaperCodexDiscoverCodexConcurrency"
 private let localDiscoverPreferencesDefaultsKey = "PaperCodexLocalDiscoverPreferences"
-private let embeddingProviderAPIKeyDefaultsKey = "PaperCodexEmbeddingProviderAPIKey"
 private let arxivSaveOrganizationDefaultsKey = "PaperCodexArxivSaveOrganization"
 private let quickPromptsDefaultsKey = "PaperCodexQuickPrompts"
 private let librarySidebarWidthDefaultsKey = "PaperCodexLibrarySidebarWidth"
@@ -235,6 +234,29 @@ private let arxivLibraryImportRetryDelaysNanoseconds: [UInt64] = [
     120_000_000_000,
     300_000_000_000
 ]
+
+private struct LocalEmbeddingProviderCredentialStore {
+    private let apiKeyDefaultsKey = "PaperCodexEmbeddingProviderAPIKey"
+    private let userDefaults: UserDefaults
+
+    init(userDefaults: UserDefaults = UserDefaults.standard) {
+        self.userDefaults = userDefaults
+    }
+
+    func loadAPIKey() -> String {
+        userDefaults.string(forKey: apiKeyDefaultsKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+
+    func saveAPIKey(_ value: String) {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            userDefaults.removeObject(forKey: apiKeyDefaultsKey)
+        } else {
+            userDefaults.set(trimmed, forKey: apiKeyDefaultsKey)
+        }
+    }
+}
 
 private func loadDiscoverCodexConcurrencyFromDefaults() -> Int {
     let stored = UserDefaults.standard.integer(forKey: discoverCodexConcurrencyDefaultsKey)
@@ -348,20 +370,6 @@ private func loadLocalDiscoverPreferencesFromDefaults() -> LocalDiscoverPreferen
 private func saveLocalDiscoverPreferencesToDefaults(_ preferences: LocalDiscoverPreferences) {
     if let data = try? JSONEncoder().encode(preferences.normalized) {
         UserDefaults.standard.set(data, forKey: localDiscoverPreferencesDefaultsKey)
-    }
-}
-
-private func loadEmbeddingProviderAPIKeyFromDefaults() -> String {
-    UserDefaults.standard.string(forKey: embeddingProviderAPIKeyDefaultsKey)?
-        .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-}
-
-private func saveEmbeddingProviderAPIKeyToDefaults(_ value: String) {
-    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-    if trimmed.isEmpty {
-        UserDefaults.standard.removeObject(forKey: embeddingProviderAPIKeyDefaultsKey)
-    } else {
-        UserDefaults.standard.set(trimmed, forKey: embeddingProviderAPIKeyDefaultsKey)
     }
 }
 
@@ -808,6 +816,7 @@ final class AppModel: ObservableObject {
     private var discoverStoreObservation: AnyCancellable?
     private var agentRuntimeStoreObservation: AnyCancellable?
     private var cachedEmbeddingProviderAPIKey: String?
+    private let embeddingProviderCredentialStore = LocalEmbeddingProviderCredentialStore()
     private var activeCodexRunHandlesBySessionID: [String: CodexRunHandle] = [:]
     private var activeDiscoverCodexRunHandles: [CodexRunHandle] = []
     private var activeAgentTerminalProcess: LocalPTYProcess?
@@ -1270,7 +1279,7 @@ final class AppModel: ObservableObject {
         if let cachedEmbeddingProviderAPIKey {
             return cachedEmbeddingProviderAPIKey
         }
-        let value = loadEmbeddingProviderAPIKeyFromDefaults()
+        let value = embeddingProviderCredentialStore.loadAPIKey()
         cachedEmbeddingProviderAPIKey = value
         return value
     }
@@ -1766,7 +1775,7 @@ final class AppModel: ObservableObject {
             postNotice(kind: .success, title: "Embedding Provider Saved")
             return
         }
-        saveEmbeddingProviderAPIKeyToDefaults(trimmedAPIKey)
+        embeddingProviderCredentialStore.saveAPIKey(trimmedAPIKey)
         cachedEmbeddingProviderAPIKey = trimmedAPIKey
         postNotice(kind: .success, title: "Embedding Provider Saved")
     }
