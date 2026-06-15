@@ -9,8 +9,27 @@ public enum CodexCLIError: Error, CustomStringConvertible, Equatable {
         case .executableNotFound:
             "Could not find the codex executable in PATH"
         case let .processFailed(status, stderr):
-            "Codex process failed with status \(status): \(stderr)"
+            "Codex process failed with status \(status): \(Self.actionableStderr(stderr))"
         }
+    }
+
+    private static func actionableStderr(_ stderr: String) -> String {
+        let detail = stderr
+            .split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && $0 != "Reading additional input from stdin..." }
+            .joined(separator: "\n")
+
+        if detail.contains("failed to connect to websocket: HTTP error: 403 Forbidden")
+            && detail.contains("chatgpt.com/backend-api/codex/responses") {
+            return "Codex authentication failed: ChatGPT websocket returned 403 Forbidden. Run `codex doctor` or `codex login` in Terminal, then retry."
+        }
+
+        if detail.isEmpty {
+            return "Codex CLI exited without diagnostic stderr."
+        }
+
+        return detail
     }
 }
 
@@ -115,6 +134,11 @@ public enum CodexReasoningEffort: String, Codable, CaseIterable, Sendable {
             "XHigh"
         }
     }
+}
+
+public enum CodexPromptTransport: Sendable {
+    case argument
+    case standardInput
 }
 
 public enum CodexRunEventKind: String, Codable, Equatable, Sendable {
@@ -655,7 +679,8 @@ public struct CodexCLI: Sendable {
         outputLastMessagePath: String? = nil,
         modelOverride: String? = nil,
         reasoningEffort: CodexReasoningEffort = .default,
-        mcpServers: [CodexMCPServerConfig] = []
+        mcpServers: [CodexMCPServerConfig] = [],
+        promptTransport: CodexPromptTransport = .argument
     ) -> [String] {
         var arguments = ["exec", "--skip-git-repo-check", "--json", "--enable", "image_generation"]
         if let modelOverride = Self.normalizedModelOverride(modelOverride) {
@@ -669,7 +694,7 @@ public struct CodexCLI: Sendable {
         if let outputLastMessagePath {
             arguments += ["--output-last-message", outputLastMessagePath]
         }
-        arguments.append(prompt)
+        arguments.append(Self.promptArgument(prompt, transport: promptTransport))
         return arguments
     }
 
@@ -679,7 +704,8 @@ public struct CodexCLI: Sendable {
         outputLastMessagePath: String? = nil,
         modelOverride: String? = nil,
         reasoningEffort: CodexReasoningEffort = .default,
-        mcpServers: [CodexMCPServerConfig] = []
+        mcpServers: [CodexMCPServerConfig] = [],
+        promptTransport: CodexPromptTransport = .argument
     ) -> [String] {
         var arguments = ["exec", "resume", "--skip-git-repo-check", "--json", "--enable", "image_generation"]
         if let modelOverride = Self.normalizedModelOverride(modelOverride) {
@@ -692,7 +718,7 @@ public struct CodexCLI: Sendable {
         if let outputLastMessagePath {
             arguments += ["--output-last-message", outputLastMessagePath]
         }
-        arguments += [sessionID, prompt]
+        arguments += [sessionID, Self.promptArgument(prompt, transport: promptTransport)]
         return arguments
     }
 
@@ -967,6 +993,7 @@ public struct CodexCLI: Sendable {
         eventLogURL: URL? = nil,
         currentDirectoryURL: URL? = nil,
         environmentOverrides: [String: String] = [:],
+        standardInput: String? = nil,
         runHandle: CodexRunHandle? = nil,
         onEvent: @escaping @Sendable (CodexRunEvent) -> Void
     ) throws -> String {
@@ -975,7 +1002,8 @@ public struct CodexCLI: Sendable {
             executablePath: executablePath,
             arguments: arguments,
             currentDirectoryPath: currentDirectoryURL?.path,
-            environmentOverrides: environmentOverrides
+            environmentOverrides: environmentOverrides,
+            standardInput: standardInput
         )
         return try CommandAgentRuntime().runStreaming(
             command: command,
@@ -995,6 +1023,15 @@ public struct CodexCLI: Sendable {
             workingDirectoryURL: workingDirectoryURL,
             environmentOverrides: environmentOverrides
         )
+    }
+
+    private static func promptArgument(_ prompt: String, transport: CodexPromptTransport) -> String {
+        switch transport {
+        case .argument:
+            return prompt
+        case .standardInput:
+            return "-"
+        }
     }
 
     private static func defaultProcessWorkingDirectory() -> URL {

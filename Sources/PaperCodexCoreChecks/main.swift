@@ -4583,6 +4583,8 @@ func runCodexCLIChecks() throws {
     try check(pwdOutput == isolatedWorkingDirectoryPath, "Codex subprocesses should run from the explicit working directory")
     let start = cli.startArguments(prompt: "hello", workspacePath: "/tmp/session-a")
     try check(start == ["exec", "--skip-git-repo-check", "--json", "--enable", "image_generation", "-C", "/tmp/session-a", "hello"], "start args should allow non-git session workspaces with image generation enabled")
+    let startWithStdinPrompt = cli.startArguments(prompt: "hello", workspacePath: "/tmp/session-a", promptTransport: .standardInput)
+    try check(startWithStdinPrompt == ["exec", "--skip-git-repo-check", "--json", "--enable", "image_generation", "-C", "/tmp/session-a", "-"], "start args should support stdin prompt transport")
     let startWithOutput = cli.startArguments(prompt: "hello", workspacePath: "/tmp/session-a", outputLastMessagePath: "/tmp/last.txt")
     try check(startWithOutput == ["exec", "--skip-git-repo-check", "--json", "--enable", "image_generation", "-C", "/tmp/session-a", "--output-last-message", "/tmp/last.txt", "hello"], "start args should support output-last-message")
     let startWithModel = cli.startArguments(prompt: "hello", workspacePath: "/tmp/session-a", outputLastMessagePath: "/tmp/last.txt", modelOverride: "gpt-5.4")
@@ -4616,6 +4618,8 @@ func runCodexCLIChecks() throws {
 
     let resume = cli.resumeArguments(sessionID: "session-a", prompt: "continue")
     try check(resume == ["exec", "resume", "--skip-git-repo-check", "--json", "--enable", "image_generation", "session-a", "continue"], "resume args should use codex exec resume with JSON output and image generation enabled")
+    let resumeWithStdinPrompt = cli.resumeArguments(sessionID: "session-a", prompt: "continue", promptTransport: .standardInput)
+    try check(resumeWithStdinPrompt == ["exec", "resume", "--skip-git-repo-check", "--json", "--enable", "image_generation", "session-a", "-"], "resume args should support stdin prompt transport")
     let resumeWithModel = cli.resumeArguments(sessionID: "session-a", prompt: "continue", modelOverride: "gpt-5.4")
     try check(resumeWithModel == ["exec", "resume", "--skip-git-repo-check", "--json", "--enable", "image_generation", "--model", "gpt-5.4", "session-a", "continue"], "resume args should support an app-local model override")
     let resumeWithReasoning = cli.resumeArguments(sessionID: "session-a", prompt: "continue", reasoningEffort: .xhigh)
@@ -4705,6 +4709,18 @@ func runCodexCLIChecks() throws {
     try check(capabilities.supportsJSONOutput, "Codex help parser should detect JSON output support")
     try check(capabilities.supportsOutputLastMessage, "Codex help parser should detect last-message output support")
     try check(capabilities.supportsResume, "Codex help parser should detect resume support")
+    let websocketForbiddenError = CodexCLIError.processFailed(
+        status: 1,
+        stderr: """
+        Reading additional input from stdin...
+        2026-06-15T03:21:38.769409Z ERROR codex_api::endpoint::responses_websocket: failed to connect to websocket: HTTP error: 403 Forbidden, url: wss://chatgpt.com/backend-api/codex/responses
+        """
+    )
+    let websocketForbiddenDescription = String(describing: websocketForbiddenError)
+    try check(websocketForbiddenDescription.contains("Codex authentication failed"), "Codex websocket 403 failures should explain auth instead of leading with stdin noise")
+    try check(!websocketForbiddenDescription.contains("Reading additional input"), "Codex process failure descriptions should remove benign stdin prelude lines")
+    let stdinOnlyFailure = String(describing: CodexCLIError.processFailed(status: 1, stderr: "Reading additional input from stdin...\n"))
+    try check(stdinOnlyFailure.contains("Codex CLI exited without diagnostic stderr"), "stdin-only stderr should become a concise missing-diagnostics message")
     let cancelHandle = CodexRunHandle()
     let cancelSemaphore = DispatchSemaphore(value: 0)
     let cancelStarted = Date()
@@ -4926,10 +4942,11 @@ func runAgentCommandBuilderChecks() throws {
             "-c", "mcp_servers.paper-codex.bearer_token_env_var=\"PAPER_CODEX_MCP_TOKEN\"",
             "-C", "/tmp/session-a",
             "--output-last-message", "/tmp/session-a/turns/last.txt",
-            "Summarize"
+            "-"
         ],
-        "Codex adapter should preserve current codex exec behavior and MCP config overrides"
+        "Codex adapter should pass the prompt through stdin while preserving MCP config overrides"
     )
+    try check(codexStart.standardInput == "Summarize", "Codex adapter should write the prompt to stdin")
     try check(codexStart.environmentOverrides["PAPER_CODEX_MCP_TOKEN"] == "secret-token", "Codex adapter should pass MCP bearer tokens through the environment")
     try check(codexStart.currentDirectoryPath == "/tmp/session-a", "Codex adapter should run from the session workspace")
 
@@ -4943,7 +4960,8 @@ func runAgentCommandBuilderChecks() throws {
         mcpServers: [mcpServer]
     )
     try check(codexResume.arguments.prefix(5) == ["exec", "resume", "--skip-git-repo-check", "--json", "--enable"], "Codex resume adapter should use codex exec resume")
-    try check(codexResume.arguments.suffix(2) == ["codex-session", "Continue"], "Codex resume adapter should append runtime session id and prompt")
+    try check(codexResume.arguments.suffix(2) == ["codex-session", "-"], "Codex resume adapter should append runtime session id and stdin prompt marker")
+    try check(codexResume.standardInput == "Continue", "Codex resume adapter should write the continuation prompt to stdin")
 
     let claude = ClaudeCodeRuntimeAdapter(executablePath: "/usr/local/bin/claude").nonInteractiveCommand(
         prompt: "Summarize",

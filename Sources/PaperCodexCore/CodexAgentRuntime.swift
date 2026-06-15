@@ -46,7 +46,8 @@ public struct CodexAgentRuntime: AgentRuntime {
                 outputLastMessagePath: outputURL.path,
                 modelOverride: request.modelOverride,
                 reasoningEffort: request.reasoningEffort,
-                mcpServers: request.mcpServers
+                mcpServers: request.mcpServers,
+                promptTransport: .standardInput
             )
         } else {
             arguments = cli.startArguments(
@@ -55,7 +56,8 @@ public struct CodexAgentRuntime: AgentRuntime {
                 outputLastMessagePath: outputURL.path,
                 modelOverride: request.modelOverride,
                 reasoningEffort: request.reasoningEffort,
-                mcpServers: request.mcpServers
+                mcpServers: request.mcpServers,
+                promptTransport: .standardInput
             )
         }
 
@@ -73,6 +75,7 @@ public struct CodexAgentRuntime: AgentRuntime {
                 eventLogURL: eventLogURL,
                 currentDirectoryURL: workspaceURL,
                 environmentOverrides: request.mcpEnvironmentOverrides,
+                standardInput: request.prompt,
                 runHandle: runHandle,
                 onEvent: onEvent
             )

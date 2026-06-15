@@ -34,10 +34,12 @@ public struct CodexRuntimeAdapter: Sendable {
                 outputLastMessagePath: outputLastMessagePath,
                 modelOverride: modelOverride,
                 reasoningEffort: reasoningEffort,
-                mcpServers: mcpServers
+                mcpServers: mcpServers,
+                promptTransport: .standardInput
             ),
             currentDirectoryPath: workspacePath,
-            environmentOverrides: Self.environmentOverrides(for: mcpServers)
+            environmentOverrides: Self.environmentOverrides(for: mcpServers),
+            standardInput: prompt
         )
     }
 
@@ -59,10 +61,12 @@ public struct CodexRuntimeAdapter: Sendable {
                 outputLastMessagePath: outputLastMessagePath,
                 modelOverride: modelOverride,
                 reasoningEffort: reasoningEffort,
-                mcpServers: mcpServers
+                mcpServers: mcpServers,
+                promptTransport: .standardInput
             ),
             currentDirectoryPath: workspacePath,
-            environmentOverrides: Self.environmentOverrides(for: mcpServers)
+            environmentOverrides: Self.environmentOverrides(for: mcpServers),
+            standardInput: prompt
         )
     }
 

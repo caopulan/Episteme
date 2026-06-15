@@ -35,6 +35,10 @@ public struct CommandAgentRuntime: Sendable {
         let error = Pipe()
         process.standardOutput = output
         process.standardError = error
+        let input = command.standardInput.map { _ in Pipe() }
+        if let input {
+            process.standardInput = input
+        }
 
         let group = DispatchGroup()
         group.enter()
@@ -65,6 +69,10 @@ public struct CommandAgentRuntime: Sendable {
         }
 
         try process.run()
+        if let input, let standardInput = command.standardInput {
+            input.fileHandleForWriting.write(Data(standardInput.utf8))
+            input.fileHandleForWriting.closeFile()
+        }
         runHandle?.setProcess(process)
         process.waitUntilExit()
         runHandle?.clearProcess(process)
