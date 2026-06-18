@@ -1,12 +1,94 @@
 import PaperCodexCore
 import SwiftUI
 
+private enum SettingsSectionID: String, CaseIterable, Identifiable {
+    case language
+    case chatAppearance
+    case arxivFeed
+    case localRanking
+    case codexEnrichment
+    case codexSystemPrompt
+    case codexMCP
+    case agentRuntimes
+    case exploreProcessing
+    case embeddingProvider
+    case quickPrompts
+    case savedPaperOrganization
+    case disposableCache
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .language:
+            "Language"
+        case .chatAppearance:
+            "Reader Chat"
+        case .arxivFeed:
+            "arXiv Feed"
+        case .localRanking:
+            "Local Ranking"
+        case .codexEnrichment:
+            "Codex Enrichment"
+        case .codexSystemPrompt:
+            "System Prompt"
+        case .codexMCP:
+            "Episteme MCP"
+        case .agentRuntimes:
+            "Agent Runtimes"
+        case .exploreProcessing:
+            "Explore Processing"
+        case .embeddingProvider:
+            "Embedding Provider"
+        case .quickPrompts:
+            "Quick Prompts"
+        case .savedPaperOrganization:
+            "Saved Papers"
+        case .disposableCache:
+            "Disposable Cache"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .language:
+            "globe"
+        case .chatAppearance:
+            "text.bubble"
+        case .arxivFeed:
+            "network"
+        case .localRanking:
+            "slider.horizontal.3"
+        case .codexEnrichment:
+            "sparkles"
+        case .codexSystemPrompt:
+            "text.quote"
+        case .codexMCP:
+            "point.3.connected.trianglepath.dotted"
+        case .agentRuntimes:
+            "terminal"
+        case .exploreProcessing:
+            "cpu"
+        case .embeddingProvider:
+            "point.3.connected.trianglepath.dotted"
+        case .quickPrompts:
+            "text.bubble"
+        case .savedPaperOrganization:
+            "folder.badge.gearshape"
+        case .disposableCache:
+            "internaldrive"
+        }
+    }
+}
+
 struct SettingsView: View {
     @EnvironmentObject private var model: AppModel
+    @State private var activeSettingsSection: SettingsSectionID = .language
     @State private var draftArxivCategories = ""
     @State private var draftWhitelistTags = ""
     @State private var draftBlacklistTags = ""
     @State private var draftSimilarityCategoryIDs: Set<String> = []
+    @State private var collapsedSimilarityCategoryIDs: Set<String> = []
     @State private var draftAutoEnrichOnOpen = false
     @State private var draftAutoEnrichOnSave = false
     @State private var draftCodexSystemPrompt = PromptBuilder.defaultSystemPrompt
@@ -71,30 +153,33 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        SidebarSplitLayout(minContentWidth: 760) {
-            sidebar
-        } content: {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 22) {
-                    header
-                    globalLanguageSettings
-                    chatAppearanceSettings
-                    arxivFeedSettings
-                    localRankingSettings
-                    codexEnrichmentSettings
-                    codexSystemPromptSettings
-                    codexMCPSettings
-                    agentRuntimeSettings
-                    discoverCodexProcessingSettings
-                    embeddingProviderSettings
-                    quickPromptSettings
-                    storageRules
-                    cacheControls
+        ScrollViewReader { settingsScrollProxy in
+            SidebarSplitLayout(minContentWidth: 760) {
+                sidebar(settingsScrollProxy: settingsScrollProxy)
+            } content: {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 26) {
+                        header
+                        globalLanguageSettings
+                        chatAppearanceSettings
+                        arxivFeedSettings
+                        localRankingSettings
+                        codexEnrichmentSettings
+                        codexSystemPromptSettings
+                        codexMCPSettings
+                        agentRuntimeSettings
+                        discoverCodexProcessingSettings
+                        embeddingProviderSettings
+                        quickPromptSettings
+                        storageRules
+                        cacheControls
+                    }
+                    .padding(.horizontal, 30)
+                    .padding(.vertical, 28)
+                    .frame(maxWidth: 860, alignment: .leading)
                 }
-                .padding(28)
-                .frame(maxWidth: 820, alignment: .leading)
+                .frame(minWidth: 0)
             }
-            .frame(minWidth: 0)
         }
         .alert("Clear arXiv cache?", isPresented: $isConfirmingClearCache) {
             Button("Clear", role: .destructive) {
@@ -125,17 +210,48 @@ struct SettingsView: View {
         }
     }
 
-    private var sidebar: some View {
+    private func sidebar(settingsScrollProxy: ScrollViewProxy) -> some View {
         VStack(alignment: .leading, spacing: 18) {
             Text("Episteme")
                 .font(.paperCodexSystem(size: 24, weight: .semibold))
 
             PrimaryNavigationSection()
 
-            Spacer()
+            Divider()
+
+            settingsNavigation(settingsScrollProxy: settingsScrollProxy)
+
+            Spacer(minLength: 0)
         }
         .paperCodexSidebarChromePadding()
         .background(Color(nsColor: .controlBackgroundColor))
+    }
+
+    private func settingsNavigation(settingsScrollProxy: ScrollViewProxy) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Settings", systemImage: "gearshape")
+                .font(.paperCodexSystem(size: 12, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 2)
+
+            ScrollView(.vertical) {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(SettingsSectionID.allCases) { section in
+                        SettingsNavigationRow(
+                            section: section,
+                            selected: activeSettingsSection == section
+                        ) {
+                            activeSettingsSection = section
+                            withAnimation(.easeInOut(duration: 0.22)) {
+                                settingsScrollProxy.scrollTo(section, anchor: .top)
+                            }
+                        }
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+        }
+        .frame(maxHeight: 430, alignment: .top)
     }
 
     private var header: some View {
@@ -149,7 +265,7 @@ struct SettingsView: View {
     }
 
     private var arxivFeedSettings: some View {
-        settingsSection(title: "arXiv Feed", systemImage: "network") {
+        settingsSection(.arxivFeed) {
             TextField("Categories, comma separated", text: $draftArxivCategories)
                 .textFieldStyle(.roundedBorder)
             HStack {
@@ -180,7 +296,7 @@ struct SettingsView: View {
     }
 
     private var globalLanguageSettings: some View {
-        settingsSection(title: "Language", systemImage: "globe") {
+        settingsSection(.language) {
             Picker("App language", selection: Binding(
                 get: { model.globalLanguageMode },
                 set: { model.setGlobalLanguageMode($0) }
@@ -198,7 +314,7 @@ struct SettingsView: View {
     }
 
     private var chatAppearanceSettings: some View {
-        settingsSection(title: "Reader Chat Appearance", systemImage: "text.bubble") {
+        settingsSection(.chatAppearance) {
             Picker("Chat font", selection: $draftChatFontFamily) {
                 ForEach(ChatFontFamily.allCases) { family in
                     Text(family.title).tag(family)
@@ -255,32 +371,12 @@ struct SettingsView: View {
     }
 
     private var localRankingSettings: some View {
-        settingsSection(title: "Local Ranking", systemImage: "slider.horizontal.3") {
+        settingsSection(.localRanking) {
             TextField("Whitelist tags, comma separated", text: $draftWhitelistTags)
                 .textFieldStyle(.roundedBorder)
             TextField("Blacklist tags, comma separated", text: $draftBlacklistTags)
                 .textFieldStyle(.roundedBorder)
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Similarity categories")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                ScrollView(.vertical) {
-                    LazyVStack(alignment: .leading, spacing: 6) {
-                        ForEach(model.categories) { category in
-                            similarityCategoryRow(category)
-                        }
-                    }
-                    .padding(10)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .frame(maxHeight: 180)
-                .background(Color(nsColor: .textBackgroundColor))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(Color.black.opacity(0.08), lineWidth: 1)
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-            }
+            similarityCategoryTree
             HStack {
                 SettingsActionButton(kind: .primary, disabled: !isRankingDirty) {
                     model.setLocalTagFilters(
@@ -301,21 +397,95 @@ struct SettingsView: View {
         }
     }
 
-    private func similarityCategoryRow(_ category: PaperCodexCore.Category) -> some View {
-        SettingsCategoryToggleRow(
-            title: categoryDisplayName(category),
-            selected: draftSimilarityCategoryIDs.contains(category.id)
-        ) {
-            if draftSimilarityCategoryIDs.contains(category.id) {
-                draftSimilarityCategoryIDs.remove(category.id)
-            } else {
-                draftSimilarityCategoryIDs.insert(category.id)
+    private var similarityCategoryTree: some View {
+        let tree = SettingsSimilarityCategoryTreeSnapshot(
+            categories: model.categories,
+            collapsedCategoryIDs: collapsedSimilarityCategoryIDs
+        )
+
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Similarity categories")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text("\(draftSimilarityCategoryIDs.count)/\(model.categories.count) folders")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+
+            VStack(spacing: 0) {
+                Divider()
+                ScrollView(.vertical) {
+                    LazyVStack(alignment: .leading, spacing: SettingsSimilarityCategoryLayout.rowSpacing) {
+                        if model.categories.isEmpty {
+                            Text("No library folders")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .padding(.vertical, 12)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        } else {
+                            SettingsSimilarityRootFolderRow(
+                                selected: draftSimilarityCategoryIDs.count == model.categories.count,
+                                countText: "\(model.categories.count)"
+                            ) {
+                                toggleAllSimilarityCategories()
+                            }
+
+                            ForEach(tree.visibleItems) { item in
+                                SettingsSimilarityCategoryRow(
+                                    title: item.category.name,
+                                    selected: draftSimilarityCategoryIDs.contains(item.category.id),
+                                    depth: item.depth,
+                                    connectorContinuations: item.connectorContinuations,
+                                    hasChildren: tree.hasChildren(item.category.id),
+                                    isExpanded: !collapsedSimilarityCategoryIDs.contains(item.category.id),
+                                    isPinned: item.category.isPinned,
+                                    onToggleExpanded: {
+                                        toggleSimilarityCategoryCollapsed(item.category.id)
+                                    },
+                                    onToggleSelected: {
+                                        toggleSimilarityCategory(item.category.id)
+                                    }
+                                )
+                            }
+                        }
+                    }
+                    .padding(.vertical, 7)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxHeight: 230)
+                Divider()
             }
         }
     }
 
+    private func toggleSimilarityCategory(_ categoryID: String) {
+        if draftSimilarityCategoryIDs.contains(categoryID) {
+            draftSimilarityCategoryIDs.remove(categoryID)
+        } else {
+            draftSimilarityCategoryIDs.insert(categoryID)
+        }
+    }
+
+    private func toggleAllSimilarityCategories() {
+        if draftSimilarityCategoryIDs.count == model.categories.count {
+            draftSimilarityCategoryIDs.removeAll()
+        } else {
+            draftSimilarityCategoryIDs = Set(model.categories.map(\.id))
+        }
+    }
+
+    private func toggleSimilarityCategoryCollapsed(_ categoryID: String) {
+        if collapsedSimilarityCategoryIDs.contains(categoryID) {
+            collapsedSimilarityCategoryIDs.remove(categoryID)
+        } else {
+            collapsedSimilarityCategoryIDs.insert(categoryID)
+        }
+    }
+
     private var codexEnrichmentSettings: some View {
-        settingsSection(title: "Codex Enrichment", systemImage: "sparkles") {
+        settingsSection(.codexEnrichment) {
             Toggle("Auto-enrich when opening arXiv papers", isOn: $draftAutoEnrichOnOpen)
                 .toggleStyle(.checkbox)
             Toggle("Auto-enrich when saving to Library", isOn: $draftAutoEnrichOnSave)
@@ -332,7 +502,7 @@ struct SettingsView: View {
     }
 
     private var discoverCodexProcessingSettings: some View {
-        settingsSection(title: "Explore Processing", systemImage: "cpu") {
+        settingsSection(.exploreProcessing) {
             Picker("Model", selection: $draftDiscoverCodexModel) {
                 Text(codexDefaultModelLabel).tag("")
                 ForEach(model.availableCodexModelIDs, id: \.self) { modelID in
@@ -390,7 +560,7 @@ struct SettingsView: View {
     }
 
     private var codexSystemPromptSettings: some View {
-        settingsSection(title: "Codex System Prompt", systemImage: "text.quote") {
+        settingsSection(.codexSystemPrompt) {
             VStack(alignment: .leading, spacing: 10) {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
@@ -434,7 +604,7 @@ struct SettingsView: View {
     }
 
     private var codexMCPSettings: some View {
-        settingsSection(title: "Episteme MCP", systemImage: "point.3.connected.trianglepath.dotted") {
+        settingsSection(.codexMCP) {
             Toggle(
                 "Enable for in-app Codex",
                 isOn: Binding(
@@ -477,7 +647,7 @@ struct SettingsView: View {
     }
 
     private var agentRuntimeSettings: some View {
-        settingsSection(title: "Agent Runtimes", systemImage: "terminal") {
+        settingsSection(.agentRuntimes) {
             HStack(spacing: 12) {
                 Picker("Chat", selection: Binding(
                     get: { model.selectedChatRuntimeID },
@@ -606,7 +776,7 @@ struct SettingsView: View {
     }
 
     private var embeddingProviderSettings: some View {
-        settingsSection(title: "Embedding Provider", systemImage: "point.3.connected.trianglepath.dotted") {
+        settingsSection(.embeddingProvider) {
             Toggle("Enable embedding similarity", isOn: $draftEmbeddingEnabled)
                 .toggleStyle(.checkbox)
             TextField("Base URL", text: $draftEmbeddingBaseURL)
@@ -649,7 +819,7 @@ struct SettingsView: View {
     }
 
     private var quickPromptSettings: some View {
-        settingsSection(title: "Quick Prompts", systemImage: "text.bubble") {
+        settingsSection(.quickPrompts) {
             VStack(alignment: .leading, spacing: 10) {
                 ForEach(model.quickPrompts) { prompt in
                     HStack(alignment: .top, spacing: 10) {
@@ -677,9 +847,11 @@ struct SettingsView: View {
                             model.deleteQuickPrompt(prompt)
                         }
                     }
-                    .padding(10)
-                    .background(Color(nsColor: .controlBackgroundColor))
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .padding(.vertical, 7)
+
+                    if prompt.id != model.quickPrompts.last?.id {
+                        Divider()
+                    }
                 }
 
                 TextField("Prompt title", text: $newPromptTitle)
@@ -706,7 +878,7 @@ struct SettingsView: View {
     }
 
     private var storageRules: some View {
-        settingsSection(title: "Saved Paper Organization", systemImage: "folder.badge.gearshape") {
+        settingsSection(.savedPaperOrganization) {
             Picker("Folder rule", selection: Binding(
                 get: { model.arxivSaveOrganization },
                 set: { model.setArxivSaveOrganization($0) }
@@ -722,7 +894,7 @@ struct SettingsView: View {
     }
 
     private var cacheControls: some View {
-        settingsSection(title: "Disposable Cache", systemImage: "internaldrive") {
+        settingsSection(.disposableCache) {
             pathRow(label: "Cache root", value: model.arxivDisposableCachePath)
             VStack(alignment: .leading, spacing: 4) {
                 Text(model.cacheStorageSummary.detailText)
@@ -753,26 +925,28 @@ struct SettingsView: View {
     }
 
     private func settingsSection<Content: View>(
-        title: String,
-        systemImage: String,
+        _ section: SettingsSectionID,
         @ViewBuilder content: () -> Content
     ) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label {
-                Text(LocalizedStringKey(title))
-            } icon: {
-                Image(systemName: systemImage)
+        VStack(alignment: .leading, spacing: 13) {
+            HStack(spacing: 10) {
+                Label {
+                    Text(LocalizedStringKey(section.title))
+                } icon: {
+                    Image(systemName: section.systemImage)
+                }
+                .font(.headline)
+
+                Rectangle()
+                    .fill(Color.primary.opacity(0.10))
+                    .frame(height: 1)
             }
-            .font(.headline)
-            content()
+
+            VStack(alignment: .leading, spacing: 11) {
+                content()
+            }
         }
-        .padding(16)
-        .background(Color(nsColor: .textBackgroundColor))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(Color.black.opacity(0.08), lineWidth: 1)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .id(section)
     }
 
     private var codexSystemPromptEditSheet: some View {
@@ -902,19 +1076,6 @@ struct SettingsView: View {
         model.categories.map(\.id).filter { draftSimilarityCategoryIDs.contains($0) }
     }
 
-    private func categoryDisplayName(_ category: PaperCodexCore.Category) -> String {
-        var names = [category.name]
-        var visited = Set([category.id])
-        var parentID = category.parentID
-        while let id = parentID,
-              !visited.contains(id),
-              let parent = model.categories.first(where: { $0.id == id }) {
-            names.append(parent.name)
-            visited.insert(parent.id)
-            parentID = parent.parentID
-        }
-        return names.reversed().joined(separator: " / ")
-    }
 }
 
 private enum SettingsActionButtonKind {
@@ -979,31 +1140,31 @@ private struct ChatAppearancePreview: View {
     }
 }
 
-private struct SettingsCategoryToggleRow: View {
+private struct SettingsNavigationRow: View {
     @State private var isHovering = false
 
-    var title: String
+    var section: SettingsSectionID
     var selected: Bool
     var action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 8) {
-                Image(systemName: selected ? "checkmark.square.fill" : "square")
+            HStack(spacing: 9) {
+                Image(systemName: section.systemImage)
+                    .font(.paperCodexSystem(size: 12, weight: .semibold))
+                    .frame(width: 16)
                     .foregroundStyle(selected ? Color.accentColor : Color.secondary)
-                Image(systemName: "folder")
-                    .foregroundStyle(.secondary)
-                Text(title)
+                Text(section.title)
                     .lineLimit(1)
                 Spacer(minLength: 0)
             }
-            .font(.paperCodexSystem(size: 12, weight: .medium))
-            .padding(.horizontal, 8)
+            .font(.paperCodexSystem(size: 12.5, weight: selected ? .semibold : .medium))
+            .padding(.horizontal, 9)
             .padding(.vertical, 6)
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
         }
-        .buttonStyle(SettingsSelectableRowButtonStyle(selected: selected, isHovering: isHovering))
+        .buttonStyle(SettingsNavigationRowButtonStyle(selected: selected, isHovering: isHovering))
         .onHover { hovering in
             withAnimation(PaperCodexMotion.hover) {
                 isHovering = hovering
@@ -1012,7 +1173,7 @@ private struct SettingsCategoryToggleRow: View {
     }
 }
 
-private struct SettingsSelectableRowButtonStyle: ButtonStyle {
+private struct SettingsNavigationRowButtonStyle: ButtonStyle {
     var selected: Bool
     var isHovering: Bool
 
@@ -1024,11 +1185,15 @@ private struct SettingsSelectableRowButtonStyle: ButtonStyle {
                 RoundedRectangle(cornerRadius: 6)
                     .fill(backgroundColor(isPressed: isPressed))
             )
-            .overlay(
-                RoundedRectangle(cornerRadius: 6)
-                    .stroke(borderColor(isPressed: isPressed), lineWidth: 1)
-            )
-            .scaleEffect(isPressed ? 0.985 : (isHovering ? 1.01 : 1), anchor: .center)
+            .overlay(alignment: .leading) {
+                if selected {
+                    Capsule()
+                        .fill(Color.accentColor.opacity(0.72))
+                        .frame(width: 3, height: 16)
+                        .padding(.leading, 3)
+                }
+            }
+            .scaleEffect(isPressed ? 0.985 : 1, anchor: .center)
             .animation(PaperCodexMotion.press, value: configuration.isPressed)
             .animation(PaperCodexMotion.hover, value: isHovering)
             .animation(PaperCodexMotion.selection, value: selected)
@@ -1048,18 +1213,326 @@ private struct SettingsSelectableRowButtonStyle: ButtonStyle {
         if selected {
             return Color.accentColor.opacity(0.10)
         }
-        return isHovering ? Color.accentColor.opacity(0.07) : Color(nsColor: .controlBackgroundColor)
+        return isHovering ? Color.primary.opacity(0.045) : Color.clear
+    }
+}
+
+private enum SettingsSimilarityCategoryLayout {
+    static let rowSpacing: CGFloat = 0
+    static let treeConnectorHeight: CGFloat = 32
+    static let treeIndentWidth: CGFloat = 22
+    static let folderButtonLeadingPadding: CGFloat = 8
+    static let folderIconWidth: CGFloat = 17
+    static let connectorTargetInset: CGFloat = 7
+    static let connectorLineWidth: CGFloat = 1
+    static let connectorOpacity = 0.16
+
+    static var folderIconCenterX: CGFloat {
+        folderButtonLeadingPadding + folderIconWidth / 2
     }
 
-    private func borderColor(isPressed: Bool) -> Color {
-        if isPressed {
-            return Color.accentColor.opacity(0.44)
-        }
-        if selected {
-            return Color.accentColor.opacity(0.26)
-        }
-        return isHovering ? Color.accentColor.opacity(0.22) : Color.clear
+    static func folderIconCenterX(depth: Int) -> CGFloat {
+        folderIconCenterX + CGFloat(depth) * treeIndentWidth
     }
+}
+
+private struct SettingsSimilarityRootFolderRow: View {
+    @State private var isHovering = false
+
+    var selected: Bool
+    var countText: String
+    var onToggleSelected: () -> Void
+
+    var body: some View {
+        Button(action: onToggleSelected) {
+            HStack(spacing: 8) {
+                Image(systemName: selected ? "tray.full.fill" : "tray.full")
+                    .frame(width: 18)
+                    .foregroundStyle(selected ? Color.accentColor : Color.secondary)
+                Text("All Folders")
+                    .font(.paperCodexSystem(size: 13, weight: selected ? .semibold : .medium))
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                Text(countText)
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                    .font(.paperCodexSystem(size: 12, weight: .semibold))
+                    .foregroundStyle(selected ? Color.accentColor : Color.secondary.opacity(0.65))
+            }
+            .padding(.horizontal, 9)
+            .padding(.vertical, 7)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(selected ? Color.accentColor.opacity(0.10) : (isHovering ? Color.primary.opacity(0.045) : Color.clear))
+        )
+        .overlay(alignment: .leading) {
+            if selected {
+                Capsule()
+                    .fill(Color.accentColor.opacity(0.72))
+                    .frame(width: 3, height: 18)
+                    .padding(.leading, 3)
+            }
+        }
+        .animation(PaperCodexMotion.hover, value: isHovering)
+        .animation(PaperCodexMotion.selection, value: selected)
+        .onHover { hovering in
+            withAnimation(PaperCodexMotion.hover) {
+                isHovering = hovering
+            }
+        }
+        .help(selected ? "Deselect all library folders" : "Select all library folders")
+    }
+}
+
+private struct SettingsSimilarityCategoryRow: View {
+    @State private var isHovering = false
+
+    var title: String
+    var selected: Bool
+    var depth: Int
+    var connectorContinuations: [Bool]
+    var hasChildren: Bool
+    var isExpanded: Bool
+    var isPinned: Bool
+    var onToggleExpanded: () -> Void
+    var onToggleSelected: () -> Void
+
+    var body: some View {
+        ZStack(alignment: .trailing) {
+            HStack(spacing: 8) {
+                Button(action: folderButtonAction) {
+                    Image(systemName: folderIconName)
+                        .frame(width: SettingsSimilarityCategoryLayout.folderIconWidth)
+                        .foregroundStyle(selected || isExpanded ? Color.accentColor : Color.secondary)
+                }
+                .buttonStyle(.plain)
+                .help(folderIconHelp)
+
+                Button(action: onToggleSelected) {
+                    HStack(spacing: 0) {
+                        Text(title)
+                            .font(.paperCodexSystem(size: 13, weight: selected ? .semibold : .medium))
+                            .lineLimit(1)
+                        Spacer(minLength: 52)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+                .help(title)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 7)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(selected ? Color.accentColor.opacity(0.10) : (isHovering ? Color.primary.opacity(0.045) : Color.clear))
+            )
+            .overlay(alignment: .leading) {
+                if selected {
+                    Capsule()
+                        .fill(Color.accentColor.opacity(0.72))
+                        .frame(width: 3, height: 18)
+                        .padding(.leading, 3)
+                }
+            }
+            .padding(.leading, CGFloat(depth) * SettingsSimilarityCategoryLayout.treeIndentWidth)
+            .frame(minHeight: SettingsSimilarityCategoryLayout.treeConnectorHeight)
+            .background(alignment: .leading) {
+                SettingsSimilarityCategoryTreeConnector(
+                    depth: depth,
+                    connectorContinuations: connectorContinuations
+                )
+                .allowsHitTesting(false)
+            }
+
+            HStack(spacing: 5) {
+                if isPinned {
+                    Image(systemName: "pin.fill")
+                        .font(.caption2)
+                        .foregroundStyle(Color.accentColor.opacity(0.72))
+                }
+                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                    .font(.paperCodexSystem(size: 12, weight: .semibold))
+                    .foregroundStyle(selected ? Color.accentColor : Color.secondary.opacity(0.65))
+            }
+            .padding(.trailing, 8)
+        }
+        .animation(PaperCodexMotion.hover, value: isHovering)
+        .animation(PaperCodexMotion.selection, value: selected)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.12)) {
+                isHovering = hovering
+            }
+        }
+    }
+
+    private var folderIconName: String {
+        hasChildren ? (isExpanded ? "folder.fill" : "folder") : "folder"
+    }
+
+    private var folderIconHelp: String {
+        guard hasChildren else {
+            return title
+        }
+        return isExpanded ? "Collapse \(title)" : "Expand \(title)"
+    }
+
+    private func folderButtonAction() {
+        if hasChildren {
+            onToggleExpanded()
+        } else {
+            onToggleSelected()
+        }
+    }
+}
+
+private struct SettingsSimilarityCategoryTreeConnector: View {
+    var depth: Int
+    var connectorContinuations: [Bool]
+
+    var body: some View {
+        if depth == 0 || connectorContinuations.isEmpty {
+            Color.clear
+                .frame(height: SettingsSimilarityCategoryLayout.treeConnectorHeight)
+        } else {
+            SettingsSimilarityCategoryTreeConnectorLevel(
+                depth: depth,
+                connectorContinuations: connectorContinuations
+            )
+            .stroke(
+                Color.primary.opacity(SettingsSimilarityCategoryLayout.connectorOpacity),
+                style: StrokeStyle(
+                    lineWidth: SettingsSimilarityCategoryLayout.connectorLineWidth,
+                    lineCap: .butt,
+                    lineJoin: .round
+                )
+            )
+            .frame(
+                width: SettingsSimilarityCategoryLayout.folderIconCenterX(depth: depth) + 1,
+                height: SettingsSimilarityCategoryLayout.treeConnectorHeight
+            )
+        }
+    }
+}
+
+private struct SettingsSimilarityCategoryTreeConnectorLevel: Shape {
+    var depth: Int
+    var connectorContinuations: [Bool]
+
+    func path(in rect: CGRect) -> Path {
+        Path { path in
+            let midY = rect.midY
+            let currentIconX = SettingsSimilarityCategoryLayout.folderIconCenterX(depth: depth)
+            let currentTargetX = currentIconX - SettingsSimilarityCategoryLayout.connectorTargetInset
+            let parentIconX = SettingsSimilarityCategoryLayout.folderIconCenterX(depth: depth - 1)
+            let currentBranchContinues = connectorContinuations.indices.contains(depth - 1)
+                ? connectorContinuations[depth - 1]
+                : false
+
+            if depth > 1 {
+                for level in 0..<(depth - 1) where connectorContinuations.indices.contains(level) && connectorContinuations[level] {
+                    let ancestorIconX = SettingsSimilarityCategoryLayout.folderIconCenterX(depth: level)
+                    path.move(to: CGPoint(x: ancestorIconX, y: rect.minY))
+                    path.addLine(to: CGPoint(x: ancestorIconX, y: rect.maxY))
+                }
+            }
+
+            path.move(to: CGPoint(x: parentIconX, y: rect.minY))
+            path.addLine(to: CGPoint(x: parentIconX, y: currentBranchContinues ? rect.maxY : midY))
+            path.move(to: CGPoint(x: parentIconX, y: midY))
+            path.addLine(to: CGPoint(x: currentTargetX, y: midY))
+        }
+    }
+}
+
+private struct SettingsSimilarityCategoryTreeSnapshot {
+    var visibleItems: [SettingsSimilarityCategoryItem]
+
+    private var childrenByParentID: [String: [PaperCodexCore.Category]]
+
+    init(categories: [PaperCodexCore.Category], collapsedCategoryIDs: Set<String>) {
+        var rootCategories: [PaperCodexCore.Category] = []
+        var childrenByParentID: [String: [PaperCodexCore.Category]] = [:]
+
+        for category in categories {
+            if let parentID = category.parentID {
+                childrenByParentID[parentID, default: []].append(category)
+            } else {
+                rootCategories.append(category)
+            }
+        }
+
+        rootCategories.sort(by: Self.sortCategories)
+        for parentID in Array(childrenByParentID.keys) {
+            childrenByParentID[parentID, default: []].sort(by: Self.sortCategories)
+        }
+
+        self.childrenByParentID = childrenByParentID
+        self.visibleItems = Self.visibleItems(
+            categories: rootCategories,
+            childrenByParentID: childrenByParentID,
+            collapsedCategoryIDs: collapsedCategoryIDs,
+            depth: 0,
+            ancestorContinuations: []
+        )
+    }
+
+    func hasChildren(_ categoryID: String) -> Bool {
+        childrenByParentID[categoryID]?.isEmpty == false
+    }
+
+    private static func visibleItems(
+        categories: [PaperCodexCore.Category],
+        childrenByParentID: [String: [PaperCodexCore.Category]],
+        collapsedCategoryIDs: Set<String>,
+        depth: Int,
+        ancestorContinuations: [Bool]
+    ) -> [SettingsSimilarityCategoryItem] {
+        categories.enumerated().flatMap { index, category in
+            let isLast = index == categories.count - 1
+            let connectorContinuations = depth == 0 ? [] : ancestorContinuations + [!isLast]
+            let item = SettingsSimilarityCategoryItem(
+                category: category,
+                depth: depth,
+                connectorContinuations: connectorContinuations
+            )
+            guard !collapsedCategoryIDs.contains(category.id) else {
+                return [item]
+            }
+            return [item] + visibleItems(
+                categories: childrenByParentID[category.id, default: []],
+                childrenByParentID: childrenByParentID,
+                collapsedCategoryIDs: collapsedCategoryIDs,
+                depth: depth + 1,
+                ancestorContinuations: connectorContinuations
+            )
+        }
+    }
+
+    private static func sortCategories(_ left: PaperCodexCore.Category, _ right: PaperCodexCore.Category) -> Bool {
+        if left.isPinned != right.isPinned {
+            return left.isPinned && !right.isPinned
+        }
+        if left.sortOrder != right.sortOrder {
+            return left.sortOrder < right.sortOrder
+        }
+        return left.name.localizedStandardCompare(right.name) == .orderedAscending
+    }
+}
+
+private struct SettingsSimilarityCategoryItem: Identifiable {
+    var category: PaperCodexCore.Category
+    var depth: Int
+    var connectorContinuations: [Bool]
+
+    var id: String { category.id }
 }
 
 private struct SettingsActionButton<Label: View>: View {
