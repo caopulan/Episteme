@@ -558,11 +558,12 @@ struct DiscoverView: View {
     }
 
     private var searchAndActionRow: some View {
-        HStack(spacing: 8) {
+        HStack(alignment: .center, spacing: 8) {
             TextField("Keyword, method, author, arXiv ID", text: $model.discoverKeyword)
                 .textFieldStyle(.roundedBorder)
                 .font(.paperCodexSystem(size: 14))
                 .frame(minWidth: 260, maxWidth: .infinity)
+                .frame(height: 30, alignment: .center)
                 .layoutPriority(1)
                 .focused($isDiscoverSearchFocused)
                 .onSubmit {
@@ -900,11 +901,12 @@ struct ArxivSearchView: View {
                 Spacer()
             }
 
-            HStack(spacing: 8) {
+            HStack(alignment: .center, spacing: 8) {
                 TextField("all:diffusion AND cat:cs.CV", text: $model.arxivSearchQuery)
                     .textFieldStyle(.roundedBorder)
                     .font(.paperCodexSystem(size: 14))
                     .frame(minWidth: 280, maxWidth: .infinity)
+                    .frame(height: 30, alignment: .center)
                     .layoutPriority(1)
                     .focused($isArxivSearchFocused)
                     .onSubmit {
@@ -1511,7 +1513,7 @@ private struct DiscoverDateControls: View {
     var onQuickRange: (DiscoverQuickRange) -> Void
 
     var body: some View {
-        HStack(spacing: 7) {
+        HStack(alignment: .center, spacing: 7) {
             Image(systemName: "calendar")
                 .foregroundStyle(.secondary)
             CompactDiscoverDatePicker(title: "Start", dateString: $start) { value in
@@ -1529,6 +1531,7 @@ private struct DiscoverDateControls: View {
             }
             QuickRangeButtons(onSelect: onQuickRange)
         }
+        .frame(height: 30, alignment: .center)
         .help("arXiv date range")
     }
 }
@@ -1553,7 +1556,7 @@ private struct CompactDiscoverDatePicker: View {
             .datePickerStyle(.compact)
             .labelsHidden()
             .font(.paperCodexSystem(size: 12.5, weight: .medium).monospacedDigit())
-            .frame(width: 118)
+            .frame(width: 118, height: 28, alignment: .center)
             .help(title)
     }
 }
@@ -3247,36 +3250,66 @@ private struct FlowLayout: Layout {
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         let width = proposal.width ?? 320
-        var x: CGFloat = 0
-        var y: CGFloat = 0
-        var rowHeight: CGFloat = 0
-        for subview in subviews {
-            let size = subview.sizeThatFits(.unspecified)
-            if x > 0, x + size.width > width {
-                x = 0
-                y += rowHeight + spacing
-                rowHeight = 0
-            }
-            x += size.width + spacing
-            rowHeight = max(rowHeight, size.height)
+        let rows = makeRows(maxWidth: width, subviews: subviews)
+        let height = rows.enumerated().reduce(CGFloat.zero) { total, pair in
+            total + pair.element.height + (pair.offset == rows.count - 1 ? 0 : spacing)
         }
-        return CGSize(width: width, height: y + rowHeight)
+        return CGSize(width: width, height: height)
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        var x = bounds.minX
+        let rows = makeRows(maxWidth: bounds.width, subviews: subviews)
         var y = bounds.minY
-        var rowHeight: CGFloat = 0
-        for subview in subviews {
-            let size = subview.sizeThatFits(.unspecified)
-            if x > bounds.minX, x + size.width > bounds.maxX {
-                x = bounds.minX
-                y += rowHeight + spacing
-                rowHeight = 0
+        for row in rows {
+            var x = bounds.minX
+            for item in row.items {
+                let verticalOffset = (row.height - item.size.height) / 2
+                subviews[item.index].place(
+                    at: CGPoint(x: x, y: y + verticalOffset),
+                    proposal: ProposedViewSize(item.size)
+                )
+                x += item.size.width + spacing
             }
-            subview.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
-            x += size.width + spacing
-            rowHeight = max(rowHeight, size.height)
+            y += row.height + spacing
+        }
+    }
+
+    private func makeRows(maxWidth: CGFloat, subviews: Subviews) -> [FlowLayoutRow] {
+        var rows: [FlowLayoutRow] = []
+        var current = FlowLayoutRow()
+        for index in subviews.indices {
+            let size = subviews[index].sizeThatFits(.unspecified)
+            if !current.items.isEmpty,
+               current.width + spacing + size.width > maxWidth {
+                rows.append(current)
+                current = FlowLayoutRow()
+            }
+            current.append(FlowLayoutItem(index: index, size: size), spacing: spacing)
+        }
+        if !current.items.isEmpty {
+            rows.append(current)
+        }
+        return rows
+    }
+
+    private struct FlowLayoutItem {
+        var index: Int
+        var size: CGSize
+    }
+
+    private struct FlowLayoutRow {
+        var items: [FlowLayoutItem] = []
+        var width: CGFloat = 0
+        var height: CGFloat = 0
+
+        mutating func append(_ item: FlowLayoutItem, spacing: CGFloat) {
+            if items.isEmpty {
+                width = item.size.width
+            } else {
+                width += spacing + item.size.width
+            }
+            height = max(height, item.size.height)
+            items.append(item)
         }
     }
 }
