@@ -2256,10 +2256,17 @@ func runUILayoutSourceChecks() throws {
             && rootViewSource.contains("canUseReaderTabSwitchCommand")
             && appModelSource.contains("func selectPreviousReaderTab()")
             && appModelSource.contains("func selectNextReaderTab()")
+            && appModelSource.contains("activateReaderTabImmediately(tab)")
+            && appModelSource.contains("readerTabSelectionTask = Task")
+            && appModelSource.contains("Task.sleep(nanoseconds: readerTabContentLoadDelayNanoseconds)")
+            && appModelSource.contains("from: readerTabState.activePaperID ?? selectedPaper?.id")
+            && readerViewSource.contains("model.isReaderTabContentLoading")
+            && readerViewSource.contains("ReaderTabLoadingView")
             && windowTabBarSource.contains("ScrollViewReader")
+            && windowTabBarSource.contains("(model.readerTabState.activePaperID ?? model.selectedPaper?.id) == tab.paperID")
             && windowTabBarSource.contains("scrollProxy.scrollTo(activePaperID, anchor: .center)")
             && windowTabBarSource.contains(".animation(PaperCodexMotion.accessible(PaperCodexMotion.selection, reduceMotion: reduceMotion), value: model.readerTabState.activePaperID)"),
-        "Reader tabs should support keyboard switching and keep the active tab visibly centered"
+        "Reader tabs should activate immediately for pointer and keyboard switching, then show a loading placeholder while paper content catches up"
     )
     if let panelPickerRange = chatSource.range(of: "Picker(\"Session Panel\""),
        let sessionPickerRange = chatSource.range(of: "Picker(\"Session\"") {

@@ -12,11 +12,18 @@ struct ReaderView: View {
     @State private var pdfSplitOpenGeneration = 0
 
     var body: some View {
-        HSplitView {
-            pdfPane
-                .frame(minWidth: ReaderPDFLayout.minimumPaneWidth, maxWidth: .infinity)
-            ChatView()
-                .frame(minWidth: 330, idealWidth: 420, maxWidth: .infinity)
+        ZStack {
+            if model.isReaderTabContentLoading {
+                ReaderTabLoadingView(title: model.activeReaderTabTitle)
+            } else {
+                HSplitView {
+                    pdfPane
+                        .frame(minWidth: ReaderPDFLayout.minimumPaneWidth, maxWidth: .infinity)
+                    ChatView()
+                        .frame(minWidth: 330, idealWidth: 420, maxWidth: .infinity)
+                }
+                .transition(.opacity)
+            }
         }
         .background(Color(nsColor: .windowBackgroundColor))
         .onChange(of: model.selectedPaper?.id) { _, _ in
@@ -45,7 +52,7 @@ struct ReaderView: View {
                     ReaderPDFToolbar(
                         status: model.pdfDocumentStatus,
                         papers: model.currentSessionPapers,
-                        activePaperID: model.selectedPaper?.id,
+                        activePaperID: model.readerTabState.activePaperID ?? model.selectedPaper?.id,
                         returnPoint: model.citationReturnPoint,
                         isSplitVisible: isPDFSplitVisible,
                         onSelectPaper: { paper in
@@ -252,6 +259,27 @@ private struct PDFSplitPreparingView: View {
             Text(LocalizedStringKey(target == nil ? "Preparing split view" : "Preparing link preview"))
                 .font(.caption.weight(.medium))
                 .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(nsColor: .textBackgroundColor))
+    }
+}
+
+private struct ReaderTabLoadingView: View {
+    var title: String
+
+    var body: some View {
+        VStack(spacing: 12) {
+            ProgressView()
+                .controlSize(.small)
+            Text("Loading paper")
+                .font(.paperCodexSystem(size: 13, weight: .semibold))
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 360)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(nsColor: .textBackgroundColor))

@@ -236,6 +236,7 @@ private let librarySidebarWidthDefaultsKey = "PaperCodexLibrarySidebarWidth"
 private let chatMessageFontSizeDefaultsKey = "PaperCodexChatMessageFontSize"
 private let chatComposerFontSizeDefaultsKey = "PaperCodexChatComposerFontSize"
 private let chatFontFamilyDefaultsKey = "PaperCodexChatFontFamily"
+private let readerTabContentLoadDelayNanoseconds: UInt64 = 60_000_000
 private let discoverScrollPositionPaperIDDefaultsKey = "PaperCodexDiscoverScrollPositionPaperID"
 private let arxivSearchRequiredCategoriesDefaultsKey = "PaperCodexArxivSearchRequiredCategories"
 private let arxivSearchFromYearDefaultsKey = "PaperCodexArxivSearchFromYear"
@@ -484,6 +485,24 @@ final class AppModel: ObservableObject {
     var readerTabState: ReaderTabState {
         get { readerStore.readerTabState }
         set { readerStore.readerTabState = newValue }
+    }
+
+    var isReaderTabContentLoading: Bool {
+        guard route == .reader,
+              let activePaperID = readerTabState.activePaperID else {
+            return false
+        }
+        return selectedPaper?.id != activePaperID
+    }
+
+    var activeReaderTabTitle: String {
+        guard let activePaperID = readerTabState.activePaperID else {
+            return "Paper"
+        }
+        if let tab = readerTabState.tabs.first(where: { $0.paperID == activePaperID }) {
+            return tab.title
+        }
+        return selectedPaper?.title ?? "Paper"
     }
 
     var selectedSession: PaperSession? {
@@ -817,6 +836,7 @@ final class AppModel: ObservableObject {
     private var cacheStorageSummaryTask: Task<Void, Never>?
     private var libraryThumbnailRefreshTask: Task<Void, Never>?
     private var routeDeferredWorkTask: Task<Void, Never>?
+    private var readerTabSelectionTask: Task<Void, Never>?
     private var paperNotesLoadTasks: [String: Task<Void, Never>] = [:]
     private var mcpService: PaperCodexMCPService?
     private var mcpServer: PaperCodexMCPServer?
@@ -1127,6 +1147,7 @@ final class AppModel: ObservableObject {
         cacheStorageSummaryTask?.cancel()
         libraryThumbnailRefreshTask?.cancel()
         routeDeferredWorkTask?.cancel()
+        readerTabSelectionTask?.cancel()
         paperNotesLoadTasks.values.forEach { $0.cancel() }
         mcpCommandPollingTask?.cancel()
         mcpServer?.stop()
@@ -4047,9 +4068,52 @@ final class AppModel: ObservableObject {
     }
 
     func selectReaderTab(_ tab: ReaderPaperTab) {
+        let needsContentLoad = selectedPaper?.id != tab.paperID
+        readerTabSelectionTask?.cancel()
+        activateReaderTabImmediately(tab)
+        guard needsContentLoad else {
+            return
+        }
+        readerTabSelectionTask = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: readerTabContentLoadDelayNanoseconds)
+            } catch {
+                return
+            }
+            guard let self,
+                  !Task.isCancelled,
+                  self.readerTabState.activePaperID == tab.paperID else {
+                return
+            }
+            self.finishSelectingReaderTab(tab)
+            if self.readerTabState.activePaperID == tab.paperID {
+                self.readerTabSelectionTask = nil
+            }
+        }
+    }
+
+    private func activateReaderTabImmediately(_ tab: ReaderPaperTab) {
+        var tabState = readerTabState
+        _ = tabState.select(tab.paperID)
+        readerTabState = tabState
+        currentSelection = nil
+        pdfJumpTarget = nil
+        citationReturnPoint = nil
+        pdfDocumentStatus = nil
+        readerPosition = nil
+        route = .reader
+    }
+
+    private func finishSelectingReaderTab(_ tab: ReaderPaperTab) {
         do {
+            guard readerTabState.activePaperID == tab.paperID else {
+                return
+            }
             guard let paper = try paperForReaderTab(tab) else {
                 closeReaderTab(tab)
+                return
+            }
+            guard readerTabState.activePaperID == tab.paperID else {
                 return
             }
             if selectedSession?.paperIDs.contains(paper.id) == true {
@@ -4057,7 +4121,6 @@ final class AppModel: ObservableObject {
             } else {
                 try focusPaperForReader(paper, opensReaderTab: false)
             }
-            route = .reader
         } catch {
             errorMessage = String(describing: error)
         }
@@ -4075,7 +4138,7 @@ final class AppModel: ObservableObject {
         guard route == .reader,
               readerTabState.tabs.count > 1,
               let paperID = readerTabState.adjacentPaperID(
-                from: selectedPaper?.id ?? readerTabState.activePaperID,
+                from: readerTabState.activePaperID ?? selectedPaper?.id,
                 offset: offset
               ),
               let tab = readerTabState.tabs.first(where: { $0.paperID == paperID }) else {

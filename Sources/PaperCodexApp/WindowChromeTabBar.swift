@@ -31,8 +31,7 @@ struct PaperCodexWindowTabBar: View {
                                 PaperCodexReaderChromeTabItem(
                                     tab: tab,
                                     isActive: navigation.route == .reader
-                                        && (model.selectedPaper?.id == tab.paperID
-                                            || model.readerTabState.activePaperID == tab.paperID)
+                                        && (model.readerTabState.activePaperID ?? model.selectedPaper?.id) == tab.paperID
                                 )
                                 .id(tab.paperID)
                                 .transition(.asymmetric(
