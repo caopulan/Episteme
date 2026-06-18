@@ -7,8 +7,9 @@ enum PaperCodexWindowChrome {
     static let sidebarBottomPadding: CGFloat = 22
     static let titlebarDoubleClickZoomHeight: CGFloat = 54
     static let tabBarHeight: CGFloat = 42
-    static let tabBarTrafficLightLeadingInset: CGFloat = 76
+    static let tabBarTrafficLightLeadingInset: CGFloat = 80
     static let tabBarFullscreenLeadingInset: CGFloat = 10
+    static let homeTabIconVerticalOffset: CGFloat = -1
 }
 
 struct WindowChromeConfigurator: NSViewRepresentable {

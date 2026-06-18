@@ -121,6 +121,7 @@ private struct PaperCodexHomeChromeTab: View {
                 .font(.paperCodexSystem(size: 13, weight: .semibold))
                 .foregroundStyle(isActive ? Color.accentColor : Color.secondary)
                 .frame(width: PaperCodexHitTarget.chromeHomeTabWidth, height: PaperCodexHitTarget.chromeTabHeight)
+                .offset(y: PaperCodexWindowChrome.homeTabIconVerticalOffset)
                 .contentShape(Rectangle())
         }
         .buttonStyle(PaperCodexChromeTabButtonStyle(isActive: isActive, isHovering: isHovering, reduceMotion: reduceMotion))
