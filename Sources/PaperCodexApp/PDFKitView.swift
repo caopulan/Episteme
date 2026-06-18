@@ -100,6 +100,7 @@ struct PDFKitView: NSViewRepresentable {
         let readingPosition = readingPosition
         DispatchQueue.main.async {
             coordinator.attachScrollObservation(to: view)
+            coordinator.resetViewportForNewDocumentIfNeeded(readingPosition: readingPosition, contextID: readingContextID)
             coordinator.applyReadingPosition(readingPosition, contextID: readingContextID)
             coordinator.reportDocumentStatus()
         }
@@ -114,6 +115,7 @@ struct PDFKitView: NSViewRepresentable {
             let readingContextID = readingContextID
             DispatchQueue.main.async {
                 coordinator.attachScrollObservation(to: nsView)
+                coordinator.resetViewportForNewDocumentIfNeeded(readingPosition: readingPosition, contextID: readingContextID)
                 coordinator.applyReadingPosition(readingPosition, contextID: readingContextID)
             }
         }
@@ -121,6 +123,7 @@ struct PDFKitView: NSViewRepresentable {
         context.coordinator.onReadingPositionChange = onReadingPositionChange
         context.coordinator.onDocumentStatusChange = onDocumentStatusChange
         context.coordinator.onInternalLinkSplit = onInternalLinkSplit
+        context.coordinator.resetViewportForNewDocumentIfNeeded(readingPosition: readingPosition, contextID: readingContextID)
         context.coordinator.applyReadingPosition(readingPosition, contextID: readingContextID)
         context.coordinator.applyInternalLinkTarget(internalLinkTarget)
         context.coordinator.applyJumpTarget(jumpTarget)
@@ -147,6 +150,7 @@ struct PDFKitView: NSViewRepresentable {
         private weak var observedClipView: NSClipView?
         private var pendingViewportReport: DispatchWorkItem?
         private var pendingWidthRefit: DispatchWorkItem?
+        private var pendingDocumentViewportReset = false
         private var isApplyingReadingPosition = false
         private var shouldFitWidthOnResize = true
         private var referenceResolver = PDFReferenceResolver(pageTexts: [:])
@@ -174,12 +178,17 @@ struct PDFKitView: NSViewRepresentable {
 
         @MainActor
         func documentDidLoad() {
+            pendingViewportReport?.cancel()
+            pendingViewportReport = nil
+            pendingWidthRefit?.cancel()
+            pendingWidthRefit = nil
             lastJumpTarget = nil
             lastAppliedInternalLinkTarget = nil
             lastAppliedReadingContext = nil
             lastAppliedCommand = nil
             lastReportedStatus = nil
             lastReportedPosition = nil
+            pendingDocumentViewportReset = true
             shouldFitWidthOnResize = true
             referenceResolver = Self.makeReferenceResolver(from: pdfView?.document)
             citationPopover?.close()
@@ -230,11 +239,48 @@ struct PDFKitView: NSViewRepresentable {
             guard let position else {
                 return
             }
+            pendingDocumentViewportReset = false
             guard contextKey != lastAppliedReadingContext else {
                 return
             }
             lastAppliedReadingContext = contextKey
             applyViewportPosition(position)
+        }
+
+        @MainActor
+        func resetViewportForNewDocumentIfNeeded(readingPosition: PaperReaderPosition?, contextID: String?) {
+            guard pendingDocumentViewportReset else {
+                return
+            }
+            guard readingPosition == nil else {
+                pendingDocumentViewportReset = false
+                return
+            }
+            resetViewportForNewDocument()
+        }
+
+        @MainActor
+        private func resetViewportForNewDocument() {
+            pendingDocumentViewportReset = false
+            guard let pdfView,
+                  let document = pdfView.document,
+                  document.pageCount > 0 else {
+                return
+            }
+            guard let page = document.page(at: 0) else {
+                return
+            }
+
+            isApplyingReadingPosition = true
+            if shouldFitWidthOnResize {
+                refitForCurrentWidth()
+            }
+            pdfView.go(to: page)
+            DispatchQueue.main.async { [weak self] in
+                self?.isApplyingReadingPosition = false
+                self?.scheduleViewportReport()
+                self?.reportDocumentStatus()
+            }
         }
 
         @MainActor
