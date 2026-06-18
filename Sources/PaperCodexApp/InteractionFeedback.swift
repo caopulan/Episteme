@@ -56,12 +56,29 @@ struct InteractionNotice: Identifiable, Equatable {
     var autoDismissAfter: TimeInterval? = 5
 }
 
-struct AppOperationStatus: Equatable {
+struct AppOperationStatus: Equatable, Identifiable {
+    var id: String
     var title: String
     var detail: String
     var systemImage: String
     var tint: Color
     var fraction: Double? = nil
+
+    init(
+        id: String,
+        title: String,
+        detail: String,
+        systemImage: String,
+        tint: Color,
+        fraction: Double? = nil
+    ) {
+        self.id = id
+        self.title = title
+        self.detail = detail
+        self.systemImage = systemImage
+        self.tint = tint
+        self.fraction = fraction
+    }
 }
 
 struct CacheStorageSummary: Equatable, Sendable {
@@ -223,40 +240,77 @@ struct GlobalOperationStatusView: View {
     var status: AppOperationStatus
 
     var body: some View {
-        HStack(spacing: 14) {
+        GlobalOperationStackView(statuses: [status])
+    }
+}
+
+struct GlobalOperationStackView: View {
+    var statuses: [AppOperationStatus]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: statuses.count > 1 ? 10 : 0) {
+            ForEach(statuses) { status in
+                GlobalOperationStatusRow(status: status, isCompact: statuses.count > 1)
+            }
+        }
+        .padding(.horizontal, statuses.count > 1 ? 14 : 18)
+        .padding(.vertical, statuses.count > 1 ? 10 : 12)
+        .frame(width: statuses.count > 1 ? 360 : 340, alignment: .leading)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(borderTint.opacity(0.22), lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(0.12), radius: 14, y: 7)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(accessibilitySummary)
+    }
+
+    private var borderTint: Color {
+        statuses.first?.tint ?? .accentColor
+    }
+
+    private var accessibilitySummary: String {
+        statuses.map { "\($0.title). \($0.detail)" }.joined(separator: ". ")
+    }
+}
+
+private struct GlobalOperationStatusRow: View {
+    var status: AppOperationStatus
+    var isCompact: Bool
+
+    var body: some View {
+        HStack(spacing: 12) {
             Image(systemName: status.systemImage)
-                .font(.paperCodexSystem(size: 16, weight: .semibold))
+                .font(.paperCodexSystem(size: isCompact ? 14 : 16, weight: .semibold))
                 .foregroundStyle(status.tint)
                 .frame(width: 22)
-            VStack(alignment: .leading, spacing: 6) {
-                Text(status.title)
-                    .font(.paperCodexSystem(size: 13.5, weight: .semibold))
-                Text(status.detail)
-                    .font(.paperCodexSystem(size: 12))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+
+            VStack(alignment: .leading, spacing: isCompact ? 3 : 6) {
+                HStack(spacing: 8) {
+                    Text(status.title)
+                        .font(.paperCodexSystem(size: isCompact ? 12.5 : 13.5, weight: .semibold))
+                        .lineLimit(1)
+                    Text(status.detail)
+                        .font(.paperCodexSystem(size: isCompact ? 11.5 : 12))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
                 if let fraction = status.fraction {
                     ProgressView(value: fraction)
                         .progressViewStyle(.linear)
                         .tint(status.tint)
-                        .frame(width: 260)
+                        .frame(height: 4)
                 } else {
                     ProgressView()
                         .progressViewStyle(.linear)
                         .controlSize(.small)
                         .tint(status.tint)
-                        .frame(width: 260, alignment: .leading)
+                        .frame(height: 4)
                 }
             }
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 12)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(status.tint.opacity(0.22), lineWidth: 1)
-        )
-        .shadow(color: Color.black.opacity(0.12), radius: 14, y: 7)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(status.title). \(status.detail)")
     }

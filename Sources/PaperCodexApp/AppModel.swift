@@ -913,72 +913,85 @@ final class AppModel: ObservableObject {
         }
     }
 
-    var globalOperationStatus: AppOperationStatus? {
+    var globalOperationStatuses: [AppOperationStatus] {
+        var statuses: [AppOperationStatus] = []
+
         if isSearchingDiscover {
-            return AppOperationStatus(
+            statuses.append(AppOperationStatus(
+                id: "discover-search",
                 title: isCancellingDiscoverSearch ? "Stopping Explore Search" : "Searching Explore",
                 detail: arxivCacheProgress?.detail ?? "\(discoverStartDate)...\(discoverEndDate)",
                 systemImage: "magnifyingglass",
                 tint: .blue,
                 fraction: arxivCacheProgress?.fraction
-            )
+            ))
         }
         if isSearchingArxivSearch {
-            return AppOperationStatus(
+            statuses.append(AppOperationStatus(
+                id: "arxiv-search",
                 title: isCancellingArxivSearch ? "Stopping arXiv Search" : "Searching arXiv",
                 detail: arxivCacheProgress?.detail ?? arxivSearchQueryPreview,
                 systemImage: "magnifyingglass",
                 tint: .blue,
                 fraction: arxivCacheProgress?.fraction
-            )
+            ))
         }
         if isProcessingDiscoverResults {
-            return AppOperationStatus(
+            statuses.append(AppOperationStatus(
+                id: "discover-processing",
                 title: isCancellingDiscoverProcessing ? "Stopping Explore Processing" : discoverProcessingProgress?.title ?? "Processing Explore Results",
                 detail: discoverProcessingProgress?.detail ?? "\(discoverCodexConcurrency) workers",
                 systemImage: "sparkles",
                 tint: .indigo,
                 fraction: discoverProcessingProgress?.fraction
-            )
+            ))
         }
         if isPreloadingArxivAssets {
-            return AppOperationStatus(
+            statuses.append(AppOperationStatus(
+                id: "arxiv-preview-cache",
                 title: arxivCacheProgress?.title ?? "Caching Preview Images",
                 detail: arxivCacheProgress?.detail ?? "Preparing previews",
                 systemImage: "photo.on.rectangle.angled",
                 tint: .blue,
                 fraction: arxivCacheProgress?.fraction
-            )
+            ))
         }
         if isCachingDiscoverPDFs {
-            return AppOperationStatus(
+            statuses.append(AppOperationStatus(
+                id: "discover-pdf-cache",
                 title: isCancellingDiscoverPDFCache ? "Stopping PDF Cache" : "Caching PDFs",
                 detail: discoverPDFCacheProgress?.detail ?? "Downloading arXiv PDFs",
                 systemImage: "tray.and.arrow.down",
                 tint: .green,
                 fraction: discoverPDFCacheProgress?.fraction
-            )
+            ))
         }
         if isScanningWatchedFolders {
-            return AppOperationStatus(
+            statuses.append(AppOperationStatus(
+                id: "watched-folder-scan",
                 title: "Scanning Watched Folders",
                 detail: "\(watchedFolders.count) folder\(watchedFolders.count == 1 ? "" : "s")",
                 systemImage: "folder.badge.gearshape",
                 tint: .orange
-            )
+            ))
         }
         if isSending {
             let activeRuns = activeCodexRunsBySessionID.values.sorted { $0.startedAt < $1.startedAt }
-            return AppOperationStatus(
+            statuses.append(AppOperationStatus(
+                id: "agent-runs",
                 title: isCancellingCodexRun ? "Stopping Agent" : "Agent Running",
                 detail: activeRuns.count == 1
                     ? (activeRuns.first?.title ?? "Current session")
                     : "\(activeRuns.count) sessions running",
                 systemImage: "brain.head.profile",
                 tint: .purple
-            )
+            ))
         }
-        return nil
+        return statuses
+    }
+
+    var globalOperationStatus: AppOperationStatus? {
+        globalOperationStatuses.first
     }
 
     func activeCodexRun(for sessionID: String?) -> ActiveCodexRun? {

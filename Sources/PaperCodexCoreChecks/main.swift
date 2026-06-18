@@ -2344,6 +2344,14 @@ func runUILayoutSourceChecks() throws {
         !pdfKitSource.contains("first.y + first.height"),
         "PDF citation jumps should not align the highlight top edge to the viewport top"
     )
+    try check(
+        pdfKitSource.contains("resetViewportForNewDocumentIfNeeded(readingPosition: readingPosition, contextID: readingContextID)")
+            && pdfKitSource.contains("private var pendingDocumentViewportReset = false")
+            && pdfKitSource.contains("resetViewportForNewDocument()")
+            && pdfKitSource.contains("guard let page = document.page(at: 0)")
+            && pdfKitSource.contains("pdfView.go(to: page)"),
+        "new PDF documents without saved reader positions should reset to the first page instead of inheriting the previous scroll offset"
+    )
     let interactionSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/InteractionFeedback.swift"))
     try check(
         interactionSource.contains("InteractionNoticeStack"),
@@ -2395,8 +2403,16 @@ func runUILayoutSourceChecks() throws {
         "Library paper lists should support focused arrow-key browsing and keep the selected row visible"
     )
     try check(
-        rootViewSource.contains("GlobalOperationStatusView"),
-        "the root view should show the current long-running operation"
+        rootViewSource.contains("GlobalOperationStackView"),
+        "the root view should show current long-running operations"
+    )
+    try check(
+        appModelSource.contains("var globalOperationStatuses: [AppOperationStatus]")
+            && rootViewSource.contains("GlobalOperationStackView(statuses: model.globalOperationStatuses)")
+            && interactionSource.contains("struct GlobalOperationStackView: View")
+            && interactionSource.contains("ForEach(statuses)")
+            && interactionSource.contains("statuses.count > 1"),
+        "the root view should show a compact stack of concurrent long-running operations instead of a single prioritized status"
     )
     try check(
         appModelSource.contains("postNotice("),
@@ -2943,6 +2959,14 @@ func runUILayoutSourceChecks() throws {
             && !discoverSource.contains("initialSelectedPaperIDs")
             && !discoverSource.contains("DiscoverProcessPaperRow"),
         "Discover processing actions should default to all selected and should not render per-paper selection rows"
+    )
+    try check(
+        discoverSource.contains("case custom")
+            && discoverSource.contains("@State private var customResultLimitText")
+            && discoverSource.contains("TextField(\"Results\", text: $customResultLimitText)")
+            && discoverSource.contains("Array(papers.prefix(resultLimitCount))")
+            && discoverSource.contains("selectedResultLimit.effectiveCount(for: paperCount, customCount: customResultLimitCount)"),
+        "Discover Process Results should support preset ranges plus a manually entered processing count"
     )
     try check(
         appModelSource.contains("var defaultDiscoverProcessActions: Set<DiscoverProcessAction>")
@@ -4603,6 +4627,17 @@ func runCodexCLIChecks() throws {
         .run(arguments: [], currentDirectoryURL: isolatedWorkingDirectory)
         .trimmingCharacters(in: .whitespacesAndNewlines)
     try check(pwdOutput == isolatedWorkingDirectoryPath, "Codex subprocesses should run from the explicit working directory")
+    let finderLaunchHome = isolatedWorkingDirectory.appendingPathComponent("finder-home", isDirectory: true)
+    let localBin = finderLaunchHome.appendingPathComponent(".local/bin", isDirectory: true)
+    try FileManager.default.createDirectory(at: localBin, withIntermediateDirectories: true)
+    let localCodex = localBin.appendingPathComponent("codex")
+    try "#!/bin/sh\nprintf 'codex-cli 0.140.0-alpha.2\\n'\n".write(to: localCodex, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: localCodex.path)
+    let finderCodexPath = try CodexCLI.findCodexExecutable(environment: [
+        "HOME": finderLaunchHome.path,
+        "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"
+    ])
+    try check(finderCodexPath == localCodex.path, "Codex resolver should find ~/.local/bin/codex when macOS app launches with a system-only PATH")
     let start = cli.startArguments(prompt: "hello", workspacePath: "/tmp/session-a")
     try check(start == ["exec", "--skip-git-repo-check", "--json", "--enable", "image_generation", "-C", "/tmp/session-a", "hello"], "start args should allow non-git session workspaces with image generation enabled")
     let startWithStdinPrompt = cli.startArguments(prompt: "hello", workspacePath: "/tmp/session-a", promptTransport: .standardInput)

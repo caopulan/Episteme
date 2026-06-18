@@ -611,6 +611,7 @@ public struct CodexCLI: Sendable {
             .split(separator: ":")
             .map { String($0) + "/codex" }
             + [
+                localUserCodexPath(environment: environment),
                 "/Applications/Codex.app/Contents/Resources/codex",
                 "/opt/homebrew/bin/codex",
                 "/usr/local/bin/codex"
@@ -636,6 +637,13 @@ public struct CodexCLI: Sendable {
             return selected.path
         }
         throw CodexCLIError.executableNotFound
+    }
+
+    private static func localUserCodexPath(environment: [String: String]) -> String {
+        let home = environment["HOME"] ?? FileManager.default.homeDirectoryForCurrentUser.path
+        return URL(fileURLWithPath: home, isDirectory: true)
+            .appendingPathComponent(".local/bin/codex")
+            .path
     }
 
     public static func selectBestExecutable(

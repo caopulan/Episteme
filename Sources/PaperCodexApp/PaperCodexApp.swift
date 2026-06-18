@@ -52,8 +52,8 @@ struct RootView: View {
             .padding(.top, PaperCodexWindowChrome.tabBarHeight + 10)
         }
         .overlay(alignment: .bottom) {
-            if let status = model.globalOperationStatus {
-                GlobalOperationStatusView(status: status)
+            if !model.globalOperationStatuses.isEmpty {
+                GlobalOperationStackView(statuses: model.globalOperationStatuses)
                     .padding(.bottom, 36)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }

@@ -179,9 +179,9 @@ struct DiscoverView: View {
                             await model.refreshAvailableCodexModels()
                         }
                     },
-                    onConfirm: { actions, modelOverride, reasoningEffort, resultLimit in
+                    onConfirm: { actions, modelOverride, reasoningEffort, resultLimitCount in
                         isShowingProcessSelection = false
-                        let processPapers = resultLimit.papers(from: papers)
+                        let processPapers = Array(papers.prefix(resultLimitCount))
                         Task {
                             await model.processCurrentDiscoverResults(
                                 processPapers,
@@ -745,9 +745,9 @@ struct ArxivSearchView: View {
                         await model.refreshAvailableCodexModels()
                     }
                 },
-                onConfirm: { actions, modelOverride, reasoningEffort, resultLimit in
+                onConfirm: { actions, modelOverride, reasoningEffort, resultLimitCount in
                     isShowingProcessSelection = false
-                    let searchPapers = resultLimit.papers(from: papers)
+                    let searchPapers = Array(papers.prefix(resultLimitCount))
                     Task {
                         await model.processCurrentDiscoverResults(searchPapers, actions: Set(actions), modelOverride: modelOverride, reasoningEffort: reasoningEffort)
                     }
@@ -1686,6 +1686,7 @@ private enum DiscoverProcessResultLimit: String, CaseIterable, Identifiable {
     case first30
     case first100
     case all
+    case custom
 
     var id: String { rawValue }
 
@@ -1697,22 +1698,25 @@ private enum DiscoverProcessResultLimit: String, CaseIterable, Identifiable {
             "First 100"
         case .all:
             "All"
+        case .custom:
+            "Custom"
         }
     }
 
-    func effectiveCount(for total: Int) -> Int {
+    func effectiveCount(for total: Int, customCount: Int?) -> Int? {
         switch self {
         case .first30:
-            min(total, 30)
+            return min(total, 30)
         case .first100:
-            min(total, 100)
+            return min(total, 100)
         case .all:
-            total
+            return total
+        case .custom:
+            guard let customCount, customCount > 0 else {
+                return nil
+            }
+            return min(total, customCount)
         }
-    }
-
-    func papers(from papers: [ArxivFeedPaper]) -> [ArxivFeedPaper] {
-        Array(papers.prefix(effectiveCount(for: papers.count)))
     }
 }
 
@@ -1727,11 +1731,12 @@ private struct DiscoverProcessActionSheet: View {
     var defaultSelectedActions: Set<DiscoverProcessAction>
     var isRefreshingModels: Bool
     var onRefreshModels: () -> Void
-    var onConfirm: ([DiscoverProcessAction], String, CodexReasoningEffort, DiscoverProcessResultLimit) -> Void
+    var onConfirm: ([DiscoverProcessAction], String, CodexReasoningEffort, Int) -> Void
     var onCancel: () -> Void
 
     @State private var selectedActions: Set<DiscoverProcessAction>
     @State private var selectedResultLimit: DiscoverProcessResultLimit
+    @State private var customResultLimitText: String
     @State private var draftModelOverride: String
     @State private var draftReasoningEffort: CodexReasoningEffort
     @State private var isCancelButtonHovering = false
@@ -1746,7 +1751,7 @@ private struct DiscoverProcessActionSheet: View {
         defaultSelectedActions: Set<DiscoverProcessAction>,
         isRefreshingModels: Bool,
         onRefreshModels: @escaping () -> Void,
-        onConfirm: @escaping ([DiscoverProcessAction], String, CodexReasoningEffort, DiscoverProcessResultLimit) -> Void,
+        onConfirm: @escaping ([DiscoverProcessAction], String, CodexReasoningEffort, Int) -> Void,
         onCancel: @escaping () -> Void
     ) {
         self.paperCount = paperCount
@@ -1761,6 +1766,7 @@ private struct DiscoverProcessActionSheet: View {
         self.onCancel = onCancel
         _selectedActions = State(initialValue: defaultSelectedActions)
         _selectedResultLimit = State(initialValue: .all)
+        _customResultLimitText = State(initialValue: String(max(1, min(paperCount, 100))))
         _draftModelOverride = State(initialValue: defaultModelOverride)
         _draftReasoningEffort = State(initialValue: defaultReasoningEffort)
     }
@@ -1775,16 +1781,35 @@ private struct DiscoverProcessActionSheet: View {
     }
 
     private var canProcessResults: Bool {
-        !selectedOrderedActions.isEmpty && paperCount > 0
+        !selectedOrderedActions.isEmpty && selectedPaperCount != nil
     }
 
-    private var selectedPaperCount: Int {
-        selectedResultLimit.effectiveCount(for: paperCount)
+    private var customResultLimitCount: Int? {
+        let trimmed = customResultLimitText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return nil
+        }
+        return Int(trimmed)
+    }
+
+    private var selectedPaperCount: Int? {
+        guard paperCount > 0 else {
+            return nil
+        }
+        return selectedResultLimit.effectiveCount(for: paperCount, customCount: customResultLimitCount)
     }
 
     private var processButtonTitle: String {
+        let selectedPaperCount = selectedPaperCount ?? 0
         let suffix = selectedPaperCount == 1 ? "Result" : "Results"
         return "Process \(selectedPaperCount) \(suffix)"
+    }
+
+    private var resultRangeDetailText: String {
+        guard let selectedPaperCount else {
+            return "Enter 1...\(paperCount)"
+        }
+        return "\(selectedPaperCount)/\(paperCount) results"
     }
 
     var body: some View {
@@ -1840,7 +1865,7 @@ private struct DiscoverProcessActionSheet: View {
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.secondary)
                         Spacer()
-                        Text("\(selectedPaperCount)/\(paperCount) results")
+                        Text(resultRangeDetailText)
                             .font(.caption.monospacedDigit())
                             .foregroundStyle(.secondary)
                     }
@@ -1852,6 +1877,29 @@ private struct DiscoverProcessActionSheet: View {
                     }
                     .pickerStyle(.segmented)
                     .labelsHidden()
+
+                    if selectedResultLimit == .custom {
+                        HStack(spacing: 8) {
+                            Text("Count")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                            TextField("Results", text: $customResultLimitText)
+                                .textFieldStyle(.roundedBorder)
+                                .font(.paperCodexSystem(size: 13).monospacedDigit())
+                                .frame(width: 86)
+                                .onChange(of: customResultLimitText) { _, value in
+                                    let digits = value.filter(\.isNumber)
+                                    if digits != value {
+                                        customResultLimitText = digits
+                                    }
+                                }
+                            Text("of \(paperCount)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                        }
+                        .controlSize(.small)
+                    }
                 }
 
                 Divider()
@@ -1915,7 +1963,10 @@ private struct DiscoverProcessActionSheet: View {
                 }
 
                 Button {
-                    onConfirm(selectedOrderedActions, draftModelOverride, draftReasoningEffort, selectedResultLimit)
+                    guard let selectedPaperCount else {
+                        return
+                    }
+                    onConfirm(selectedOrderedActions, draftModelOverride, draftReasoningEffort, selectedPaperCount)
                     dismiss()
                 } label: {
                     Label(processButtonTitle, systemImage: "sparkles")
