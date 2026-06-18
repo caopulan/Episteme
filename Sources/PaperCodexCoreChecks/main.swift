@@ -2100,6 +2100,14 @@ func runUILayoutSourceChecks() throws {
         "settings similarity category rows should not draw selected-state boxes"
     )
     try check(
+        settingsViewSource.contains(".font(.paperCodexSystem(size: 22, weight: .semibold))")
+            && settingsViewSource.contains(".font(.paperCodexSystem(size: 18, weight: .semibold))")
+            && settingsViewSource.contains(".font(.paperCodexSystem(size: 15.5, weight: selectionState.isActive ? .semibold : .medium))")
+            && settingsViewSource.contains(".font(.paperCodexSystem(size: 14, weight: .medium, design: .monospaced))")
+            && !settingsViewSource.contains(".font(.caption2.monospacedDigit())"),
+        "settings ranking tree and section headings should use larger readable typography"
+    )
+    try check(
         appModelSource.contains("similarityCategorySources")
             && appModelSource.contains("interestVectorGroups")
             && appModelSource.contains("similarityCategoryIDs"),

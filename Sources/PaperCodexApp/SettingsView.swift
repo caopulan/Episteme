@@ -291,7 +291,7 @@ struct SettingsView: View {
                 Spacer()
 
                 Text(model.selectedArxivDate ?? "No cached date")
-                    .font(.caption.monospacedDigit())
+                    .font(.paperCodexSystem(size: 14, weight: .medium, design: .monospaced))
                     .foregroundStyle(.secondary)
             }
         }
@@ -310,7 +310,7 @@ struct SettingsView: View {
             .pickerStyle(.segmented)
 
             Text("Controls the whole app interface, Explore language, and the default Codex prompt.")
-                .font(.caption)
+                .font(.paperCodexSystem(size: 14))
                 .foregroundStyle(.secondary)
         }
     }
@@ -366,7 +366,7 @@ struct SettingsView: View {
                 Spacer()
 
                 Text("\(model.chatFontFamily.title) · \(Int(model.chatMessageFontSize))/\(Int(model.chatComposerFontSize)) pt")
-                    .font(.caption.monospacedDigit())
+                    .font(.paperCodexSystem(size: 14, weight: .medium, design: .monospaced))
                     .foregroundStyle(isChatAppearanceDirty ? .orange : .secondary)
             }
         }
@@ -393,7 +393,7 @@ struct SettingsView: View {
                 Spacer()
 
                 Text("\(model.localDiscoverPreferences.whitelistTags.count) white · \(model.localDiscoverPreferences.blacklistTags.count) black · \(draftSimilarityCategoryIDs.count)/\(model.categories.count) cats")
-                    .font(.caption)
+                    .font(.paperCodexSystem(size: 14, weight: .medium))
                     .foregroundStyle(isRankingDirty ? .orange : .secondary)
             }
         }
@@ -410,11 +410,11 @@ struct SettingsView: View {
         return VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline) {
                 Text("Similarity categories")
-                    .font(.paperCodexSystem(size: 15, weight: .semibold))
+                    .font(.paperCodexSystem(size: 18, weight: .semibold))
                     .foregroundStyle(.primary)
                 Spacer()
                 Text("\(draftSimilarityCategoryIDs.count)/\(model.categories.count) folders")
-                    .font(.paperCodexSystem(size: 12, design: .monospaced))
+                    .font(.paperCodexSystem(size: 14, weight: .medium, design: .monospaced))
                     .foregroundStyle(.secondary)
             }
 
@@ -424,7 +424,7 @@ struct SettingsView: View {
                     LazyVStack(alignment: .leading, spacing: SettingsSimilarityCategoryLayout.rowSpacing) {
                         if model.categories.isEmpty {
                             Text("No library folders")
-                                .font(.caption)
+                                .font(.paperCodexSystem(size: 14, weight: .medium))
                                 .foregroundStyle(.secondary)
                                 .padding(.vertical, 12)
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -564,7 +564,7 @@ struct SettingsView: View {
                 Spacer()
 
                 Text("\(model.discoverCodexConcurrency) workers · Think \(model.discoverCodexReasoningEffort.displayName)")
-                    .font(.caption.monospacedDigit())
+                    .font(.paperCodexSystem(size: 14, weight: .medium, design: .monospaced))
                     .foregroundStyle(.secondary)
             }
         }
@@ -576,15 +576,15 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
                         Text("Template")
-                            .font(.caption.weight(.semibold))
+                            .font(.paperCodexSystem(size: 14, weight: .semibold))
                             .foregroundStyle(.secondary)
                         Spacer()
                         Text("Workspace placeholder: \(PromptBuilder.workspacePathPlaceholder)")
-                            .font(.caption.monospaced())
+                            .font(.paperCodexSystem(size: 13.5, weight: .medium, design: .monospaced))
                             .foregroundStyle(.secondary)
                     }
                     Text("\(model.codexSystemPrompt.count) characters")
-                        .font(.caption.monospacedDigit())
+                        .font(.paperCodexSystem(size: 14, weight: .medium, design: .monospaced))
                         .foregroundStyle(.secondary)
                 }
                 HStack {
@@ -607,7 +607,7 @@ struct SettingsView: View {
                     Spacer()
 
                     Text(PromptBuilder.isBuiltInSystemPrompt(model.codexSystemPrompt) ? "Default" : "Custom")
-                        .font(.caption)
+                        .font(.paperCodexSystem(size: 14, weight: .medium))
                         .foregroundStyle(.secondary)
                 }
             }
@@ -627,7 +627,7 @@ struct SettingsView: View {
 
             HStack {
                 Text(model.inAppCodexMCPStatusText)
-                    .font(.caption.monospacedDigit())
+                    .font(.paperCodexSystem(size: 14, weight: .medium, design: .monospaced))
                     .foregroundStyle(.secondary)
                 Spacer()
             }
@@ -637,9 +637,9 @@ struct SettingsView: View {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Codex Plugin")
-                        .font(.paperCodexSystem(size: 13, weight: .semibold))
+                        .font(.paperCodexSystem(size: 15, weight: .semibold))
                     Text(model.codexPluginInstallationStatus?.detail ?? "Not checked")
-                        .font(.caption.monospacedDigit())
+                        .font(.paperCodexSystem(size: 14, weight: .medium, design: .monospaced))
                         .foregroundStyle((model.codexPluginInstallationStatus?.current ?? false) ? .green : .secondary)
                 }
 
@@ -715,35 +715,35 @@ struct SettingsView: View {
                     )
                 )
                 .toggleStyle(.checkbox)
-                .font(.paperCodexSystem(size: 13, weight: .semibold))
+                .font(.paperCodexSystem(size: 15, weight: .semibold))
 
                 Text(diagnostic?.title ?? "Not checked")
-                    .font(.caption.monospacedDigit())
+                    .font(.paperCodexSystem(size: 14, weight: .medium, design: .monospaced))
                     .foregroundStyle(diagnostic?.state.settingsColor ?? .secondary)
 
                 Spacer()
 
                 Text(profile.executableName)
-                    .font(.caption.monospaced())
+                    .font(.paperCodexSystem(size: 14, weight: .medium, design: .monospaced))
                     .foregroundStyle(.secondary)
             }
 
             HStack(spacing: 10) {
                 if let path = diagnostic?.executablePath {
                     Text(path)
-                        .font(.caption)
+                        .font(.paperCodexSystem(size: 14))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.middle)
                 } else {
                     Text(diagnostic?.detail ?? "Executable has not been checked yet.")
-                        .font(.caption)
+                        .font(.paperCodexSystem(size: 14))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
 
                 Text(model.agentRuntimeAuthSummary(for: profile.id))
-                    .font(.caption)
+                    .font(.paperCodexSystem(size: 14))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.tail)
@@ -779,7 +779,7 @@ struct SettingsView: View {
                 Spacer()
 
                 Text(profile.capabilitySummary)
-                    .font(.caption2)
+                    .font(.paperCodexSystem(size: 13.5, weight: .medium))
                     .foregroundStyle(.tertiary)
             }
         }
@@ -823,7 +823,7 @@ struct SettingsView: View {
                 Spacer()
 
                 Text(model.embeddingProviderTestStatus ?? (model.localDiscoverPreferences.embedding.enabled ? "Enabled" : "Disabled"))
-                    .font(.caption)
+                    .font(.paperCodexSystem(size: 14, weight: .medium))
                     .foregroundStyle(.secondary)
             }
         }
@@ -836,9 +836,9 @@ struct SettingsView: View {
                     HStack(alignment: .top, spacing: 10) {
                         VStack(alignment: .leading, spacing: 3) {
                             Text(prompt.title)
-                                .font(.paperCodexSystem(size: 13, weight: .semibold))
+                                .font(.paperCodexSystem(size: 15, weight: .semibold))
                             Text(prompt.content)
-                                .font(.caption)
+                                .font(.paperCodexSystem(size: 14))
                                 .foregroundStyle(.secondary)
                                 .lineLimit(2)
                         }
@@ -909,10 +909,10 @@ struct SettingsView: View {
             pathRow(label: "Cache root", value: model.arxivDisposableCachePath)
             VStack(alignment: .leading, spacing: 4) {
                 Text(model.cacheStorageSummary.detailText)
-                    .font(.caption.monospacedDigit())
+                    .font(.paperCodexSystem(size: 14, weight: .medium, design: .monospaced))
                     .foregroundStyle(.secondary)
                 Text("arXiv \(CacheStorageSummary.formatBytes(model.cacheStorageSummary.arxivCacheBytes)) · thumbnails \(CacheStorageSummary.formatBytes(model.cacheStorageSummary.thumbnailBytes))")
-                    .font(.caption2.monospacedDigit())
+                    .font(.paperCodexSystem(size: 13.5, weight: .medium, design: .monospaced))
                     .foregroundStyle(.tertiary)
             }
             HStack {
@@ -929,7 +929,7 @@ struct SettingsView: View {
                 }
 
                 Text("Clears feed JSON, temporary PDFs, and unsaved opened papers.")
-                    .font(.caption)
+                    .font(.paperCodexSystem(size: 14))
                     .foregroundStyle(.secondary)
             }
         }
@@ -946,7 +946,7 @@ struct SettingsView: View {
                 } icon: {
                     Image(systemName: section.systemImage)
                 }
-                .font(.title3.weight(.semibold))
+                .font(.paperCodexSystem(size: 22, weight: .semibold))
 
                 Rectangle()
                     .fill(Color.primary.opacity(0.10))
@@ -965,7 +965,7 @@ struct SettingsView: View {
             Label("Edit System Prompt", systemImage: "text.quote")
                 .font(.title3.weight(.semibold))
             Text("Workspace placeholder: \(PromptBuilder.workspacePathPlaceholder)")
-                .font(.caption.monospaced())
+                .font(.paperCodexSystem(size: 13.5, weight: .medium, design: .monospaced))
                 .foregroundStyle(.secondary)
             TextEditor(text: $draftCodexSystemPrompt)
                 .font(.paperCodexSystem(size: 13, design: .monospaced))
@@ -977,7 +977,7 @@ struct SettingsView: View {
                 .accessibilityValue("\(draftCodexSystemPrompt.count) characters")
             HStack {
                 Text("\(draftCodexSystemPrompt.count) characters")
-                    .font(.caption.monospacedDigit())
+                    .font(.paperCodexSystem(size: 14, weight: .medium, design: .monospaced))
                     .foregroundStyle(.secondary)
                 Spacer()
                 SettingsActionButton {
@@ -1041,11 +1041,11 @@ struct SettingsView: View {
     private func pathRow(label: String, value: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(LocalizedStringKey(label))
-                .font(.caption.weight(.semibold))
+                .font(.paperCodexSystem(size: 14, weight: .semibold))
                 .foregroundStyle(.secondary)
             HStack(alignment: .top, spacing: 8) {
                 Text(value)
-                    .font(.caption)
+                    .font(.paperCodexSystem(size: 14))
                     .textSelection(.enabled)
                     .lineLimit(2)
                 Spacer()
@@ -1319,18 +1319,19 @@ private struct SettingsSimilarityRootFolderRow: View {
         Button(action: onToggleSelected) {
             HStack(spacing: 8) {
                 Image(systemName: selectionState.indicatorSystemImage)
-                    .font(.paperCodexSystem(size: 13, weight: .semibold))
-                    .frame(width: 17)
+                    .font(.paperCodexSystem(size: 15, weight: .semibold))
+                    .frame(width: 19)
                     .foregroundStyle(selectionState.indicatorTint)
                 Image(systemName: selectionState.isComplete ? "tray.full.fill" : "tray.full")
-                    .frame(width: 18)
+                    .font(.paperCodexSystem(size: 15, weight: .medium))
+                    .frame(width: 20)
                     .foregroundStyle(selectionState.isActive ? Color.accentColor.opacity(0.9) : Color.secondary)
                 Text("All Folders")
-                    .font(.paperCodexSystem(size: 13.5, weight: selectionState.isActive ? .semibold : .medium))
+                    .font(.paperCodexSystem(size: 15.5, weight: selectionState.isActive ? .semibold : .medium))
                     .lineLimit(1)
                 Spacer(minLength: 8)
                 Text(countText)
-                    .font(.caption2.monospacedDigit())
+                    .font(.paperCodexSystem(size: 14, weight: .medium, design: .monospaced))
                     .foregroundStyle(.secondary)
             }
             .padding(.horizontal, 8)
@@ -1377,8 +1378,8 @@ private struct SettingsSimilarityCategoryRow: View {
                 if hasChildren {
                     Button(action: onToggleExpanded) {
                         Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                            .font(.paperCodexSystem(size: 10.5, weight: .semibold))
-                            .frame(width: 14, height: 22)
+                            .font(.paperCodexSystem(size: 12.5, weight: .semibold))
+                            .frame(width: 16, height: 24)
                             .foregroundStyle(Color.secondary)
                     }
                     .buttonStyle(.plain)
@@ -1392,22 +1393,23 @@ private struct SettingsSimilarityCategoryRow: View {
             Button(action: onToggleSelected) {
                 HStack(spacing: 8) {
                     Image(systemName: selectionState.indicatorSystemImage)
-                        .font(.paperCodexSystem(size: 13, weight: .semibold))
-                        .frame(width: 17)
+                        .font(.paperCodexSystem(size: 15, weight: .semibold))
+                        .frame(width: 19)
                         .foregroundStyle(selectionState.indicatorTint)
 
                     Image(systemName: folderIconName)
+                        .font(.paperCodexSystem(size: 15, weight: .medium))
                         .frame(width: SettingsSimilarityCategoryLayout.folderIconWidth)
                         .foregroundStyle(selectionState.isActive || isExpanded ? Color.accentColor.opacity(0.9) : Color.secondary)
 
                     Text(title)
-                        .font(.paperCodexSystem(size: 13.5, weight: selectionState.isActive ? .semibold : .medium))
+                        .font(.paperCodexSystem(size: 15.5, weight: selectionState.isActive ? .semibold : .medium))
                         .foregroundStyle(selectionState.isActive ? Color.primary : Color.primary.opacity(0.82))
                         .lineLimit(1)
 
                     if isPinned {
                         Image(systemName: "pin.fill")
-                            .font(.caption2)
+                            .font(.paperCodexSystem(size: 13.5, weight: .medium))
                             .foregroundStyle(Color.accentColor.opacity(0.72))
                     }
 
