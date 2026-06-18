@@ -59,7 +59,7 @@ public struct CategoryHierarchySelection: Sendable {
         guard categoriesByID[categoryID] != nil else {
             return .none
         }
-        let selected = expandedSelection(selectedIDs)
+        let selected = selectedIDs.intersection(Set(categoriesByID.keys))
         let coverage = selectionCoverageIDs(categoryID)
         guard !coverage.isEmpty else {
             return .none
@@ -78,7 +78,7 @@ public struct CategoryHierarchySelection: Sendable {
             return normalizedSelection(selectedIDs)
         }
 
-        var next = expandedSelection(selectedIDs)
+        var next = normalizedSelection(selectedIDs)
         let subtree = subtreeIDs(categoryID)
         switch selectionState(for: categoryID, selectedIDs: next) {
         case .all:

@@ -933,10 +933,18 @@ func runCategoryHierarchySelectionChecks() throws {
         selection.selectionState(for: root.id, selectedIDs: allRoot) == .all,
         "a parent folder should show all-selected when its whole subtree is selected"
     )
+    try check(
+        selection.selectionState(for: vae.id, selectedIDs: Set([root.id])) == .none,
+        "a third-level folder should not inherit selected state from an ancestor id"
+    )
 
     let withoutVAE = selection.toggledSelection(categoryID: vae.id, selectedIDs: allRoot)
     try check(!withoutVAE.contains(root.id), "deselecting a nested folder should remove broad ancestor selections")
     try check(!withoutVAE.contains(methods.id), "deselecting a nested folder should remove its immediate broad parent selection")
+    try check(
+        selection.selectionState(for: vae.id, selectedIDs: withoutVAE) == .none,
+        "a deselected third-level folder should show unselected while siblings keep their state"
+    )
     try check(
         selection.selectionState(for: root.id, selectedIDs: withoutVAE) == .partial,
         "a folder should show partial selection when only some descendants remain selected"
@@ -2086,6 +2094,10 @@ func runUILayoutSourceChecks() throws {
             && settingsViewSource.contains("selectionState:")
             && !settingsViewSource.contains("selected ? Color.accentColor.opacity(0.10)"),
         "settings similarity category rows should use tri-state selection styling without painting selected rows"
+    )
+    try check(
+        !settingsViewSource.contains("strokeBorder(Color.accentColor.opacity(selectionState.strokeOpacity)"),
+        "settings similarity category rows should not draw selected-state boxes"
     )
     try check(
         appModelSource.contains("similarityCategorySources")

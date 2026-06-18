@@ -410,11 +410,11 @@ struct SettingsView: View {
         return VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline) {
                 Text("Similarity categories")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                    .font(.paperCodexSystem(size: 15, weight: .semibold))
+                    .foregroundStyle(.primary)
                 Spacer()
                 Text("\(draftSimilarityCategoryIDs.count)/\(model.categories.count) folders")
-                    .font(.caption.monospacedDigit())
+                    .font(.paperCodexSystem(size: 12, design: .monospaced))
                     .foregroundStyle(.secondary)
             }
 
@@ -946,7 +946,7 @@ struct SettingsView: View {
                 } icon: {
                     Image(systemName: section.systemImage)
                 }
-                .font(.headline)
+                .font(.title3.weight(.semibold))
 
                 Rectangle()
                     .fill(Color.primary.opacity(0.10))
@@ -1305,28 +1305,6 @@ private extension CategoryHierarchySelectionState {
             Color.secondary.opacity(0.62)
         }
     }
-
-    var strokeOpacity: Double {
-        switch self {
-        case .all:
-            0.24
-        case .partial:
-            0.15
-        case .none:
-            0
-        }
-    }
-
-    var statusBarOpacity: Double {
-        switch self {
-        case .all:
-            0.72
-        case .partial:
-            0.38
-        case .none:
-            0
-        }
-    }
 }
 
 private struct SettingsSimilarityRootFolderRow: View {
@@ -1340,21 +1318,22 @@ private struct SettingsSimilarityRootFolderRow: View {
     var body: some View {
         Button(action: onToggleSelected) {
             HStack(spacing: 8) {
+                Image(systemName: selectionState.indicatorSystemImage)
+                    .font(.paperCodexSystem(size: 13, weight: .semibold))
+                    .frame(width: 17)
+                    .foregroundStyle(selectionState.indicatorTint)
                 Image(systemName: selectionState.isComplete ? "tray.full.fill" : "tray.full")
                     .frame(width: 18)
-                    .foregroundStyle(selectionState.isActive ? Color.accentColor : Color.secondary)
+                    .foregroundStyle(selectionState.isActive ? Color.accentColor.opacity(0.9) : Color.secondary)
                 Text("All Folders")
-                    .font(.paperCodexSystem(size: 13, weight: selectionState.isComplete ? .semibold : .medium))
+                    .font(.paperCodexSystem(size: 13.5, weight: selectionState.isActive ? .semibold : .medium))
                     .lineLimit(1)
                 Spacer(minLength: 8)
                 Text(countText)
                     .font(.caption2.monospacedDigit())
                     .foregroundStyle(.secondary)
-                Image(systemName: selectionState.indicatorSystemImage)
-                    .font(.paperCodexSystem(size: 12, weight: .semibold))
-                    .foregroundStyle(selectionState.indicatorTint)
             }
-            .padding(.horizontal, 9)
+            .padding(.horizontal, 8)
             .padding(.vertical, 7)
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
@@ -1364,18 +1343,6 @@ private struct SettingsSimilarityRootFolderRow: View {
             RoundedRectangle(cornerRadius: 6)
                 .fill(isHovering ? Color.primary.opacity(0.045) : Color.clear)
         )
-        .overlay {
-            RoundedRectangle(cornerRadius: 6)
-                .strokeBorder(Color.accentColor.opacity(selectionState.strokeOpacity), lineWidth: 1)
-        }
-        .overlay(alignment: .leading) {
-            if selectionState.isActive {
-                Capsule()
-                    .fill(Color.accentColor.opacity(selectionState.statusBarOpacity))
-                    .frame(width: 3, height: selectionState.isComplete ? 18 : 13)
-                    .padding(.leading, 3)
-            }
-        }
         .animation(PaperCodexMotion.hover, value: isHovering)
         .animation(PaperCodexMotion.selection, value: selectionState)
         .onHover { hovering in
@@ -1405,68 +1372,68 @@ private struct SettingsSimilarityCategoryRow: View {
     var onToggleSelected: () -> Void
 
     var body: some View {
-        ZStack(alignment: .trailing) {
-            HStack(spacing: 8) {
-                Button(action: folderButtonAction) {
+        HStack(spacing: 7) {
+            Group {
+                if hasChildren {
+                    Button(action: onToggleExpanded) {
+                        Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                            .font(.paperCodexSystem(size: 10.5, weight: .semibold))
+                            .frame(width: 14, height: 22)
+                            .foregroundStyle(Color.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help(folderIconHelp)
+                } else {
+                    Color.clear
+                        .frame(width: 14, height: 22)
+                }
+            }
+
+            Button(action: onToggleSelected) {
+                HStack(spacing: 8) {
+                    Image(systemName: selectionState.indicatorSystemImage)
+                        .font(.paperCodexSystem(size: 13, weight: .semibold))
+                        .frame(width: 17)
+                        .foregroundStyle(selectionState.indicatorTint)
+
                     Image(systemName: folderIconName)
                         .frame(width: SettingsSimilarityCategoryLayout.folderIconWidth)
-                        .foregroundStyle(selectionState.isActive || isExpanded ? Color.accentColor : Color.secondary)
-                }
-                .buttonStyle(.plain)
-                .help(folderIconHelp)
+                        .foregroundStyle(selectionState.isActive || isExpanded ? Color.accentColor.opacity(0.9) : Color.secondary)
 
-                Button(action: onToggleSelected) {
-                    HStack(spacing: 0) {
-                        Text(title)
-                            .font(.paperCodexSystem(size: 13, weight: selectionState.isComplete ? .semibold : .medium))
-                            .lineLimit(1)
-                        Spacer(minLength: 52)
+                    Text(title)
+                        .font(.paperCodexSystem(size: 13.5, weight: selectionState.isActive ? .semibold : .medium))
+                        .foregroundStyle(selectionState.isActive ? Color.primary : Color.primary.opacity(0.82))
+                        .lineLimit(1)
+
+                    if isPinned {
+                        Image(systemName: "pin.fill")
+                            .font(.caption2)
+                            .foregroundStyle(Color.accentColor.opacity(0.72))
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .buttonStyle(.plain)
-                .help(title)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 7)
-            .background(
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(isHovering ? Color.primary.opacity(0.045) : Color.clear)
-            )
-            .overlay {
-                RoundedRectangle(cornerRadius: 6)
-                    .strokeBorder(Color.accentColor.opacity(selectionState.strokeOpacity), lineWidth: 1)
-            }
-            .overlay(alignment: .leading) {
-                if selectionState.isActive {
-                    Capsule()
-                        .fill(Color.accentColor.opacity(selectionState.statusBarOpacity))
-                        .frame(width: 3, height: selectionState.isComplete ? 18 : 13)
-                        .padding(.leading, 3)
-                }
-            }
-            .padding(.leading, CGFloat(depth) * SettingsSimilarityCategoryLayout.treeIndentWidth)
-            .frame(minHeight: SettingsSimilarityCategoryLayout.treeConnectorHeight)
-            .background(alignment: .leading) {
-                SettingsSimilarityCategoryTreeConnector(
-                    depth: depth,
-                    connectorContinuations: connectorContinuations
-                )
-                .allowsHitTesting(false)
-            }
 
-            HStack(spacing: 5) {
-                if isPinned {
-                    Image(systemName: "pin.fill")
-                        .font(.caption2)
-                        .foregroundStyle(Color.accentColor.opacity(0.72))
+                    Spacer(minLength: 8)
                 }
-                Image(systemName: selectionState.indicatorSystemImage)
-                    .font(.paperCodexSystem(size: 12, weight: .semibold))
-                    .foregroundStyle(selectionState.indicatorTint)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
             }
-            .padding(.trailing, 8)
+            .buttonStyle(.plain)
+            .help(title)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 5)
+                .fill(isHovering ? Color.primary.opacity(0.045) : Color.clear)
+        )
+        .padding(.leading, CGFloat(depth) * SettingsSimilarityCategoryLayout.treeIndentWidth)
+        .frame(minHeight: SettingsSimilarityCategoryLayout.treeConnectorHeight)
+        .background(alignment: .leading) {
+            SettingsSimilarityCategoryTreeConnector(
+                depth: depth,
+                connectorContinuations: connectorContinuations
+            )
+            .allowsHitTesting(false)
         }
         .animation(PaperCodexMotion.hover, value: isHovering)
         .animation(PaperCodexMotion.selection, value: selectionState)
@@ -1484,18 +1451,7 @@ private struct SettingsSimilarityCategoryRow: View {
     }
 
     private var folderIconHelp: String {
-        guard hasChildren else {
-            return title
-        }
-        return isExpanded ? "Collapse \(title)" : "Expand \(title)"
-    }
-
-    private func folderButtonAction() {
-        if hasChildren {
-            onToggleExpanded()
-        } else {
-            onToggleSelected()
-        }
+        isExpanded ? "Collapse \(title)" : "Expand \(title)"
     }
 }
 
