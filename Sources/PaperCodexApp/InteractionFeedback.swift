@@ -61,6 +61,7 @@ struct AppOperationStatus: Equatable {
     var detail: String
     var systemImage: String
     var tint: Color
+    var fraction: Double? = nil
 }
 
 struct CacheStorageSummary: Equatable, Sendable {
@@ -222,28 +223,40 @@ struct GlobalOperationStatusView: View {
     var status: AppOperationStatus
 
     var body: some View {
-        HStack(spacing: 10) {
-            ProgressView()
-                .controlSize(.small)
+        HStack(spacing: 14) {
             Image(systemName: status.systemImage)
+                .font(.paperCodexSystem(size: 16, weight: .semibold))
                 .foregroundStyle(status.tint)
-            VStack(alignment: .leading, spacing: 2) {
+                .frame(width: 22)
+            VStack(alignment: .leading, spacing: 6) {
                 Text(status.title)
-                    .font(.caption.weight(.semibold))
+                    .font(.paperCodexSystem(size: 13.5, weight: .semibold))
                 Text(status.detail)
-                    .font(.caption2)
+                    .font(.paperCodexSystem(size: 12))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                if let fraction = status.fraction {
+                    ProgressView(value: fraction)
+                        .progressViewStyle(.linear)
+                        .tint(status.tint)
+                        .frame(width: 260)
+                } else {
+                    ProgressView()
+                        .progressViewStyle(.linear)
+                        .controlSize(.small)
+                        .tint(status.tint)
+                        .frame(width: 260, alignment: .leading)
+                }
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(.regularMaterial, in: Capsule())
+        .padding(.horizontal, 18)
+        .padding(.vertical, 12)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
         .overlay(
-            Capsule()
+            RoundedRectangle(cornerRadius: 14)
                 .stroke(status.tint.opacity(0.22), lineWidth: 1)
         )
-        .shadow(color: Color.black.opacity(0.10), radius: 10, y: 5)
+        .shadow(color: Color.black.opacity(0.12), radius: 14, y: 7)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(status.title). \(status.detail)")
     }

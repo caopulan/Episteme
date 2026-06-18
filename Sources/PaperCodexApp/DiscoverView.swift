@@ -179,11 +179,12 @@ struct DiscoverView: View {
                             await model.refreshAvailableCodexModels()
                         }
                     },
-                    onConfirm: { actions, modelOverride, reasoningEffort in
+                    onConfirm: { actions, modelOverride, reasoningEffort, resultLimit in
                         isShowingProcessSelection = false
+                        let processPapers = resultLimit.papers(from: papers)
                         Task {
                             await model.processCurrentDiscoverResults(
-                                papers,
+                                processPapers,
                                 actions: Set(actions),
                                 modelOverride: modelOverride,
                                 reasoningEffort: reasoningEffort
@@ -540,18 +541,6 @@ struct DiscoverView: View {
 
                 activeFilterChips
 
-                if (model.isSearchingDiscover || model.isPreloadingArxivAssets),
-                   let progress = model.arxivCacheProgress {
-                    ArxivCacheProgressStrip(progress: progress)
-                }
-                if model.isProcessingDiscoverResults,
-                   let progress = model.discoverProcessingProgress {
-                    ArxivCacheProgressStrip(progress: progress)
-                }
-                if model.isCachingDiscoverPDFs,
-                   let progress = model.discoverPDFCacheProgress {
-                    ArxivCacheProgressStrip(progress: progress)
-                }
             }
         }
         .frame(maxWidth: .infinity, minHeight: discoverRouteToolbarMinHeight, alignment: .topLeading)
@@ -756,9 +745,9 @@ struct ArxivSearchView: View {
                         await model.refreshAvailableCodexModels()
                     }
                 },
-                onConfirm: { actions, modelOverride, reasoningEffort in
+                onConfirm: { actions, modelOverride, reasoningEffort, resultLimit in
                     isShowingProcessSelection = false
-                    let searchPapers = papers
+                    let searchPapers = resultLimit.papers(from: papers)
                     Task {
                         await model.processCurrentDiscoverResults(searchPapers, actions: Set(actions), modelOverride: modelOverride, reasoningEffort: reasoningEffort)
                     }
@@ -988,13 +977,6 @@ struct ArxivSearchView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            if model.isProcessingDiscoverResults,
-               let progress = model.discoverProcessingProgress {
-                ArxivCacheProgressStrip(progress: progress)
-            } else if model.isSearchingArxivSearch,
-                      let progress = model.arxivCacheProgress {
-                ArxivCacheProgressStrip(progress: progress)
-            }
         }
         .frame(maxWidth: .infinity, minHeight: discoverRouteToolbarMinHeight, alignment: .topLeading)
     }
@@ -1700,6 +1682,40 @@ private struct DiscoverQuickRangeButtonStyle: ButtonStyle {
     }
 }
 
+private enum DiscoverProcessResultLimit: String, CaseIterable, Identifiable {
+    case first30
+    case first100
+    case all
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .first30:
+            "First 30"
+        case .first100:
+            "First 100"
+        case .all:
+            "All"
+        }
+    }
+
+    func effectiveCount(for total: Int) -> Int {
+        switch self {
+        case .first30:
+            min(total, 30)
+        case .first100:
+            min(total, 100)
+        case .all:
+            total
+        }
+    }
+
+    func papers(from papers: [ArxivFeedPaper]) -> [ArxivFeedPaper] {
+        Array(papers.prefix(effectiveCount(for: papers.count)))
+    }
+}
+
 private struct DiscoverProcessActionSheet: View {
     @Environment(\.dismiss) private var dismiss
 
@@ -1711,10 +1727,11 @@ private struct DiscoverProcessActionSheet: View {
     var defaultSelectedActions: Set<DiscoverProcessAction>
     var isRefreshingModels: Bool
     var onRefreshModels: () -> Void
-    var onConfirm: ([DiscoverProcessAction], String, CodexReasoningEffort) -> Void
+    var onConfirm: ([DiscoverProcessAction], String, CodexReasoningEffort, DiscoverProcessResultLimit) -> Void
     var onCancel: () -> Void
 
     @State private var selectedActions: Set<DiscoverProcessAction>
+    @State private var selectedResultLimit: DiscoverProcessResultLimit
     @State private var draftModelOverride: String
     @State private var draftReasoningEffort: CodexReasoningEffort
     @State private var isCancelButtonHovering = false
@@ -1729,7 +1746,7 @@ private struct DiscoverProcessActionSheet: View {
         defaultSelectedActions: Set<DiscoverProcessAction>,
         isRefreshingModels: Bool,
         onRefreshModels: @escaping () -> Void,
-        onConfirm: @escaping ([DiscoverProcessAction], String, CodexReasoningEffort) -> Void,
+        onConfirm: @escaping ([DiscoverProcessAction], String, CodexReasoningEffort, DiscoverProcessResultLimit) -> Void,
         onCancel: @escaping () -> Void
     ) {
         self.paperCount = paperCount
@@ -1743,6 +1760,7 @@ private struct DiscoverProcessActionSheet: View {
         self.onConfirm = onConfirm
         self.onCancel = onCancel
         _selectedActions = State(initialValue: defaultSelectedActions)
+        _selectedResultLimit = State(initialValue: .all)
         _draftModelOverride = State(initialValue: defaultModelOverride)
         _draftReasoningEffort = State(initialValue: defaultReasoningEffort)
     }
@@ -1758,6 +1776,15 @@ private struct DiscoverProcessActionSheet: View {
 
     private var canProcessResults: Bool {
         !selectedOrderedActions.isEmpty && paperCount > 0
+    }
+
+    private var selectedPaperCount: Int {
+        selectedResultLimit.effectiveCount(for: paperCount)
+    }
+
+    private var processButtonTitle: String {
+        let suffix = selectedPaperCount == 1 ? "Result" : "Results"
+        return "Process \(selectedPaperCount) \(suffix)"
     }
 
     var body: some View {
@@ -1803,6 +1830,28 @@ private struct DiscoverProcessActionSheet: View {
                             })
                         )
                     }
+                }
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 8) {
+                        Label("Result Range", systemImage: "number")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text("\(selectedPaperCount)/\(paperCount) results")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Picker("Result Range", selection: $selectedResultLimit) {
+                        ForEach(DiscoverProcessResultLimit.allCases) { limit in
+                            Text(limit.title).tag(limit)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
                 }
 
                 Divider()
@@ -1866,10 +1915,10 @@ private struct DiscoverProcessActionSheet: View {
                 }
 
                 Button {
-                    onConfirm(selectedOrderedActions, draftModelOverride, draftReasoningEffort)
+                    onConfirm(selectedOrderedActions, draftModelOverride, draftReasoningEffort, selectedResultLimit)
                     dismiss()
                 } label: {
-                    Label("Process Results", systemImage: "sparkles")
+                    Label(processButtonTitle, systemImage: "sparkles")
                 }
                 .keyboardShortcut(.defaultAction)
                 .buttonStyle(DiscoverProcessFooterButtonStyle(kind: .primary, isHovering: isProcessButtonHovering, disabled: !canProcessResults))
@@ -2172,44 +2221,6 @@ private struct DateMenuButton: View {
                 isHovering = hovering
             }
         }
-    }
-}
-
-private struct ArxivCacheProgressStrip: View {
-    var progress: ArxivCacheProgress
-
-    var body: some View {
-        HStack(spacing: 10) {
-            if let fraction = progress.fraction {
-                ProgressView(value: fraction)
-                    .frame(width: 150)
-            } else {
-                ProgressView()
-                    .controlSize(.small)
-                    .frame(width: 150)
-            }
-            VStack(alignment: .leading, spacing: 2) {
-                Text(progress.title)
-                    .font(.paperCodexSystem(size: 12.5, weight: .semibold))
-                Text(progress.detail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            Text(progress.date)
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 7)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.82))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(Color.black.opacity(0.08), lineWidth: 1)
-                )
-        )
     }
 }
 

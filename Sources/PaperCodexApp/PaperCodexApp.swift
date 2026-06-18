@@ -54,7 +54,7 @@ struct RootView: View {
         .overlay(alignment: .bottom) {
             if let status = model.globalOperationStatus {
                 GlobalOperationStatusView(status: status)
-                    .padding(.bottom, 14)
+                    .padding(.bottom, 36)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }

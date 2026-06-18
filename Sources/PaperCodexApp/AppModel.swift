@@ -899,23 +899,35 @@ final class AppModel: ObservableObject {
                 title: isCancellingDiscoverSearch ? "Stopping Explore Search" : "Searching Explore",
                 detail: arxivCacheProgress?.detail ?? "\(discoverStartDate)...\(discoverEndDate)",
                 systemImage: "magnifyingglass",
-                tint: .blue
+                tint: .blue,
+                fraction: arxivCacheProgress?.fraction
             )
         }
         if isSearchingArxivSearch {
             return AppOperationStatus(
                 title: isCancellingArxivSearch ? "Stopping arXiv Search" : "Searching arXiv",
-                detail: arxivSearchQueryPreview,
+                detail: arxivCacheProgress?.detail ?? arxivSearchQueryPreview,
                 systemImage: "magnifyingglass",
-                tint: .blue
+                tint: .blue,
+                fraction: arxivCacheProgress?.fraction
             )
         }
         if isProcessingDiscoverResults {
             return AppOperationStatus(
-                title: isCancellingDiscoverProcessing ? "Stopping Explore Processing" : "Processing Explore Results",
+                title: isCancellingDiscoverProcessing ? "Stopping Explore Processing" : discoverProcessingProgress?.title ?? "Processing Explore Results",
                 detail: discoverProcessingProgress?.detail ?? "\(discoverCodexConcurrency) workers",
                 systemImage: "sparkles",
-                tint: .indigo
+                tint: .indigo,
+                fraction: discoverProcessingProgress?.fraction
+            )
+        }
+        if isPreloadingArxivAssets {
+            return AppOperationStatus(
+                title: arxivCacheProgress?.title ?? "Caching Preview Images",
+                detail: arxivCacheProgress?.detail ?? "Preparing previews",
+                systemImage: "photo.on.rectangle.angled",
+                tint: .blue,
+                fraction: arxivCacheProgress?.fraction
             )
         }
         if isCachingDiscoverPDFs {
@@ -923,7 +935,8 @@ final class AppModel: ObservableObject {
                 title: isCancellingDiscoverPDFCache ? "Stopping PDF Cache" : "Caching PDFs",
                 detail: discoverPDFCacheProgress?.detail ?? "Downloading arXiv PDFs",
                 systemImage: "tray.and.arrow.down",
-                tint: .green
+                tint: .green,
+                fraction: discoverPDFCacheProgress?.fraction
             )
         }
         if isScanningWatchedFolders {
