@@ -1011,7 +1011,7 @@ func runUILayoutSourceChecks() throws {
        let paperRowEndRange = librarySource.range(of: "private struct PaperDragPreview", range: paperRowRange.upperBound..<librarySource.endIndex) {
         let paperRowSource = String(librarySource[paperRowRange.lowerBound..<paperRowEndRange.lowerBound])
         try check(
-            paperRowSource.contains("PaperCodexIconButton(\n                title: paper.isStarred ? \"Remove Star\" : \"Star Paper\"")
+            paperRowSource.contains("title: paper.isStarred ? \"Remove Star\" : \"Star Paper\"")
                 && paperRowSource.contains("PaperCodexIconButton(title: \"Read\"")
                 && !paperRowSource.contains(".buttonStyle(.borderless)"),
             "library row star and read icon buttons should use shared immediate press feedback instead of borderless buttons"
@@ -1911,17 +1911,22 @@ func runUILayoutSourceChecks() throws {
         "navigation rows should provide immediate press feedback while route content switches without delayed fade motion"
     )
     if let recentRowRange = librarySource.range(of: "private struct RecentConversationRow: View"),
-       let recentRowEndRange = librarySource.range(of: "private struct RecentConversationDetailPanel", range: recentRowRange.upperBound..<librarySource.endIndex) {
+       let recentRowEndRange = librarySource.range(of: "private struct RecentConversationDetailPanel", range: recentRowRange.upperBound..<librarySource.endIndex),
+       let paperRowRange = librarySource.range(of: "private struct PaperRow: View"),
+       let paperRowEndRange = librarySource.range(of: "private struct PaperDragPreview", range: paperRowRange.upperBound..<librarySource.endIndex) {
         let recentRowSource = String(librarySource[recentRowRange.lowerBound..<recentRowEndRange.lowerBound])
+        let paperRowSource = String(librarySource[paperRowRange.lowerBound..<paperRowEndRange.lowerBound])
         try check(
-            recentRowSource.contains("private struct RecentConversationRowButtonStyle: ButtonStyle")
-                && recentRowSource.contains(".buttonStyle(RecentConversationRowButtonStyle(")
-                && recentRowSource.contains("configuration.isPressed")
-                && recentRowSource.contains("PaperCodexMotion.press")
-                && recentRowSource.contains("PaperCodexIconButton(title: \"Open Session\"")
+            recentRowSource.contains("PaperRow(")
+                && recentRowSource.contains("sessionFooterText: renamedSessionFooterText")
+                && recentRowSource.contains("private var renamedSessionFooterText: String?")
+                && recentRowSource.contains("trimmedTitle != defaultSessionTitle")
+                && recentRowSource.contains("onOpenSession: onOpen")
+                && paperRowSource.contains("PaperCodexIconButton(title: \"Open Session\"")
+                && paperRowSource.contains("PaperCodexMotion.press")
                 && !recentRowSource.contains(".buttonStyle(.plain)")
                 && !recentRowSource.contains(".buttonStyle(.borderless)"),
-            "recent conversation rows should provide immediate pressed feedback before selecting or opening sessions"
+            "recent conversation rows should reuse library paper cards and show renamed session titles as a footer"
         )
     } else {
         throw CheckFailure(description: "recent conversation row source should remain inspectable")
@@ -1962,18 +1967,17 @@ func runUILayoutSourceChecks() throws {
             && settingsViewSource.contains("private enum SettingsActionButtonKind")
             && settingsViewSource.contains(".buttonStyle(SettingsActionButtonStyle(")
             && settingsViewSource.components(separatedBy: "SettingsActionButton(").count - 1 >= 15
-            && settingsViewSource.contains("private struct SettingsCategoryToggleRow: View")
-            && settingsViewSource.contains("private struct SettingsSelectableRowButtonStyle: ButtonStyle")
-            && settingsViewSource.contains(".buttonStyle(SettingsSelectableRowButtonStyle(")
+            && settingsViewSource.contains("private struct SettingsNavigationRow: View")
+            && settingsViewSource.contains("private struct SettingsNavigationRowButtonStyle: ButtonStyle")
+            && settingsViewSource.contains(".buttonStyle(SettingsNavigationRowButtonStyle(")
             && settingsViewSource.contains("PaperCodexIconButton(title: \"Move Up\"")
             && settingsViewSource.contains("PaperCodexIconButton(title: \"Reveal in Finder\"")
             && settingsViewSource.contains("configuration.isPressed")
             && settingsViewSource.contains("PaperCodexMotion.press")
             && !settingsViewSource.contains(".buttonStyle(.borderedProminent)")
             && !settingsViewSource.contains(".buttonStyle(.bordered)")
-            && !settingsViewSource.contains(".buttonStyle(.borderless)")
-            && !settingsViewSource.contains(".buttonStyle(.plain)"),
-        "Settings action buttons should provide immediate pressed feedback instead of system default delayed button chrome"
+            && !settingsViewSource.contains(".buttonStyle(.borderless)"),
+        "Settings action and navigation buttons should provide immediate pressed feedback instead of system default delayed button chrome"
     )
     try check(
         homeChromeSource.contains("static let sidebarTopPadding: CGFloat = 28")
@@ -2021,8 +2025,13 @@ func runUILayoutSourceChecks() throws {
     )
     try check(
         settingsViewSource.contains("Similarity categories")
-            && settingsViewSource.contains("draftSimilarityCategoryIDs"),
-        "settings should expose category-based similarity defaults"
+            && settingsViewSource.contains("draftSimilarityCategoryIDs")
+            && settingsViewSource.contains("SettingsSimilarityCategoryTreeSnapshot")
+            && settingsViewSource.contains("SettingsSimilarityRootFolderRow")
+            && settingsViewSource.contains("SettingsSimilarityCategoryRow")
+            && settingsViewSource.contains("SettingsSimilarityCategoryTreeConnector")
+            && !settingsViewSource.contains("categoryDisplayName("),
+        "settings should expose category-based similarity defaults as a library-style folder tree"
     )
     try check(
         appModelSource.contains("similarityCategorySources")
@@ -3127,16 +3136,21 @@ func runUILayoutSourceChecks() throws {
     }
 
     try check(
-        !settingsViewSource.contains("SettingsSectionAnchor")
-            && !settingsViewSource.contains("ScrollViewReader")
-            && !settingsViewSource.contains("Settings Sections"),
-        "settings should not add a second navigation rail or force scroll-anchor layout work"
+        settingsViewSource.contains("private enum SettingsSectionID")
+            && settingsViewSource.contains("ScrollViewReader { settingsScrollProxy in")
+            && settingsViewSource.contains("settingsNavigation(settingsScrollProxy:")
+            && settingsViewSource.contains("settingsScrollProxy.scrollTo(section, anchor: .top)")
+            && settingsViewSource.contains(".id(section)")
+            && settingsViewSource.contains("activeSettingsSection"),
+        "settings should provide an in-sidebar section navigation that jumps to anchored settings sections"
     )
     try check(
-        settingsViewSource.contains("LazyVStack(alignment: .leading, spacing: 22)")
-            && settingsViewSource.contains("LazyVStack(alignment: .leading, spacing: 6)")
+        settingsViewSource.contains("LazyVStack(alignment: .leading, spacing: 26)")
+            && settingsViewSource.contains("LazyVStack(alignment: .leading, spacing: SettingsSimilarityCategoryLayout.rowSpacing)")
+            && settingsViewSource.contains("Rectangle()\n                    .fill(Color.primary.opacity(0.10))\n                    .frame(height: 1)")
+            && !settingsViewSource.contains(".padding(16)\n        .background(Color(nsColor: .textBackgroundColor))")
             && !settingsViewSource.contains(".onAppear {\n            syncLocalDrafts()\n            model.refreshCacheStorageSummary()\n            Task {\n                await model.refreshAvailableCodexModels()\n            }\n        }"),
-        "settings should lazily build offscreen sections and should not refresh Codex models on every route entry"
+        "settings should lazily build offscreen sections, use divider-led sections instead of card containers, and avoid refreshing Codex models on every route entry"
     )
     try check(
         settingsViewSource.contains(".accessibilityLabel(\"System prompt template editor\")")

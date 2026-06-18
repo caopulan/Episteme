@@ -534,10 +534,17 @@ struct LibraryView: View {
             RecentConversationsContent(
                 sessions: model.recentSessions,
                 papersBySessionID: model.recentSessionPapersByID,
+                categories: model.categories,
+                paperCategoryIDsByID: model.paperCategoryIDsByID,
+                paperTagsByID: model.paperTagsByID,
+                paperThumbnailURLsByID: model.paperThumbnailURLsByID,
                 selectedSessionID: Binding(
                     get: { selectedRecentSessionID ?? model.recentSessions.first?.id },
                     set: { selectedRecentSessionID = $0 }
                 ),
+                placeholderDetail: { paper in
+                    model.arxivImportPlaceholderDetail(for: paper)
+                },
                 onOpen: { session in
                     model.openRecentSession(session)
                 }
@@ -2176,12 +2183,15 @@ private struct PaperRow: View {
     var categories: [PaperCodexCore.Category]
     var tags: [PaperTag]
     var thumbnailURLs: [URL]
+    var sessionFooterText: String? = nil
+    var sessionFooterSystemImage = "text.bubble"
     var isImportPlaceholder: Bool
     var placeholderDetail: String
     var isSelected: Bool
     var isMultiSelected: Bool
     var onToggleStar: () -> Void
     var onRead: () -> Void
+    var onOpenSession: (() -> Void)? = nil
 
     @State private var isHovering = false
     @State private var isPressing = false
@@ -2211,19 +2221,29 @@ private struct PaperRow: View {
                         SmallChip(title: tag.name, systemImage: "tag")
                     }
                 }
+                if let sessionFooterText {
+                    Label(sessionFooterText, systemImage: sessionFooterSystemImage)
+                        .font(.paperCodexSystem(size: 12.5, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
             }
 
             Spacer()
 
-            PaperCodexIconButton(
-                title: paper.isStarred ? "Remove Star" : "Star Paper",
-                systemImage: paper.isStarred ? "star.fill" : "star",
-                tint: paper.isStarred ? .yellow : .secondary,
-                disabled: isImportPlaceholder,
-                action: onToggleStar
-            )
+            if let onOpenSession {
+                PaperCodexIconButton(title: "Open Session", systemImage: "arrow.forward.circle", tint: .accentColor, disabled: isImportPlaceholder, action: onOpenSession)
+            } else {
+                PaperCodexIconButton(
+                    title: paper.isStarred ? "Remove Star" : "Star Paper",
+                    systemImage: paper.isStarred ? "star.fill" : "star",
+                    tint: paper.isStarred ? .yellow : .secondary,
+                    disabled: isImportPlaceholder,
+                    action: onToggleStar
+                )
 
-            PaperCodexIconButton(title: "Read", systemImage: "book", tint: .secondary, disabled: isImportPlaceholder, action: onRead)
+                PaperCodexIconButton(title: "Read", systemImage: "book", tint: .secondary, disabled: isImportPlaceholder, action: onRead)
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 21)
@@ -2466,7 +2486,12 @@ private struct SidebarEmptyText: View {
 private struct RecentConversationsContent: View {
     var sessions: [PaperSession]
     var papersBySessionID: [String: [Paper]]
+    var categories: [PaperCodexCore.Category]
+    var paperCategoryIDsByID: [String: [String]]
+    var paperTagsByID: [String: [PaperTag]]
+    var paperThumbnailURLsByID: [String: [URL]]
     @Binding var selectedSessionID: String?
+    var placeholderDetail: (Paper) -> String
     var onOpen: (PaperSession) -> Void
 
     var body: some View {
@@ -2484,10 +2509,16 @@ private struct RecentConversationsContent: View {
                 ScrollView {
                     LazyVStack(spacing: 8) {
                         ForEach(sessions) { session in
+                            let sessionPapers = papers(for: session)
                             RecentConversationRow(
                                 session: session,
-                                papers: papersBySessionID[session.id, default: []],
+                                papers: sessionPapers,
+                                categories: categories,
+                                paperCategoryIDsByID: paperCategoryIDsByID,
+                                paperTagsByID: paperTagsByID,
+                                paperThumbnailURLsByID: paperThumbnailURLsByID,
                                 isSelected: selectedSessionID == session.id,
+                                placeholderDetail: placeholderDetail,
                                 onSelect: {
                                     selectedSessionID = session.id
                                 },
@@ -2503,6 +2534,14 @@ private struct RecentConversationsContent: View {
         }
         .padding(24)
     }
+
+    private func papers(for session: PaperSession) -> [Paper] {
+        let visiblePapers = papersBySessionID[session.id, default: []]
+        let orderedPapers = session.paperIDs.compactMap { paperID in
+            visiblePapers.first { $0.id == paperID }
+        }
+        return orderedPapers.isEmpty ? visiblePapers : orderedPapers
+    }
 }
 
 private struct RecentConversationRow: View {
@@ -2510,45 +2549,38 @@ private struct RecentConversationRow: View {
 
     var session: PaperSession
     var papers: [Paper]
+    var categories: [PaperCodexCore.Category]
+    var paperCategoryIDsByID: [String: [String]]
+    var paperTagsByID: [String: [PaperTag]]
+    var paperThumbnailURLsByID: [String: [URL]]
     var isSelected: Bool
+    var placeholderDetail: (Paper) -> String
     var onSelect: () -> Void
     var onOpen: () -> Void
 
     var body: some View {
-        HStack(alignment: .center, spacing: 10) {
-            Button(action: onSelect) {
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(spacing: 7) {
-                        Image(systemName: session.paperIDs.count > 1 ? "square.stack.3d.up.fill" : "doc.text")
-                            .foregroundStyle(Color.accentColor)
-                        Text(session.title)
-                            .font(.paperCodexSystem(size: 14, weight: .semibold))
-                            .lineLimit(1)
-                        Spacer(minLength: 0)
-                        Text(Self.relativeFormatter.localizedString(for: session.updatedAt, relativeTo: Date()))
-                            .font(.caption.monospacedDigit())
-                            .foregroundStyle(.tertiary)
-                    }
-                    Text(detailText)
-                        .font(.paperCodexSystem(size: 12.5))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
+        Group {
+            if let displayPaper {
+                PaperRow(
+                    paper: displayPaper,
+                    categories: categories(for: displayPaper),
+                    tags: paperTagsByID[displayPaper.id, default: []],
+                    thumbnailURLs: thumbnailURLs,
+                    sessionFooterText: renamedSessionFooterText,
+                    isImportPlaceholder: displayPaper.isArxivImportPlaceholder,
+                    placeholderDetail: placeholderDetail(displayPaper),
+                    isSelected: isSelected,
+                    isMultiSelected: false,
+                    onToggleStar: {},
+                    onRead: {},
+                    onOpenSession: onOpen
+                )
+            } else {
+                missingPaperRow
             }
-            .buttonStyle(RecentConversationRowButtonStyle(isSelected: isSelected, isHovering: isHovering))
-
-            PaperCodexIconButton(title: "Open Session", systemImage: "arrow.forward.circle", tint: .accentColor, action: onOpen)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(isSelected ? Color.accentColor.opacity(0.08) : Color(nsColor: .controlBackgroundColor))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(isSelected ? Color.accentColor.opacity(0.35) : Color.primary.opacity(0.08), lineWidth: 1)
-        )
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onSelect)
         .help(session.title)
         .onHover { hovering in
             withAnimation(PaperCodexMotion.hover) {
@@ -2557,64 +2589,82 @@ private struct RecentConversationRow: View {
         }
     }
 
-    private var detailText: String {
+    private var displayPaper: Paper? {
+        session.paperIDs.compactMap { paperID in
+            papers.first { $0.id == paperID }
+        }.first ?? papers.first
+    }
+
+    private var missingPaperRow: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: session.paperIDs.count > 1 ? "square.stack.3d.up.fill" : "doc.text")
+                .font(.paperCodexSystem(size: 18, weight: .semibold))
+                .foregroundStyle(Color.accentColor)
+                .frame(width: 132, height: 54)
+                .background(Color(nsColor: .windowBackgroundColor))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text(session.title)
+                    .font(.headline)
+                    .lineLimit(2)
+                Text("\(session.paperIDs.count) paper\(session.paperIDs.count == 1 ? "" : "s")")
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer()
+
+            PaperCodexIconButton(title: "Open Session", systemImage: "arrow.forward.circle", tint: .accentColor, action: onOpen)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 21)
+        .background(isSelected ? Color.accentColor.opacity(0.10) : (isHovering ? Color(nsColor: .textBackgroundColor) : Color(nsColor: .controlBackgroundColor)))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(isSelected ? Color.accentColor.opacity(0.38) : (isHovering ? Color.primary.opacity(0.10) : Color.clear), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private var thumbnailURLs: [URL] {
+        guard let displayPaper else {
+            return []
+        }
+        let orderedPapers = session.paperIDs.compactMap { paperID in
+            papers.first { $0.id == paperID }
+        }
+        guard orderedPapers.count > 1 else {
+            return paperThumbnailURLsByID[displayPaper.id, default: []]
+        }
+        let sessionThumbnails = orderedPapers.flatMap { paper in
+            paperThumbnailURLsByID[paper.id, default: []].prefix(1)
+        }
+        return sessionThumbnails.isEmpty ? paperThumbnailURLsByID[displayPaper.id, default: []] : sessionThumbnails
+    }
+
+    private var renamedSessionFooterText: String? {
+        let trimmedTitle = session.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedTitle.isEmpty,
+              trimmedTitle != defaultSessionTitle else {
+            return nil
+        }
+        return "Session: \(trimmedTitle)"
+    }
+
+    private var defaultSessionTitle: String {
+        guard let displayPaper else {
+            return "Paper Notes"
+        }
         guard session.paperIDs.count > 1 else {
-            return papers.first?.title ?? "Single paper"
+            return "\(displayPaper.title) Notes"
         }
-        let firstTitle = papers.first?.title ?? "Multiple papers"
-        return "\(session.paperIDs.count) papers · \(firstTitle)"
+        return "\(displayPaper.title) + \(session.paperIDs.count - 1) Notes"
     }
 
-    private static let relativeFormatter: RelativeDateTimeFormatter = {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .short
-        return formatter
-    }()
-}
-
-private struct RecentConversationRowButtonStyle: ButtonStyle {
-    var isSelected: Bool
-    var isHovering: Bool
-
-    func makeBody(configuration: Configuration) -> some View {
-        let isPressed = configuration.isPressed
-        configuration.label
-            .padding(.horizontal, 8)
-            .padding(.vertical, 7)
-            .background(
-                RoundedRectangle(cornerRadius: 7)
-                    .fill(backgroundColor(isPressed: isPressed))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 7)
-                    .stroke(borderColor(isPressed: isPressed), lineWidth: 1)
-            )
-            .shadow(color: shadowColor(isPressed: isPressed), radius: isPressed ? 3 : 5, y: isPressed ? 1 : 2)
-            .scaleEffect(isPressed ? 0.988 : 1, anchor: .center)
-            .animation(PaperCodexMotion.press, value: configuration.isPressed)
-            .animation(PaperCodexMotion.hover, value: isHovering)
-            .animation(PaperCodexMotion.selection, value: isSelected)
-    }
-
-    private func backgroundColor(isPressed: Bool) -> Color {
-        if isSelected {
-            return Color.accentColor.opacity(isPressed ? 0.18 : 0.12)
-        }
-        if isPressed {
-            return Color.accentColor.opacity(0.10)
-        }
-        return isHovering ? Color.primary.opacity(0.045) : Color.clear
-    }
-
-    private func borderColor(isPressed: Bool) -> Color {
-        if isPressed {
-            return Color.accentColor.opacity(0.40)
-        }
-        return isSelected ? Color.accentColor.opacity(0.25) : Color.clear
-    }
-
-    private func shadowColor(isPressed: Bool) -> Color {
-        isPressed ? Color.accentColor.opacity(0.10) : .clear
+    private func categories(for paper: Paper) -> [PaperCodexCore.Category] {
+        let ids = Set(paperCategoryIDsByID[paper.id, default: []])
+        return categories.filter { ids.contains($0.id) }
     }
 }
 
