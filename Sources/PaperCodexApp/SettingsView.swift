@@ -160,7 +160,7 @@ struct SettingsView: View {
                 sidebar(settingsScrollProxy: settingsScrollProxy)
             } content: {
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 26) {
+                    LazyVStack(alignment: .leading, spacing: 34) {
                         header
                         globalLanguageSettings
                         chatAppearanceSettings
@@ -410,7 +410,7 @@ struct SettingsView: View {
         return VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline) {
                 Text("Similarity categories")
-                    .font(.paperCodexSystem(size: 18, weight: .semibold))
+                    .font(.paperCodexSystem(size: 15.5, weight: .semibold))
                     .foregroundStyle(.primary)
                 Spacer()
                 Text("\(draftSimilarityCategoryIDs.count)/\(model.categories.count) folders")
@@ -939,23 +939,27 @@ struct SettingsView: View {
         _ section: SettingsSectionID,
         @ViewBuilder content: () -> Content
     ) -> some View {
-        VStack(alignment: .leading, spacing: 13) {
-            HStack(spacing: 10) {
+        HStack(alignment: .top, spacing: 26) {
+            VStack(alignment: .leading, spacing: 7) {
                 Label {
                     Text(LocalizedStringKey(section.title))
                 } icon: {
                     Image(systemName: section.systemImage)
                 }
-                .font(.paperCodexSystem(size: 22, weight: .semibold))
+                .font(.paperCodexSystem(size: 16, weight: .semibold))
+                .foregroundStyle(.primary)
 
                 Rectangle()
-                    .fill(Color.primary.opacity(0.10))
-                    .frame(height: 1)
+                    .fill(Color.primary.opacity(0.12))
+                    .frame(width: 34, height: 1)
             }
+            .frame(width: 184, alignment: .leading)
+            .padding(.top, 2)
 
             VStack(alignment: .leading, spacing: 11) {
                 content()
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .id(section)
     }
@@ -1319,15 +1323,15 @@ private struct SettingsSimilarityRootFolderRow: View {
         Button(action: onToggleSelected) {
             HStack(spacing: 8) {
                 Image(systemName: selectionState.indicatorSystemImage)
-                    .font(.paperCodexSystem(size: 15, weight: .semibold))
-                    .frame(width: 19)
+                    .font(.paperCodexSystem(size: 14, weight: .semibold))
+                    .frame(width: 18)
                     .foregroundStyle(selectionState.indicatorTint)
                 Image(systemName: selectionState.isComplete ? "tray.full.fill" : "tray.full")
-                    .font(.paperCodexSystem(size: 15, weight: .medium))
-                    .frame(width: 20)
+                    .font(.paperCodexSystem(size: 14, weight: .medium))
+                    .frame(width: 19)
                     .foregroundStyle(selectionState.isActive ? Color.accentColor.opacity(0.9) : Color.secondary)
                 Text("All Folders")
-                    .font(.paperCodexSystem(size: 15.5, weight: selectionState.isActive ? .semibold : .medium))
+                    .font(.paperCodexSystem(size: 14.5, weight: selectionState.isActive ? .semibold : .medium))
                     .lineLimit(1)
                 Spacer(minLength: 8)
                 Text(countText)
@@ -1378,7 +1382,7 @@ private struct SettingsSimilarityCategoryRow: View {
                 if hasChildren {
                     Button(action: onToggleExpanded) {
                         Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                            .font(.paperCodexSystem(size: 12.5, weight: .semibold))
+                            .font(.paperCodexSystem(size: 11.5, weight: .semibold))
                             .frame(width: 16, height: 24)
                             .foregroundStyle(Color.secondary)
                     }
@@ -1393,17 +1397,17 @@ private struct SettingsSimilarityCategoryRow: View {
             Button(action: onToggleSelected) {
                 HStack(spacing: 8) {
                     Image(systemName: selectionState.indicatorSystemImage)
-                        .font(.paperCodexSystem(size: 15, weight: .semibold))
-                        .frame(width: 19)
+                        .font(.paperCodexSystem(size: 14, weight: .semibold))
+                        .frame(width: 18)
                         .foregroundStyle(selectionState.indicatorTint)
 
                     Image(systemName: folderIconName)
-                        .font(.paperCodexSystem(size: 15, weight: .medium))
+                        .font(.paperCodexSystem(size: 14, weight: .medium))
                         .frame(width: SettingsSimilarityCategoryLayout.folderIconWidth)
                         .foregroundStyle(selectionState.isActive || isExpanded ? Color.accentColor.opacity(0.9) : Color.secondary)
 
                     Text(title)
-                        .font(.paperCodexSystem(size: 15.5, weight: selectionState.isActive ? .semibold : .medium))
+                        .font(.paperCodexSystem(size: 14.5, weight: selectionState.isActive ? .semibold : .medium))
                         .foregroundStyle(selectionState.isActive ? Color.primary : Color.primary.opacity(0.82))
                         .lineLimit(1)
 

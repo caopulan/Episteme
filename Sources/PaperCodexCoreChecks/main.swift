@@ -2100,12 +2100,14 @@ func runUILayoutSourceChecks() throws {
         "settings similarity category rows should not draw selected-state boxes"
     )
     try check(
-        settingsViewSource.contains(".font(.paperCodexSystem(size: 22, weight: .semibold))")
-            && settingsViewSource.contains(".font(.paperCodexSystem(size: 18, weight: .semibold))")
-            && settingsViewSource.contains(".font(.paperCodexSystem(size: 15.5, weight: selectionState.isActive ? .semibold : .medium))")
-            && settingsViewSource.contains(".font(.paperCodexSystem(size: 14, weight: .medium, design: .monospaced))")
+        settingsViewSource.contains("LazyVStack(alignment: .leading, spacing: 34)")
+            && settingsViewSource.contains("HStack(alignment: .top, spacing: 26)")
+            && settingsViewSource.contains(".frame(width: 184, alignment: .leading)")
+            && settingsViewSource.contains(".font(.paperCodexSystem(size: 16, weight: .semibold))")
+            && settingsViewSource.contains(".font(.paperCodexSystem(size: 15.5, weight: .semibold))")
+            && settingsViewSource.contains(".font(.paperCodexSystem(size: 14.5, weight: selectionState.isActive ? .semibold : .medium))")
             && !settingsViewSource.contains(".font(.caption2.monospacedDigit())"),
-        "settings ranking tree and section headings should use larger readable typography"
+        "settings sections should use a left title column, top alignment, separated rows, and moderate readable typography"
     )
     try check(
         appModelSource.contains("similarityCategorySources")
@@ -3219,9 +3221,9 @@ func runUILayoutSourceChecks() throws {
         "settings should provide an in-sidebar section navigation that jumps to anchored settings sections"
     )
     try check(
-        settingsViewSource.contains("LazyVStack(alignment: .leading, spacing: 26)")
+        settingsViewSource.contains("LazyVStack(alignment: .leading, spacing: 34)")
             && settingsViewSource.contains("LazyVStack(alignment: .leading, spacing: SettingsSimilarityCategoryLayout.rowSpacing)")
-            && settingsViewSource.contains("Rectangle()\n                    .fill(Color.primary.opacity(0.10))\n                    .frame(height: 1)")
+            && settingsViewSource.contains("Rectangle()\n                    .fill(Color.primary.opacity(0.12))\n                    .frame(width: 34, height: 1)")
             && !settingsViewSource.contains(".padding(16)\n        .background(Color(nsColor: .textBackgroundColor))")
             && !settingsViewSource.contains(".onAppear {\n            syncLocalDrafts()\n            model.refreshCacheStorageSummary()\n            Task {\n                await model.refreshAvailableCodexModels()\n            }\n        }"),
         "settings should lazily build offscreen sections, use divider-led sections instead of card containers, and avoid refreshing Codex models on every route entry"
