@@ -909,6 +909,54 @@ func runCategoryMovePlannerChecks() throws {
     )
 }
 
+func runCategoryHierarchySelectionChecks() throws {
+    let root = Category(id: "cat-root", parentID: nil, name: "Root", sortOrder: 10)
+    let methods = Category(id: "cat-methods", parentID: root.id, name: "Methods", sortOrder: 10)
+    let vae = Category(id: "cat-vae", parentID: methods.id, name: "VAE", sortOrder: 10)
+    let diffusion = Category(id: "cat-diffusion", parentID: methods.id, name: "Diffusion", sortOrder: 20)
+    let datasets = Category(id: "cat-datasets", parentID: root.id, name: "Datasets", sortOrder: 20)
+    let uncategorized = Category(id: "cat-uncategorized", parentID: nil, name: "Uncategorized", sortOrder: 20)
+    let categories = [root, methods, vae, diffusion, datasets, uncategorized]
+    let selection = CategoryHierarchySelection(categories: categories)
+
+    try check(
+        selection.defaultCollapsedRootCategoryIDs() == Set([root.id]),
+        "default ranking selection tree should collapse expandable root folders only"
+    )
+
+    let allRoot = selection.toggledSelection(categoryID: root.id, selectedIDs: [])
+    try check(
+        allRoot == Set([root.id, methods.id, vae.id, diffusion.id, datasets.id]),
+        "selecting a parent folder should select the whole subtree"
+    )
+    try check(
+        selection.selectionState(for: root.id, selectedIDs: allRoot) == .all,
+        "a parent folder should show all-selected when its whole subtree is selected"
+    )
+
+    let withoutVAE = selection.toggledSelection(categoryID: vae.id, selectedIDs: allRoot)
+    try check(!withoutVAE.contains(root.id), "deselecting a nested folder should remove broad ancestor selections")
+    try check(!withoutVAE.contains(methods.id), "deselecting a nested folder should remove its immediate broad parent selection")
+    try check(
+        selection.selectionState(for: root.id, selectedIDs: withoutVAE) == .partial,
+        "a folder should show partial selection when only some descendants remain selected"
+    )
+    try check(
+        selection.selectionState(for: methods.id, selectedIDs: withoutVAE) == .partial,
+        "a second-level folder should show partial selection after one third-level child is deselected"
+    )
+    try check(
+        selection.selectionState(for: datasets.id, selectedIDs: withoutVAE) == .all,
+        "an untouched sibling leaf should remain selected"
+    )
+
+    let restored = selection.toggledSelection(categoryID: vae.id, selectedIDs: withoutVAE)
+    try check(
+        selection.selectionState(for: root.id, selectedIDs: restored) == .all,
+        "a parent folder should return to all-selected after every item under it is selected again"
+    )
+}
+
 func runUILayoutSourceChecks() throws {
     let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
     let libraryViewURL = root.appendingPathComponent("Sources/PaperCodexApp/LibraryView.swift")
@@ -2032,6 +2080,12 @@ func runUILayoutSourceChecks() throws {
             && settingsViewSource.contains("SettingsSimilarityCategoryTreeConnector")
             && !settingsViewSource.contains("categoryDisplayName("),
         "settings should expose category-based similarity defaults as a library-style folder tree"
+    )
+    try check(
+        settingsViewSource.contains("CategoryHierarchySelectionState")
+            && settingsViewSource.contains("selectionState:")
+            && !settingsViewSource.contains("selected ? Color.accentColor.opacity(0.10)"),
+        "settings similarity category rows should use tri-state selection styling without painting selected rows"
     )
     try check(
         appModelSource.contains("similarityCategorySources")
@@ -6637,6 +6691,10 @@ do {
     if selectedChecks.isEmpty || selectedChecks.contains("category-move-planner") {
         try runCategoryMovePlannerChecks()
         print("category-move-planner: pass")
+    }
+    if selectedChecks.isEmpty || selectedChecks.contains("category-hierarchy-selection") {
+        try runCategoryHierarchySelectionChecks()
+        print("category-hierarchy-selection: pass")
     }
     if selectedChecks.isEmpty || selectedChecks.contains("ui-layout-source") {
         try runUILayoutSourceChecks()

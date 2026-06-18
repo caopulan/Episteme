@@ -89,6 +89,7 @@ struct SettingsView: View {
     @State private var draftBlacklistTags = ""
     @State private var draftSimilarityCategoryIDs: Set<String> = []
     @State private var collapsedSimilarityCategoryIDs: Set<String> = []
+    @State private var hasInitializedSimilarityCategoryCollapse = false
     @State private var draftAutoEnrichOnOpen = false
     @State private var draftAutoEnrichOnSave = false
     @State private var draftCodexSystemPrompt = PromptBuilder.defaultSystemPrompt
@@ -116,9 +117,10 @@ struct SettingsView: View {
 
     private var isRankingDirty: Bool {
         let preferences = model.localDiscoverPreferences.normalized
+        let selection = CategoryHierarchySelection(categories: model.categories)
         return splitDraftList(draftWhitelistTags) != preferences.whitelistTags
             || splitDraftList(draftBlacklistTags) != preferences.blacklistTags
-            || draftSimilarityCategoryIDs != Set(model.similarityCategoryIDsForSettings())
+            || selection.normalizedSelection(draftSimilarityCategoryIDs) != selection.normalizedSelection(Set(model.similarityCategoryIDsForSettings()))
     }
 
     private var isEnrichmentDirty: Bool {
@@ -398,10 +400,12 @@ struct SettingsView: View {
     }
 
     private var similarityCategoryTree: some View {
+        let selection = CategoryHierarchySelection(categories: model.categories)
         let tree = SettingsSimilarityCategoryTreeSnapshot(
             categories: model.categories,
             collapsedCategoryIDs: collapsedSimilarityCategoryIDs
         )
+        let rootSelectionState = similarityRootSelectionState(selection)
 
         return VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline) {
@@ -426,8 +430,9 @@ struct SettingsView: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         } else {
                             SettingsSimilarityRootFolderRow(
-                                selected: draftSimilarityCategoryIDs.count == model.categories.count,
-                                countText: "\(model.categories.count)"
+                                selectionState: rootSelectionState,
+                                selectedCount: selection.normalizedSelection(draftSimilarityCategoryIDs).count,
+                                totalCount: model.categories.count
                             ) {
                                 toggleAllSimilarityCategories()
                             }
@@ -435,10 +440,13 @@ struct SettingsView: View {
                             ForEach(tree.visibleItems) { item in
                                 SettingsSimilarityCategoryRow(
                                     title: item.category.name,
-                                    selected: draftSimilarityCategoryIDs.contains(item.category.id),
+                                    selectionState: selection.selectionState(
+                                        for: item.category.id,
+                                        selectedIDs: draftSimilarityCategoryIDs
+                                    ),
                                     depth: item.depth,
                                     connectorContinuations: item.connectorContinuations,
-                                    hasChildren: tree.hasChildren(item.category.id),
+                                    hasChildren: selection.hasChildren(item.category.id),
                                     isExpanded: !collapsedSimilarityCategoryIDs.contains(item.category.id),
                                     isPinned: item.category.isPinned,
                                     onToggleExpanded: {
@@ -461,18 +469,21 @@ struct SettingsView: View {
     }
 
     private func toggleSimilarityCategory(_ categoryID: String) {
-        if draftSimilarityCategoryIDs.contains(categoryID) {
-            draftSimilarityCategoryIDs.remove(categoryID)
-        } else {
-            draftSimilarityCategoryIDs.insert(categoryID)
-        }
+        let selection = CategoryHierarchySelection(categories: model.categories)
+        draftSimilarityCategoryIDs = selection.toggledSelection(
+            categoryID: categoryID,
+            selectedIDs: draftSimilarityCategoryIDs
+        )
     }
 
     private func toggleAllSimilarityCategories() {
-        if draftSimilarityCategoryIDs.count == model.categories.count {
+        let selection = CategoryHierarchySelection(categories: model.categories)
+        let selected = selection.normalizedSelection(draftSimilarityCategoryIDs)
+        let allCategoryIDs = Set(model.categories.map(\.id))
+        if !allCategoryIDs.isEmpty, allCategoryIDs.isSubset(of: selected) {
             draftSimilarityCategoryIDs.removeAll()
         } else {
-            draftSimilarityCategoryIDs = Set(model.categories.map(\.id))
+            draftSimilarityCategoryIDs = selection.normalizedSelection(allCategoryIDs)
         }
     }
 
@@ -1050,7 +1061,10 @@ struct SettingsView: View {
         draftArxivCategories = preferences.categories.joined(separator: ", ")
         draftWhitelistTags = preferences.whitelistTags.joined(separator: ", ")
         draftBlacklistTags = preferences.blacklistTags.joined(separator: ", ")
-        draftSimilarityCategoryIDs = Set(model.similarityCategoryIDsForSettings())
+        let selection = CategoryHierarchySelection(categories: model.categories)
+        draftSimilarityCategoryIDs = selection.normalizedSelection(Set(model.similarityCategoryIDsForSettings()))
+        collapsedSimilarityCategoryIDs.formIntersection(Set(model.categories.map(\.id)))
+        initializeDefaultSimilarityCategoryCollapseIfNeeded(selection)
         draftAutoEnrichOnOpen = preferences.enrichment.autoEnrichOnOpen
         draftAutoEnrichOnSave = preferences.enrichment.autoEnrichOnSave
         draftCodexSystemPrompt = model.codexSystemPrompt
@@ -1073,7 +1087,32 @@ struct SettingsView: View {
     }
 
     private var selectedSimilarityCategoryIDsInOrder: [String] {
-        model.categories.map(\.id).filter { draftSimilarityCategoryIDs.contains($0) }
+        CategoryHierarchySelection(categories: model.categories)
+            .orderedSelectedIDs(draftSimilarityCategoryIDs)
+    }
+
+    private func similarityRootSelectionState(
+        _ selection: CategoryHierarchySelection
+    ) -> CategoryHierarchySelectionState {
+        let allCategoryIDs = Set(model.categories.map(\.id))
+        guard !allCategoryIDs.isEmpty else {
+            return .none
+        }
+        let selected = selection.normalizedSelection(draftSimilarityCategoryIDs)
+        if allCategoryIDs.isSubset(of: selected) {
+            return .all
+        }
+        return selected.isDisjoint(with: allCategoryIDs) ? .none : .partial
+    }
+
+    private func initializeDefaultSimilarityCategoryCollapseIfNeeded(
+        _ selection: CategoryHierarchySelection
+    ) {
+        guard !hasInitializedSimilarityCategoryCollapse, !model.categories.isEmpty else {
+            return
+        }
+        collapsedSimilarityCategoryIDs = selection.defaultCollapsedRootCategoryIDs()
+        hasInitializedSimilarityCategoryCollapse = true
     }
 
 }
@@ -1236,29 +1275,84 @@ private enum SettingsSimilarityCategoryLayout {
     }
 }
 
+private extension CategoryHierarchySelectionState {
+    var isActive: Bool {
+        self != .none
+    }
+
+    var isComplete: Bool {
+        self == .all
+    }
+
+    var indicatorSystemImage: String {
+        switch self {
+        case .all:
+            "checkmark.circle.fill"
+        case .partial:
+            "minus.circle.fill"
+        case .none:
+            "circle"
+        }
+    }
+
+    var indicatorTint: Color {
+        switch self {
+        case .all:
+            Color.accentColor
+        case .partial:
+            Color.accentColor.opacity(0.72)
+        case .none:
+            Color.secondary.opacity(0.62)
+        }
+    }
+
+    var strokeOpacity: Double {
+        switch self {
+        case .all:
+            0.24
+        case .partial:
+            0.15
+        case .none:
+            0
+        }
+    }
+
+    var statusBarOpacity: Double {
+        switch self {
+        case .all:
+            0.72
+        case .partial:
+            0.38
+        case .none:
+            0
+        }
+    }
+}
+
 private struct SettingsSimilarityRootFolderRow: View {
     @State private var isHovering = false
 
-    var selected: Bool
-    var countText: String
+    var selectionState: CategoryHierarchySelectionState
+    var selectedCount: Int
+    var totalCount: Int
     var onToggleSelected: () -> Void
 
     var body: some View {
         Button(action: onToggleSelected) {
             HStack(spacing: 8) {
-                Image(systemName: selected ? "tray.full.fill" : "tray.full")
+                Image(systemName: selectionState.isComplete ? "tray.full.fill" : "tray.full")
                     .frame(width: 18)
-                    .foregroundStyle(selected ? Color.accentColor : Color.secondary)
+                    .foregroundStyle(selectionState.isActive ? Color.accentColor : Color.secondary)
                 Text("All Folders")
-                    .font(.paperCodexSystem(size: 13, weight: selected ? .semibold : .medium))
+                    .font(.paperCodexSystem(size: 13, weight: selectionState.isComplete ? .semibold : .medium))
                     .lineLimit(1)
                 Spacer(minLength: 8)
                 Text(countText)
                     .font(.caption2.monospacedDigit())
                     .foregroundStyle(.secondary)
-                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                Image(systemName: selectionState.indicatorSystemImage)
                     .font(.paperCodexSystem(size: 12, weight: .semibold))
-                    .foregroundStyle(selected ? Color.accentColor : Color.secondary.opacity(0.65))
+                    .foregroundStyle(selectionState.indicatorTint)
             }
             .padding(.horizontal, 9)
             .padding(.vertical, 7)
@@ -1268,24 +1362,32 @@ private struct SettingsSimilarityRootFolderRow: View {
         .buttonStyle(.plain)
         .background(
             RoundedRectangle(cornerRadius: 6)
-                .fill(selected ? Color.accentColor.opacity(0.10) : (isHovering ? Color.primary.opacity(0.045) : Color.clear))
+                .fill(isHovering ? Color.primary.opacity(0.045) : Color.clear)
         )
+        .overlay {
+            RoundedRectangle(cornerRadius: 6)
+                .strokeBorder(Color.accentColor.opacity(selectionState.strokeOpacity), lineWidth: 1)
+        }
         .overlay(alignment: .leading) {
-            if selected {
+            if selectionState.isActive {
                 Capsule()
-                    .fill(Color.accentColor.opacity(0.72))
-                    .frame(width: 3, height: 18)
+                    .fill(Color.accentColor.opacity(selectionState.statusBarOpacity))
+                    .frame(width: 3, height: selectionState.isComplete ? 18 : 13)
                     .padding(.leading, 3)
             }
         }
         .animation(PaperCodexMotion.hover, value: isHovering)
-        .animation(PaperCodexMotion.selection, value: selected)
+        .animation(PaperCodexMotion.selection, value: selectionState)
         .onHover { hovering in
             withAnimation(PaperCodexMotion.hover) {
                 isHovering = hovering
             }
         }
-        .help(selected ? "Deselect all library folders" : "Select all library folders")
+        .help(selectionState.isComplete ? "Deselect all library folders" : "Select all library folders")
+    }
+
+    private var countText: String {
+        selectionState.isComplete ? "\(totalCount)" : "\(selectedCount)/\(totalCount)"
     }
 }
 
@@ -1293,7 +1395,7 @@ private struct SettingsSimilarityCategoryRow: View {
     @State private var isHovering = false
 
     var title: String
-    var selected: Bool
+    var selectionState: CategoryHierarchySelectionState
     var depth: Int
     var connectorContinuations: [Bool]
     var hasChildren: Bool
@@ -1308,7 +1410,7 @@ private struct SettingsSimilarityCategoryRow: View {
                 Button(action: folderButtonAction) {
                     Image(systemName: folderIconName)
                         .frame(width: SettingsSimilarityCategoryLayout.folderIconWidth)
-                        .foregroundStyle(selected || isExpanded ? Color.accentColor : Color.secondary)
+                        .foregroundStyle(selectionState.isActive || isExpanded ? Color.accentColor : Color.secondary)
                 }
                 .buttonStyle(.plain)
                 .help(folderIconHelp)
@@ -1316,7 +1418,7 @@ private struct SettingsSimilarityCategoryRow: View {
                 Button(action: onToggleSelected) {
                     HStack(spacing: 0) {
                         Text(title)
-                            .font(.paperCodexSystem(size: 13, weight: selected ? .semibold : .medium))
+                            .font(.paperCodexSystem(size: 13, weight: selectionState.isComplete ? .semibold : .medium))
                             .lineLimit(1)
                         Spacer(minLength: 52)
                     }
@@ -1330,13 +1432,17 @@ private struct SettingsSimilarityCategoryRow: View {
             .padding(.vertical, 7)
             .background(
                 RoundedRectangle(cornerRadius: 6)
-                    .fill(selected ? Color.accentColor.opacity(0.10) : (isHovering ? Color.primary.opacity(0.045) : Color.clear))
+                    .fill(isHovering ? Color.primary.opacity(0.045) : Color.clear)
             )
+            .overlay {
+                RoundedRectangle(cornerRadius: 6)
+                    .strokeBorder(Color.accentColor.opacity(selectionState.strokeOpacity), lineWidth: 1)
+            }
             .overlay(alignment: .leading) {
-                if selected {
+                if selectionState.isActive {
                     Capsule()
-                        .fill(Color.accentColor.opacity(0.72))
-                        .frame(width: 3, height: 18)
+                        .fill(Color.accentColor.opacity(selectionState.statusBarOpacity))
+                        .frame(width: 3, height: selectionState.isComplete ? 18 : 13)
                         .padding(.leading, 3)
                 }
             }
@@ -1356,14 +1462,14 @@ private struct SettingsSimilarityCategoryRow: View {
                         .font(.caption2)
                         .foregroundStyle(Color.accentColor.opacity(0.72))
                 }
-                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                Image(systemName: selectionState.indicatorSystemImage)
                     .font(.paperCodexSystem(size: 12, weight: .semibold))
-                    .foregroundStyle(selected ? Color.accentColor : Color.secondary.opacity(0.65))
+                    .foregroundStyle(selectionState.indicatorTint)
             }
             .padding(.trailing, 8)
         }
         .animation(PaperCodexMotion.hover, value: isHovering)
-        .animation(PaperCodexMotion.selection, value: selected)
+        .animation(PaperCodexMotion.selection, value: selectionState)
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
         .onHover { hovering in
