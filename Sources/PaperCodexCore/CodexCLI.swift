@@ -830,23 +830,31 @@ public struct CodexCLI: Sendable {
 
     public func availableModelIDs(configText: String? = nil) throws -> [String] {
         let version = try version()
-        let data = try Data(contentsOf: URL(fileURLWithPath: executablePath))
-        let embeddedText = String(decoding: data, as: UTF8.self)
+        let data = try? Data(contentsOf: URL(fileURLWithPath: executablePath))
+        let embeddedText = data.map { String(decoding: $0, as: UTF8.self) }
+        let catalogText = try? run(arguments: ["debug", "models"])
         return Self.availableModelIDs(
             cliVersion: version,
             embeddedText: embeddedText,
-            configText: configText ?? Self.readDefaultConfig(environment: ProcessInfo.processInfo.environment)
+            configText: configText ?? Self.readDefaultConfig(environment: ProcessInfo.processInfo.environment),
+            catalogText: catalogText
         )
     }
 
     public static func availableModelIDs(
         cliVersion: String?,
         embeddedText: String?,
-        configText: String?
+        configText: String?,
+        catalogText: String? = nil
     ) -> [String] {
         var models: Set<String> = []
         for fallback in fallbackModelIDs {
             models.insert(fallback)
+        }
+        if let catalogText {
+            for model in extractCatalogModelIDs(from: catalogText) {
+                models.insert(model)
+            }
         }
         if let configured = configText.flatMap(parseConfiguredModel(from:)) {
             models.insert(configured)
@@ -876,8 +884,29 @@ public struct CodexCLI: Sendable {
         "gpt-5-codex"
     ]
 
+    private static func extractCatalogModelIDs(from text: String) -> [String] {
+        guard let data = text.data(using: .utf8),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let entries = root["models"] as? [[String: Any]] else {
+            return []
+        }
+
+        var seen: Set<String> = []
+        var result: [String] = []
+        for entry in entries {
+            guard (entry["visibility"] as? String) == "list",
+                  let slug = entry["slug"] as? String,
+                  !seen.contains(slug) else {
+                continue
+            }
+            seen.insert(slug)
+            result.append(slug)
+        }
+        return result
+    }
+
     private static func extractEmbeddedModelIDs(from text: String) -> [String] {
-        let pattern = #"\bgpt-(?:oss-\d+b|\d+[a-z]?(?:\.\d+)*(?:-(?:codex|max|mini|nano|latest))*)\b"#
+        let pattern = #"\bgpt-(?:oss-\d+b|\d+[a-z]?(?:\.\d+)*(?:-(?:codex|max|mini|nano|spark|latest))*)\b"#
         guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
             return []
         }

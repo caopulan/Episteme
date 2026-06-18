@@ -4791,12 +4791,22 @@ func runCodexCLIChecks() throws {
 
     let detectedModels = CodexCLI.availableModelIDs(
         cliVersion: "0.120.0",
-        embeddedText: "gpt-5.4 gpt-5.3-codex gpt-5.1-codex-mini gpt-5-4 gpt-account-id gptAuthTokens gpt.com",
-        configText: #"model = "gpt-5.2""#
+        embeddedText: "gpt-5.4 gpt-5.3-codex-spark gpt-5.1-codex-mini gpt-5-4 gpt-account-id gptAuthTokens gpt.com",
+        configText: #"model = "gpt-5.2""#,
+        catalogText: """
+        {
+          "models": [
+            {"slug": "gpt-5.3-codex-spark", "display_name": "GPT-5.3-Codex-Spark", "visibility": "list", "supported_in_api": false},
+            {"slug": "codex-auto-review", "display_name": "Codex Auto Review", "visibility": "hide", "supported_in_api": true}
+          ]
+        }
+        """
     )
     try check(detectedModels.contains("gpt-5.4"), "Codex model detector should include embedded GPT models")
     try check(detectedModels.contains("gpt-5.1-codex-mini"), "Codex model detector should include embedded Codex model variants")
+    try check(detectedModels.contains("gpt-5.3-codex-spark"), "Codex model detector should include visible Codex catalog models")
     try check(detectedModels.contains("gpt-5.2"), "Codex model detector should include the configured model")
+    try check(!detectedModels.contains("codex-auto-review"), "Codex model detector should filter hidden catalog models")
     try check(!detectedModels.contains("gpt-account-id"), "Codex model detector should filter telemetry strings")
     try check(!detectedModels.contains("gptAuthTokens"), "Codex model detector should filter auth implementation strings")
     try check(!detectedModels.contains("gpt-5-4"), "Codex model detector should filter hyphenated version noise")
