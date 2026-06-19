@@ -4054,6 +4054,18 @@ func runCitationChecks() throws {
     try check(manyCitations.citations.map(\.displayIndex) == [1, 2, 3], "citation parser should cap visible citations")
     try check(!manyCitations.displayMarkdown.contains("p1%3Ab4"), "citation parser should omit citation links above the visible cap")
     try check(manyCitations.displayText == "A [1] B [2] C [3] D ", "citation parser should remove extra citation markers from display text")
+
+    let copyWithoutCitations = CitationParser.parse(
+        "Markdown **answer**. [[cite:paper:paper-a:p1:b1]]\n\n- Keep structure [[cite:paper:paper-a:p1:b2]]",
+        maxVisibleCitations: 0
+    )
+    try check(copyWithoutCitations.citations.isEmpty, "copy parsing should not expose citation metadata")
+    try check(
+        copyWithoutCitations.displayMarkdown == "Markdown **answer**. \n\n- Keep structure ",
+        "copy parsing should preserve markdown body while removing citation markers"
+    )
+    try check(!copyWithoutCitations.displayMarkdown.contains("papercodex-cite://"), "copy parsing should not emit citation links")
+
     try check(
         CitationParser.baseSpanCitationID(for: "paper:paper-a:p1:b17s2") == "paper:paper-a:p1:b17",
         "split citation aliases should resolve to their original span citation"

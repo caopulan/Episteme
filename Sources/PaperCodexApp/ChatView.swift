@@ -1550,6 +1550,8 @@ private struct CodexRunEventRow: View {
 }
 
 private struct MessageBubble: View {
+    @State private var didCopyMarkdown = false
+
     var message: ChatMessage
     var isBusy: Bool
     var messageFontSize: Double
@@ -1587,6 +1589,15 @@ private struct MessageBubble: View {
             return parsedUserSource.visibleContent
         }
         return parsed.displayMarkdown
+    }
+
+    private var copyMarkdown: String {
+        if let failureNotice {
+            return failureNotice.messageContent
+        }
+        return CitationParser.parse(message.content, maxVisibleCitations: 0)
+            .displayMarkdown
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private var chatBubbleContentWidth: CGFloat? {
@@ -1654,6 +1665,7 @@ private struct MessageBubble: View {
                 messageHeader
                 messageContent
                     .frame(maxWidth: .infinity, alignment: .leading)
+                copyMarkdownButton
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -1724,6 +1736,38 @@ private struct MessageBubble: View {
             )
             .frame(maxWidth: .infinity, alignment: .leading)
             .layoutPriority(1)
+        }
+    }
+
+    @ViewBuilder
+    private var copyMarkdownButton: some View {
+        if !copyMarkdown.isEmpty {
+            Button {
+                copyMarkdownToPasteboard()
+            } label: {
+                Image(systemName: didCopyMarkdown ? "checkmark" : "doc.on.doc")
+                    .font(.paperCodexSystem(size: 11.5, weight: .semibold))
+                    .frame(width: 24, height: 22)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(didCopyMarkdown ? Color.green : Color.secondary.opacity(0.72))
+            .background(
+                Circle()
+                    .fill(didCopyMarkdown ? Color.green.opacity(0.12) : Color.clear)
+            )
+            .help(didCopyMarkdown ? "Copied Markdown" : "Copy Markdown")
+            .accessibilityLabel(didCopyMarkdown ? "Copied Markdown" : "Copy Markdown")
+            .padding(.top, -2)
+        }
+    }
+
+    private func copyMarkdownToPasteboard() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(copyMarkdown, forType: .string)
+        didCopyMarkdown = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+            didCopyMarkdown = false
         }
     }
 }
