@@ -1551,6 +1551,7 @@ private struct CodexRunEventRow: View {
 
 private struct MessageBubble: View {
     @State private var didCopyMarkdown = false
+    @State private var isCopyMarkdownButtonHovered = false
 
     var message: ChatMessage
     var isBusy: Bool
@@ -1629,6 +1630,27 @@ private struct MessageBubble: View {
 
     private var chatBubbleMaximumContentWidth: CGFloat {
         PaperCodexTypography.readableLineWidth - 26
+    }
+
+    private var copyMarkdownButtonForeground: Color {
+        if didCopyMarkdown {
+            return .green
+        }
+        return isCopyMarkdownButtonHovered ? .accentColor : Color.secondary.opacity(0.72)
+    }
+
+    private var copyMarkdownButtonBackground: Color {
+        if didCopyMarkdown {
+            return Color.green.opacity(0.12)
+        }
+        return isCopyMarkdownButtonHovered ? Color.accentColor.opacity(0.10) : Color.clear
+    }
+
+    private var copyMarkdownButtonBorder: Color {
+        if didCopyMarkdown {
+            return Color.green.opacity(0.34)
+        }
+        return isCopyMarkdownButtonHovered ? Color.accentColor.opacity(0.28) : Color.clear
     }
 
     var body: some View {
@@ -1751,13 +1773,25 @@ private struct MessageBubble: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .foregroundStyle(didCopyMarkdown ? Color.green : Color.secondary.opacity(0.72))
+            .foregroundStyle(copyMarkdownButtonForeground)
             .background(
                 Circle()
-                    .fill(didCopyMarkdown ? Color.green.opacity(0.12) : Color.clear)
+                    .fill(copyMarkdownButtonBackground)
             )
+            .overlay(
+                Circle()
+                    .stroke(copyMarkdownButtonBorder, lineWidth: 1)
+            )
+            .shadow(color: isCopyMarkdownButtonHovered ? Color.accentColor.opacity(0.12) : Color.clear, radius: 4, y: 1)
+            .scaleEffect(isCopyMarkdownButtonHovered ? 1.06 : 1, anchor: .center)
             .help(didCopyMarkdown ? "Copied Markdown" : "Copy Markdown")
             .accessibilityLabel(didCopyMarkdown ? "Copied Markdown" : "Copy Markdown")
+            .onHover { hovering in
+                withAnimation(PaperCodexMotion.hover) {
+                    isCopyMarkdownButtonHovered = hovering
+                }
+            }
+            .animation(PaperCodexMotion.hover, value: didCopyMarkdown)
             .padding(.top, -2)
         }
     }
