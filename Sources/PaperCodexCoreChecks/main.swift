@@ -3121,8 +3121,10 @@ func runUILayoutSourceChecks() throws {
         "Discover feed rendering should reuse one visible-paper snapshot and avoid building long string layout signatures in body"
     )
     try check(
-        appModelSource.contains("cachedSearchResult = try loadCachedDiscoverSearch(query: query, allowPartialFragments: true)")
-            && appModelSource.contains("if cachedSearchResult == .complete")
+        appModelSource.contains("cachedSearchResult = try await loadAndDisplayCachedDiscoverSearch(query: query, allowPartialFragments: true)")
+            && appModelSource.contains("Task.detached(priority: .userInitiated)")
+            && appModelSource.contains("loadCachedDiscoverSearchSnapshot")
+            && appModelSource.contains("if cachedSearchResult.isComplete")
             && appModelSource.contains("cacheQueryResult:")
             && appModelSource.contains("guard !feed.papers.isEmpty else")
             && appModelSource.contains("try loadDiscoverEnrichments(for: feed.papers)"),
@@ -3131,10 +3133,22 @@ func runUILayoutSourceChecks() throws {
     try check(
         appModelSource.contains("resetStaleDiscoverSearchTaskIfNeeded()")
             && appModelSource.contains("resetStaleArxivSearchTaskIfNeeded()")
-            && appModelSource.contains("defer {\n                self?.activeDiscoverSearchTask = nil\n            }")
+            && appModelSource.contains("await MainActor.run {\n                self?.activeDiscoverSearchTask = nil\n            }")
             && appModelSource.contains("defer {\n                self?.activeArxivSearchTask = nil\n            }"),
         "Discover and arXiv search buttons should recover if a stale task reference blocks a new search"
     )
+    if let startDiscoverSearchRange = appModelSource.range(of: "func startDiscoverSearch()"),
+       let startArxivSearchRange = appModelSource.range(of: "func startArxivSearch()", range: startDiscoverSearchRange.upperBound..<appModelSource.endIndex) {
+        let startDiscoverSearchSource = String(appModelSource[startDiscoverSearchRange.lowerBound..<startArxivSearchRange.lowerBound])
+        try check(
+            startDiscoverSearchSource.contains("isSearchingDiscover = true")
+                && startDiscoverSearchSource.contains("await Task.yield()")
+                && !startDiscoverSearchSource.contains("Task { @MainActor"),
+            "Discover search should mark Searching Explore before deferred cache or network work can occupy the main actor"
+        )
+    } else {
+        try check(false, "Discover search startup source should remain inspectable")
+    }
     try check(
         appModelSource.contains("selectedArxivDate = nil")
             && appModelSource.contains("syncDiscoverControlsFromCachedDateIfNeeded(state.selectedDate)")
