@@ -90,14 +90,15 @@ enum DiscoverCacheLoader {
 
     private static func apply(preferences: LocalDiscoverPreferences, to feed: ArxivFeedResponse) -> ArxivFeedResponse {
         let normalized = preferences.normalized
+        let deduplicatedFeed = feed.deduplicatedByCanonicalID()
         let rankedPapers = SimilarityRanker.rank(
-            papers: feed.papers,
+            papers: deduplicatedFeed.papers,
             whitelistTags: normalized.whitelistTags,
             blacklistTags: normalized.blacklistTags,
             interestVectors: []
         )
         return ArxivFeedResponse(
-            date: feed.date,
+            date: deduplicatedFeed.date,
             count: rankedPapers.count,
             papers: rankedPapers,
             groups: [

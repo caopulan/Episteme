@@ -135,6 +135,34 @@ public struct ArxivFeedAssets: Codable, Equatable, Sendable {
 }
 
 public extension ArxivFeedResponse {
+    func deduplicatedByCanonicalID(preservingCount: Bool = false) -> ArxivFeedResponse {
+        var papersByID: [String: ArxivFeedPaper] = [:]
+        var orderedIDs: [String] = []
+        for paper in papers {
+            let canonicalID = paper.canonicalArxivFeedID
+            guard !canonicalID.isEmpty else {
+                continue
+            }
+            var normalizedPaper = paper
+            normalizedPaper.id = canonicalID
+            normalizedPaper.arxivID = canonicalID
+            if let existing = papersByID[canonicalID] {
+                papersByID[canonicalID] = existing.mergingDiscoverDuplicate(normalizedPaper)
+            } else {
+                papersByID[canonicalID] = normalizedPaper
+                orderedIDs.append(canonicalID)
+            }
+        }
+        let uniquePapers = orderedIDs.compactMap { papersByID[$0] }
+        return ArxivFeedResponse(
+            date: date,
+            count: preservingCount ? count : uniquePapers.count,
+            papers: uniquePapers,
+            groups: groups,
+            tagOptions: tagOptions
+        )
+    }
+
     func uniqueAssets(includeLarge: Bool) -> [ArxivFeedAsset] {
         var result: [ArxivFeedAsset] = []
         var seen: Set<String> = []
@@ -154,6 +182,105 @@ public extension ArxivFeedResponse {
         }
         return result
     }
+}
+
+private extension ArxivFeedPaper {
+    var canonicalArxivFeedID: String {
+        for candidate in [arxivID, id, arxivIDVersioned].compactMap({ $0 }) {
+            let normalized = LocalArxivClient.normalizeArxivID(candidate)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !normalized.isEmpty {
+                return normalized
+            }
+        }
+        return ""
+    }
+
+    func mergingDiscoverDuplicate(_ duplicate: ArxivFeedPaper) -> ArxivFeedPaper {
+        var merged = self
+        merged.arxivIDVersioned = preferredNonEmpty(arxivIDVersioned, duplicate.arxivIDVersioned)
+        merged.title = title.mergingMissingText(from: duplicate.title)
+        merged.abstract = abstract.mergingMissingText(from: duplicate.abstract)
+        merged.summary = summary.mergingMissingText(from: duplicate.summary)
+        merged.authors = authors.isEmpty ? duplicate.authors : authors
+        merged.categories = mergedUnique(categories, duplicate.categories)
+        merged.primaryCategory = preferredNonEmpty(primaryCategory, duplicate.primaryCategory)
+        merged.listCategories = mergedUnique(listCategories, duplicate.listCategories)
+        merged.tags = mergedUnique(tags, duplicate.tags)
+        merged.comment = preferredNonEmpty(comment, duplicate.comment)
+        merged.published = preferredNonEmpty(published, duplicate.published)
+        merged.updated = preferredNonEmpty(updated, duplicate.updated)
+        merged.listDate = preferredNonEmpty(listDate, duplicate.listDate)
+        merged.thumbnailVersion = thumbnailVersion ?? duplicate.thumbnailVersion
+        merged.embedding = embedding ?? duplicate.embedding
+        merged.similarity = similarity ?? duplicate.similarity
+        merged.filterGroup = preferredNonEmpty(filterGroup, duplicate.filterGroup)
+        merged.links = links.mergingMissingLinks(from: duplicate.links)
+        merged.assets = assets.mergingMissingAssets(from: duplicate.assets)
+        return merged
+    }
+}
+
+private extension ArxivLocalizedText {
+    func mergingMissingText(from duplicate: ArxivLocalizedText) -> ArxivLocalizedText {
+        ArxivLocalizedText(
+            en: preferredNonEmpty(en, duplicate.en),
+            zh: preferredNonEmpty(zh, duplicate.zh)
+        )
+    }
+}
+
+private extension ArxivFeedLinks {
+    func mergingMissingLinks(from duplicate: ArxivFeedLinks) -> ArxivFeedLinks {
+        ArxivFeedLinks(
+            abs: abs ?? duplicate.abs,
+            pdf: pdf ?? duplicate.pdf,
+            github: github ?? duplicate.github,
+            code: code ?? duplicate.code,
+            project: project ?? duplicate.project,
+            huggingFace: huggingFace ?? duplicate.huggingFace
+        )
+    }
+}
+
+private extension ArxivFeedAssets {
+    func mergingMissingAssets(from duplicate: ArxivFeedAssets) -> ArxivFeedAssets {
+        ArxivFeedAssets(
+            small: small ?? duplicate.small,
+            large: large ?? duplicate.large
+        )
+    }
+}
+
+private func preferredNonEmpty(_ current: String?, _ duplicate: String?) -> String? {
+    let currentValue = current?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    if !currentValue.isEmpty {
+        return current
+    }
+    let duplicateValue = duplicate?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    return duplicateValue.isEmpty ? current : duplicate
+}
+
+private func preferredNonEmpty(_ current: String, _ duplicate: String) -> String {
+    current.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? duplicate : current
+}
+
+private func mergedUnique(_ first: [String], _ second: [String]) -> [String] {
+    var seen: Set<String> = []
+    var result: [String] = []
+    for value in first + second {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            continue
+        }
+        let key = trimmed.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+        guard !seen.contains(key) else {
+            continue
+        }
+        seen.insert(key)
+        result.append(value)
+    }
+    return result
 }
 
 public struct ArxivFeedPaper: Codable, Equatable, Identifiable, Sendable {

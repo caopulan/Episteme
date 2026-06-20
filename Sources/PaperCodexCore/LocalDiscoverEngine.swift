@@ -201,6 +201,7 @@ public extension ArxivFeedResponse {
             count: scopedPapers.count,
             papers: scopedPapers
         )
+        .deduplicatedByCanonicalID()
     }
 }
 

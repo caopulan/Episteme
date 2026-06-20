@@ -229,12 +229,13 @@ private enum CachedDiscoverSearchLoadResult: Equatable, Sendable {
 }
 
 private func filteredDiscoverFeed(_ feed: ArxivFeedResponse, keyword: String) -> ArxivFeedResponse {
+    let deduplicatedFeed = feed.deduplicatedByCanonicalID(preservingCount: feed.date == "search")
     let query = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !query.isEmpty else {
-        return feed
+        return deduplicatedFeed
     }
     let terms = query.lowercased().split(separator: " ").map(String.init)
-    let papers = feed.papers.filter { paper in
+    let papers = deduplicatedFeed.papers.filter { paper in
         let haystack = [
             paper.id,
             paper.title.en,
@@ -253,12 +254,13 @@ private func filteredDiscoverFeed(_ feed: ArxivFeedResponse, keyword: String) ->
         return terms.allSatisfy { haystack.contains($0) }
     }
     return ArxivFeedResponse(
-        date: feed.date,
+        date: deduplicatedFeed.date,
         count: papers.count,
         papers: papers,
-        groups: feed.groups,
-        tagOptions: feed.tagOptions
+        groups: deduplicatedFeed.groups,
+        tagOptions: deduplicatedFeed.tagOptions
     )
+    .deduplicatedByCanonicalID()
 }
 
 private func loadCachedDiscoverSearchSnapshot(
@@ -339,6 +341,7 @@ private func mergedCachedDiscoverFeed(
         count: papers.count,
         papers: papers
     )
+    .deduplicatedByCanonicalID()
 }
 
 private struct DiscoverSimilarityCategorySource {
@@ -5335,19 +5338,21 @@ final class AppModel: ObservableObject {
     }
 
     private func resetDiscoverRanking(in feed: ArxivFeedResponse) -> ArxivFeedResponse {
-        let papers = feed.papers.map { paper -> ArxivFeedPaper in
+        let deduplicatedFeed = feed.deduplicatedByCanonicalID()
+        let papers = deduplicatedFeed.papers.map { paper -> ArxivFeedPaper in
             var resetPaper = paper
             resetPaper.similarity = nil
             resetPaper.filterGroup = nil
             return resetPaper
         }
         return ArxivFeedResponse(
-            date: feed.date,
+            date: deduplicatedFeed.date,
             count: papers.count,
             papers: papers,
-            groups: feed.groups,
-            tagOptions: feed.tagOptions
+            groups: deduplicatedFeed.groups,
+            tagOptions: deduplicatedFeed.tagOptions
         )
+        .deduplicatedByCanonicalID()
     }
 
     private func filterDiscoverFeed(_ feed: ArxivFeedResponse, keyword: String) -> ArxivFeedResponse {
@@ -5790,10 +5795,11 @@ final class AppModel: ObservableObject {
     }
 
     private func applyDiscoverRanking(to feed: ArxivFeedResponse, query: DiscoverQuery) async throws -> ArxivFeedResponse {
+        let deduplicatedFeed = feed.deduplicatedByCanonicalID()
         let preferences = localDiscoverPreferences.normalized
         let sourceIDs = query.similaritySourceIDs
         guard preferences.embedding.enabled, !sourceIDs.isEmpty else {
-            return applyLocalDiscoverPreferences(to: feed)
+            return applyLocalDiscoverPreferences(to: deduplicatedFeed)
         }
 
         let embeddingSettings = preferences.embedding
@@ -5801,14 +5807,14 @@ final class AppModel: ObservableObject {
         let apiKey = embeddingProviderAPIKeyValue().trimmingCharacters(in: .whitespacesAndNewlines)
         guard !embeddingSettings.baseURL.isEmpty, !model.isEmpty, !apiKey.isEmpty else {
             errorMessage = "Embedding similarity is enabled, but Base URL, API key, or model is missing."
-            return applyLocalDiscoverPreferences(to: feed)
+            return applyLocalDiscoverPreferences(to: deduplicatedFeed)
         }
 
         let categorySources = similarityCategorySources(for: sourceIDs)
         let sourcePapers = uniquePapers(categorySources.flatMap(\.papers))
         guard !categorySources.isEmpty, !sourcePapers.isEmpty else {
             errorMessage = "No library papers matched the selected similarity source."
-            return applyLocalDiscoverPreferences(to: feed)
+            return applyLocalDiscoverPreferences(to: deduplicatedFeed)
         }
 
         guard let repository else {
@@ -5820,7 +5826,7 @@ final class AppModel: ObservableObject {
             title: "Embedding ranking",
             detail: "Preparing \(sourcePapers.count) library sources",
             completed: 0,
-            total: sourcePapers.count + feed.papers.count
+            total: sourcePapers.count + deduplicatedFeed.papers.count
         )
 
         let client = try OpenAICompatibleEmbeddingClient(settings: embeddingSettings, apiKey: apiKey)
@@ -5845,10 +5851,10 @@ final class AppModel: ObservableObject {
             }
         }
         guard !interestVectorGroups.flatMap({ $0 }).isEmpty else {
-            return applyLocalDiscoverPreferences(to: feed)
+            return applyLocalDiscoverPreferences(to: deduplicatedFeed)
         }
 
-        let paperInputs = feed.papers.map { paper in
+        let paperInputs = deduplicatedFeed.papers.map { paper in
             DiscoverEmbeddingInput(
                 sourceID: "arxiv:\(paper.id)",
                 text: trimmedEmbeddingText(DiscoverEmbeddingText.arxivPaperText(paper))
@@ -5864,7 +5870,7 @@ final class AppModel: ObservableObject {
         )
 
         let vectorsByID = Dictionary(uniqueKeysWithValues: zip(paperInputs.map(\.sourceID), paperVectors))
-        let papersWithEmbeddings = feed.papers.map { paper -> ArxivFeedPaper in
+        let papersWithEmbeddings = deduplicatedFeed.papers.map { paper -> ArxivFeedPaper in
             var rankedPaper = paper
             rankedPaper.embedding = vectorsByID["arxiv:\(paper.id)"]
             return rankedPaper
@@ -5883,7 +5889,7 @@ final class AppModel: ObservableObject {
             total: rankedPapers.count
         )
         return ArxivFeedResponse(
-            date: feed.date,
+            date: deduplicatedFeed.date,
             count: rankedPapers.count,
             papers: rankedPapers,
             groups: [
@@ -5893,6 +5899,7 @@ final class AppModel: ObservableObject {
             ],
             tagOptions: Array(Set(rankedPapers.flatMap(\.tags))).sorted()
         )
+        .deduplicatedByCanonicalID()
     }
 
     private func rerankEmbeddedDiscoverFeed(
@@ -5902,16 +5909,17 @@ final class AppModel: ObservableObject {
         progressDate: String,
         progressTitle: String
     ) async throws -> ArxivFeedResponse {
+        let deduplicatedFeed = feed.deduplicatedByCanonicalID(preservingCount: feed.date == "search")
         let preferences = localDiscoverPreferences.normalized
         let sourceIDs = effectiveDiscoverSimilaritySourceIDs()
         guard preferences.embedding.enabled, !sourceIDs.isEmpty else {
-            return applyLocalDiscoverPreferences(to: feed)
+            return applyLocalDiscoverPreferences(to: deduplicatedFeed)
         }
 
         let categorySources = similarityCategorySources(for: sourceIDs)
         let sourcePapers = uniquePapers(categorySources.flatMap(\.papers))
         guard !categorySources.isEmpty, !sourcePapers.isEmpty else {
-            return applyLocalDiscoverPreferences(to: feed)
+            return applyLocalDiscoverPreferences(to: deduplicatedFeed)
         }
 
         guard let repository else {
@@ -5940,11 +5948,11 @@ final class AppModel: ObservableObject {
             }
         }
         guard !interestVectorGroups.flatMap({ $0 }).isEmpty else {
-            return applyLocalDiscoverPreferences(to: feed)
+            return applyLocalDiscoverPreferences(to: deduplicatedFeed)
         }
 
         let rankedPapers = SimilarityRanker.rank(
-            papers: feed.papers,
+            papers: deduplicatedFeed.papers,
             whitelistTags: preferences.whitelistTags,
             blacklistTags: preferences.blacklistTags,
             interestVectorGroups: interestVectorGroups
@@ -5957,8 +5965,8 @@ final class AppModel: ObservableObject {
             total: rankedPapers.count
         )
         return ArxivFeedResponse(
-            date: feed.date,
-            count: feed.count,
+            date: deduplicatedFeed.date,
+            count: deduplicatedFeed.count,
             papers: rankedPapers,
             groups: [
                 ArxivFeedGroup(key: "white", count: rankedPapers.filter { $0.filterGroup == "white" }.count),
@@ -5967,6 +5975,7 @@ final class AppModel: ObservableObject {
             ],
             tagOptions: Array(Set(rankedPapers.flatMap(\.tags))).sorted()
         )
+        .deduplicatedByCanonicalID(preservingCount: deduplicatedFeed.date == "search")
     }
 
     private func cachedEmbeddings(
@@ -6168,15 +6177,16 @@ final class AppModel: ObservableObject {
 
     private func applyLocalDiscoverPreferences(to feed: ArxivFeedResponse) -> ArxivFeedResponse {
         let preferences = localDiscoverPreferences.normalized
+        let deduplicatedFeed = feed.deduplicatedByCanonicalID(preservingCount: feed.date == "search")
         let rankedPapers = SimilarityRanker.rank(
-            papers: feed.papers,
+            papers: deduplicatedFeed.papers,
             whitelistTags: preferences.whitelistTags,
             blacklistTags: preferences.blacklistTags,
             interestVectors: []
         )
         return ArxivFeedResponse(
-            date: feed.date,
-            count: rankedPapers.count,
+            date: deduplicatedFeed.date,
+            count: deduplicatedFeed.date == "search" ? deduplicatedFeed.count : rankedPapers.count,
             papers: rankedPapers,
             groups: [
                 ArxivFeedGroup(key: "white", count: rankedPapers.filter { $0.filterGroup == "white" }.count),
@@ -6185,6 +6195,7 @@ final class AppModel: ObservableObject {
             ],
             tagOptions: Array(Set(rankedPapers.flatMap(\.tags))).sorted()
         )
+        .deduplicatedByCanonicalID(preservingCount: deduplicatedFeed.date == "search")
     }
 
     private func fetchArxivAsset(_ asset: ArxivFeedAsset) async throws -> Data {
@@ -6690,6 +6701,7 @@ private extension ArxivFeedResponse {
             groups: groups,
             tagOptions: tagOptions
         )
+        .deduplicatedByCanonicalID(preservingCount: date == "search")
     }
 }
 

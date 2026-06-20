@@ -5774,6 +5774,52 @@ func runArxivFeedChecks() throws {
     try check(paper.similarity == 0.91, "arXiv paper should decode similarity score")
     try check(paper.filterGroup == "white", "arXiv paper should decode local filter group")
 
+    var duplicatePaper = paper
+    duplicatePaper.categories = ["cs.AI", "cs.CL"]
+    duplicatePaper.listCategories = ["cs.CL"]
+    duplicatePaper.tags = ["SSL", "retrieval"]
+    duplicatePaper.embedding = [0.4, 0.5, 0.6]
+    duplicatePaper.links = ArxivFeedLinks(
+        abs: nil,
+        pdf: nil,
+        github: nil,
+        code: nil,
+        project: nil,
+        huggingFace: "https://huggingface.co/example/updated-paper"
+    )
+    duplicatePaper.assets = ArxivFeedAssets(
+        small: nil,
+        large: ArxivFeedAsset(path: "images/2026-04-22/2604.18586-large-v2.png", url: "/api/v1/assets/updated.png")
+    )
+    let duplicatedFeed = ArxivFeedResponse(date: "2026-04-22", count: 2, papers: [paper, duplicatePaper])
+    let deduplicatedFeed = duplicatedFeed.deduplicatedByCanonicalID()
+    try check(deduplicatedFeed.count == 1, "deduplicated arXiv feeds should report the unique paper count")
+    try check(deduplicatedFeed.papers.map(\.id) == ["2604.18586"], "deduplicated arXiv feeds should keep one card per canonical id")
+    try check(
+        deduplicatedFeed.papers[0].categories == ["cs.CY", "cs.AI", "cs.CL"],
+        "deduplicated arXiv feeds should merge category metadata while preserving first-seen order"
+    )
+    try check(
+        deduplicatedFeed.papers[0].listCategories == ["cs.AI", "cs.CL"],
+        "deduplicated arXiv feeds should merge listing categories"
+    )
+    try check(
+        deduplicatedFeed.papers[0].tags == ["text-cls", "SSL", "retrieval"],
+        "deduplicated arXiv feeds should merge tags"
+    )
+    try check(
+        deduplicatedFeed.papers[0].embedding == [0.1, 0.2, 0.3],
+        "deduplicated arXiv feeds should preserve the first available embedding"
+    )
+    try check(
+        deduplicatedFeed.papers[0].links.huggingFace == "https://huggingface.co/example/paper",
+        "deduplicated arXiv feeds should preserve the first available link value"
+    )
+    try check(
+        duplicatedFeed.deduplicatedByCanonicalID(preservingCount: true).count == 2,
+        "deduplicated search feeds should be able to preserve provider total counts"
+    )
+
     let quickPrompt = QuickPrompt(
         id: "qp-summary",
         title: "Summarize",

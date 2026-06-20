@@ -156,6 +156,7 @@ public final class LocalArxivClient: Sendable {
 
         let papers = try await fetchMetadata(ids: ids, listDate: date, listCategoriesByID: listCategoriesByID)
         return ArxivFeedResponse(date: date, count: papers.count, papers: papers)
+            .deduplicatedByCanonicalID()
     }
 
     public func fetchFeed(range: DiscoverDateRange) async throws -> ArxivFeedResponse {
@@ -210,6 +211,7 @@ public final class LocalArxivClient: Sendable {
         }
 
         return ArxivFeedResponse(date: rangeLabel, count: papers.count, papers: papers)
+            .deduplicatedByCanonicalID()
     }
 
     public func search(query: String,
@@ -250,6 +252,7 @@ public final class LocalArxivClient: Sendable {
                 return datedPaper
             }
         return ArxivFeedResponse(date: "search", count: totalResults ?? papers.count, papers: papers)
+            .deduplicatedByCanonicalID(preservingCount: totalResults != nil)
     }
 
     public func fetchPapers(ids: [String], listDate: String = "library-import") async throws -> [ArxivFeedPaper] {
