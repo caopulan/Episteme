@@ -972,6 +972,7 @@ final class AppModel: ObservableObject {
     private var activeDiscoverSearchTask: Task<Void, Never>?
     private var activeArxivSearchTask: Task<Void, Never>?
     private var activeDiscoverPDFCacheTask: Task<Void, Never>?
+    private var activeDiscoverSimilarityRerankTask: Task<Void, Never>?
     private var discoverCacheWarmupTask: Task<Void, Never>?
     private var cacheStorageSummaryTask: Task<Void, Never>?
     private var libraryThumbnailRefreshTask: Task<Void, Never>?
@@ -1298,6 +1299,7 @@ final class AppModel: ObservableObject {
         activeDiscoverSearchTask?.cancel()
         activeArxivSearchTask?.cancel()
         activeDiscoverPDFCacheTask?.cancel()
+        activeDiscoverSimilarityRerankTask?.cancel()
         discoverCacheWarmupTask?.cancel()
         cacheStorageSummaryTask?.cancel()
         libraryThumbnailRefreshTask?.cancel()
@@ -1959,7 +1961,37 @@ final class AppModel: ObservableObject {
         preferences.similarityCategoryIDs = normalizedIdentifiers(categoryIDs)
         localDiscoverPreferences = preferences.normalized
         saveLocalDiscoverPreferencesToDefaults(localDiscoverPreferences)
-        postNotice(kind: .success, title: "Similarity Categories Saved")
+        refreshDiscoverSimilarityRankingAfterPreferenceChange()
+    }
+
+    private func refreshDiscoverSimilarityRankingAfterPreferenceChange() {
+        activeDiscoverSimilarityRerankTask?.cancel()
+        activeDiscoverSimilarityRerankTask = Task { @MainActor [weak self] in
+            guard let self else {
+                return
+            }
+            defer {
+                self.activeDiscoverSimilarityRerankTask = nil
+            }
+            do {
+                let scoredCount = try await self.rerankCurrentDiscoverFeedsForSimilarityChange()
+                guard !Task.isCancelled else {
+                    return
+                }
+                if scoredCount > 0 {
+                    self.postNotice(kind: .success, title: "Similarity Categories Saved", message: "\(scoredCount) papers scored")
+                } else {
+                    self.postNotice(kind: .success, title: "Similarity Categories Saved")
+                }
+            } catch {
+                guard !Task.isCancelled, !isCancellationError(error) else {
+                    return
+                }
+                let message = String(describing: error)
+                self.errorMessage = message
+                self.postNotice(kind: .error, title: "Similarity Ranking Failed", message: message, autoDismissAfter: nil)
+            }
+        }
     }
 
     private func includeCategoryInSimilarityDefaults(_ categoryID: String) {
@@ -2669,6 +2701,67 @@ final class AppModel: ObservableObject {
                 progressDate: discoverProcessingDateLabel(for: visiblePapers),
                 progressTitle: "Sorting Search results"
             )
+            arxivSearchFeed = rankedFeed
+            mergeDiscoverEnrichments(for: rankedFeed.papers)
+            scoredIDs.formUnion(rankedFeed.papers.compactMap { paper in
+                paper.similarity == nil ? nil : paper.id
+            })
+        }
+
+        return scoredIDs.count
+    }
+
+    @discardableResult
+    private func rerankCurrentDiscoverFeedsForSimilarityChange() async throws -> Int {
+        let preferences = localDiscoverPreferences.normalized
+        let embeddingSettings = preferences.embedding
+        let sourceIDs = effectiveDiscoverSimilaritySourceIDs()
+        let model = embeddingSettings.model.trimmingCharacters(in: .whitespacesAndNewlines)
+        let apiKey = embeddingProviderAPIKeyValue().trimmingCharacters(in: .whitespacesAndNewlines)
+        let client = embeddingSettings.enabled && !sourceIDs.isEmpty && !embeddingSettings.baseURL.isEmpty && !model.isEmpty && !apiKey.isEmpty
+            ? try OpenAICompatibleEmbeddingClient(settings: embeddingSettings, apiKey: apiKey)
+            : nil
+        var scoredIDs: Set<String> = []
+
+        if let feed = arxivFeed {
+            let previousSelectionID = selectedArxivPaper?.id
+            let resetFeed = resetDiscoverRanking(in: feed)
+            let rankedFeed: ArxivFeedResponse
+            if let client {
+                rankedFeed = try await rerankEmbeddedDiscoverFeed(
+                    resetFeed,
+                    model: model,
+                    client: client,
+                    progressDate: selectedArxivDate ?? resetFeed.date,
+                    progressTitle: "Sorting Explore results"
+                )
+            } else {
+                rankedFeed = applyLocalDiscoverPreferences(to: resetFeed)
+            }
+            arxivFeed = rankedFeed
+            discoverResultIDs = rankedFeed.papers.map(\.id)
+            selectedArxivPaper = rankedFeed.papers.first { $0.id == previousSelectionID } ?? rankedFeed.papers.first
+            try loadDiscoverEnrichments(for: rankedFeed.papers)
+            reloadCachedArxivAssets()
+            scoredIDs.formUnion(rankedFeed.papers.compactMap { paper in
+                paper.similarity == nil ? nil : paper.id
+            })
+        }
+
+        if let feed = arxivSearchFeed {
+            let resetFeed = resetDiscoverRanking(in: feed)
+            let rankedFeed: ArxivFeedResponse
+            if let client {
+                rankedFeed = try await rerankEmbeddedDiscoverFeed(
+                    resetFeed,
+                    model: model,
+                    client: client,
+                    progressDate: resetFeed.date,
+                    progressTitle: "Sorting Search results"
+                )
+            } else {
+                rankedFeed = applyLocalDiscoverPreferences(to: resetFeed)
+            }
             arxivSearchFeed = rankedFeed
             mergeDiscoverEnrichments(for: rankedFeed.papers)
             scoredIDs.formUnion(rankedFeed.papers.compactMap { paper in
@@ -5389,7 +5482,8 @@ final class AppModel: ObservableObject {
     }
 
     private func resetDiscoverRanking(in feed: ArxivFeedResponse) -> ArxivFeedResponse {
-        let deduplicatedFeed = feed.deduplicatedByCanonicalID()
+        let isSearchFeed = feed.date == "search"
+        let deduplicatedFeed = feed.deduplicatedByCanonicalID(preservingCount: isSearchFeed)
         let papers = deduplicatedFeed.papers.map { paper -> ArxivFeedPaper in
             var resetPaper = paper
             resetPaper.similarity = nil
@@ -5398,12 +5492,12 @@ final class AppModel: ObservableObject {
         }
         return ArxivFeedResponse(
             date: deduplicatedFeed.date,
-            count: papers.count,
+            count: isSearchFeed ? deduplicatedFeed.count : papers.count,
             papers: papers,
             groups: deduplicatedFeed.groups,
             tagOptions: deduplicatedFeed.tagOptions
         )
-        .deduplicatedByCanonicalID()
+        .deduplicatedByCanonicalID(preservingCount: isSearchFeed)
     }
 
     private func filterDiscoverFeed(_ feed: ArxivFeedResponse, keyword: String) -> ArxivFeedResponse {

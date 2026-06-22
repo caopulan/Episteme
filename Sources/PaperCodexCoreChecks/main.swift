@@ -3098,6 +3098,14 @@ func runUILayoutSourceChecks() throws {
         "Discover processing should run selected actions, including embedding reranking, PDF download, and thumbnail generation"
     )
     try check(
+        appModelSource.contains("refreshDiscoverSimilarityRankingAfterPreferenceChange()")
+            && appModelSource.contains("Task {")
+            && appModelSource.contains("rerankCurrentDiscoverFeedsForSimilarityChange()")
+            && appModelSource.contains("private func rerankCurrentDiscoverFeedsForSimilarityChange(")
+            && appModelSource.contains("try await rerankEmbeddedDiscoverFeed("),
+        "Changing similarity categories should rerank existing Explore and Search feeds"
+    )
+    try check(
         appModelSource.contains("discoverCodexReasoningEffort")
             && appModelSource.contains("discoverCodexReasoningEffortDefaultsKey")
             && appModelSource.contains("processCurrentDiscoverResults(_ papers: [ArxivFeedPaper], actions: Set<DiscoverProcessAction> = Set(DiscoverProcessAction.allCases), modelOverride: String? = nil, reasoningEffort: CodexReasoningEffort? = nil)")
