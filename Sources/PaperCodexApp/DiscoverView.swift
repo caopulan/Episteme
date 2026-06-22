@@ -2162,6 +2162,10 @@ private struct SimilaritySourceMenu: View {
         return "\(model.discoverSelectedSimilaritySourceIDs.count) sources"
     }
 
+    private var similarityFolderMenuItems: [DiscoverSimilarityMenuItem] {
+        DiscoverSimilarityMenuTreeSnapshot(categories: model.categories).visibleItems
+    }
+
     private func selectSources(_ sourceIDs: [String]) {
         model.discoverSelectedSimilaritySourceIDs = sourceIDs
         Task {
@@ -2183,14 +2187,15 @@ private struct SimilaritySourceMenu: View {
             if !model.categories.isEmpty {
                 Divider()
                 Section("Folders") {
-                    ForEach(model.categories) { category in
+                    ForEach(similarityFolderMenuItems) { item in
+                        let sourceID = "category:\(item.category.id)"
                         Button {
-                            selectSources(["category:\(category.id)"])
+                            selectSources([sourceID])
                         } label: {
-                            if model.discoverSelectedSimilaritySourceIDs == ["category:\(category.id)"] {
-                                Label(category.name, systemImage: "checkmark")
+                            if model.discoverSelectedSimilaritySourceIDs == [sourceID] {
+                                Label(item.menuTitle, systemImage: "checkmark")
                             } else {
-                                Text(category.name)
+                                Text(item.menuTitle)
                             }
                         }
                     }
@@ -2205,6 +2210,91 @@ private struct SimilaritySourceMenu: View {
         .menuStyle(.borderlessButton)
         .fixedSize()
         .help("Similarity source")
+    }
+}
+
+private struct DiscoverSimilarityMenuTreeSnapshot {
+    var visibleItems: [DiscoverSimilarityMenuItem]
+
+    init(categories: [PaperCodexCore.Category]) {
+        var rootCategories: [PaperCodexCore.Category] = []
+        var childrenByParentID: [String: [PaperCodexCore.Category]] = [:]
+
+        for category in categories {
+            if let parentID = category.parentID {
+                childrenByParentID[parentID, default: []].append(category)
+            } else {
+                rootCategories.append(category)
+            }
+        }
+
+        rootCategories.sort(by: Self.sortCategories)
+        for parentID in Array(childrenByParentID.keys) {
+            childrenByParentID[parentID, default: []].sort(by: Self.sortCategories)
+        }
+
+        self.visibleItems = Self.visibleItems(
+            categories: rootCategories,
+            childrenByParentID: childrenByParentID,
+            depth: 0,
+            ancestorContinuations: []
+        )
+    }
+
+    private static func visibleItems(
+        categories: [PaperCodexCore.Category],
+        childrenByParentID: [String: [PaperCodexCore.Category]],
+        depth: Int,
+        ancestorContinuations: [Bool]
+    ) -> [DiscoverSimilarityMenuItem] {
+        categories.enumerated().flatMap { index, category in
+            let isLast = index == categories.count - 1
+            let connectorContinuations = depth == 0 ? [] : ancestorContinuations + [!isLast]
+            let item = DiscoverSimilarityMenuItem(
+                category: category,
+                depth: depth,
+                connectorContinuations: connectorContinuations
+            )
+            return [item] + visibleItems(
+                categories: childrenByParentID[category.id, default: []],
+                childrenByParentID: childrenByParentID,
+                depth: depth + 1,
+                ancestorContinuations: connectorContinuations
+            )
+        }
+    }
+
+    private static func sortCategories(_ left: PaperCodexCore.Category, _ right: PaperCodexCore.Category) -> Bool {
+        if left.isPinned != right.isPinned {
+            return left.isPinned && !right.isPinned
+        }
+        if left.sortOrder != right.sortOrder {
+            return left.sortOrder < right.sortOrder
+        }
+        return left.name.localizedStandardCompare(right.name) == .orderedAscending
+    }
+}
+
+private struct DiscoverSimilarityMenuItem: Identifiable {
+    var category: PaperCodexCore.Category
+    var depth: Int
+    var connectorContinuations: [Bool]
+
+    var id: String { category.id }
+
+    var menuTitle: String {
+        "\(branchPrefix)\(category.name)"
+    }
+
+    private var branchPrefix: String {
+        guard depth > 0 else {
+            return ""
+        }
+        let ancestorPrefix = (0..<(depth - 1)).map { level in
+            connectorContinuations.indices.contains(level) && connectorContinuations[level] ? "│  " : "   "
+        }.joined()
+        let branch = connectorContinuations.indices.contains(depth - 1) && connectorContinuations[depth - 1] ? "├─ " : "└─ "
+        return ancestorPrefix + branch
     }
 }
 

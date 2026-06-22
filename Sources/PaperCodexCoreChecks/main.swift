@@ -2104,6 +2104,15 @@ func runUILayoutSourceChecks() throws {
         "discover scrolling should restore via ScrollViewReader and avoid high-frequency scrollPosition state binding"
     )
     try check(
+        discoverSource.contains("DiscoverSimilarityMenuTreeSnapshot(categories: model.categories)")
+            && discoverSource.contains("private struct DiscoverSimilarityMenuTreeSnapshot")
+            && discoverSource.contains("private var similarityFolderMenuItems")
+            && discoverSource.contains("menuTitle")
+            && discoverSource.contains("branchPrefix")
+            && !discoverSource.contains("ForEach(model.categories) { category in"),
+        "Explore similarity source menu should show folder hierarchy with simple elbow prefixes instead of a flat folder list"
+    )
+    try check(
         settingsViewSource.contains("Similarity categories")
             && settingsViewSource.contains("draftSimilarityCategoryIDs")
             && settingsViewSource.contains("SettingsSimilarityCategoryTreeSnapshot")
