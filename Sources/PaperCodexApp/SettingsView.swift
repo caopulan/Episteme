@@ -1277,14 +1277,18 @@ private enum SettingsSimilarityCategoryLayout {
     static let rowSpacing: CGFloat = 0
     static let treeConnectorHeight: CGFloat = 32
     static let treeIndentWidth: CGFloat = 22
-    static let folderButtonLeadingPadding: CGFloat = 8
+    static let rowHorizontalPadding: CGFloat = 8
+    static let rowContentSpacing: CGFloat = 7
+    static let disclosureColumnWidth: CGFloat = 16
+    static let selectionIndicatorWidth: CGFloat = 18
+    static let folderContentSpacing: CGFloat = 8
     static let folderIconWidth: CGFloat = 17
     static let connectorTargetInset: CGFloat = 7
     static let connectorLineWidth: CGFloat = 1
-    static let connectorOpacity = 0.16
+    static let connectorOpacity = 0.24
 
     static var folderIconCenterX: CGFloat {
-        folderButtonLeadingPadding + folderIconWidth / 2
+        rowHorizontalPadding + disclosureColumnWidth + rowContentSpacing + selectionIndicatorWidth + folderContentSpacing + folderIconWidth / 2
     }
 
     static func folderIconCenterX(depth: Int) -> CGFloat {
@@ -1390,28 +1394,28 @@ private struct SettingsSimilarityCategoryRow: View {
     var onToggleSelected: () -> Void
 
     var body: some View {
-        HStack(spacing: 7) {
+        HStack(spacing: SettingsSimilarityCategoryLayout.rowContentSpacing) {
             Group {
                 if hasChildren {
                     Button(action: onToggleExpanded) {
                         Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                             .font(.paperCodexSystem(size: 11, weight: .semibold))
-                            .frame(width: 16, height: 24)
+                            .frame(width: SettingsSimilarityCategoryLayout.disclosureColumnWidth, height: 24)
                             .foregroundStyle(Color.secondary)
                     }
                     .buttonStyle(.plain)
                     .help(folderIconHelp)
                 } else {
                     Color.clear
-                        .frame(width: 14, height: 22)
+                        .frame(width: SettingsSimilarityCategoryLayout.disclosureColumnWidth, height: 22)
                 }
             }
 
             Button(action: onToggleSelected) {
-                HStack(spacing: 8) {
+                HStack(spacing: SettingsSimilarityCategoryLayout.folderContentSpacing) {
                     Image(systemName: selectionState.indicatorSystemImage)
                         .font(.paperCodexSystem(size: 13, weight: .semibold))
-                        .frame(width: 18)
+                        .frame(width: SettingsSimilarityCategoryLayout.selectionIndicatorWidth)
                         .foregroundStyle(selectionState.indicatorTint)
 
                     Image(systemName: folderIconName)
@@ -1439,7 +1443,7 @@ private struct SettingsSimilarityCategoryRow: View {
             .help(title)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 8)
+        .padding(.horizontal, SettingsSimilarityCategoryLayout.rowHorizontalPadding)
         .padding(.vertical, 6)
         .background(
             RoundedRectangle(cornerRadius: 5)

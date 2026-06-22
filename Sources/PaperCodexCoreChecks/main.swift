@@ -2114,6 +2114,15 @@ func runUILayoutSourceChecks() throws {
         "settings should expose category-based similarity defaults as a library-style folder tree"
     )
     try check(
+        settingsViewSource.contains("static let disclosureColumnWidth: CGFloat = 16")
+            && settingsViewSource.contains("static let selectionIndicatorWidth: CGFloat = 18")
+            && settingsViewSource.contains("static let rowHorizontalPadding: CGFloat = 8")
+            && settingsViewSource.contains("rowHorizontalPadding + disclosureColumnWidth + rowContentSpacing + selectionIndicatorWidth + folderContentSpacing + folderIconWidth / 2")
+            && settingsViewSource.contains(".frame(width: SettingsSimilarityCategoryLayout.disclosureColumnWidth, height: 22)")
+            && settingsViewSource.contains("static let connectorOpacity = 0.24"),
+        "settings similarity folders should draw simple elbow connectors aligned with the real folder icon column"
+    )
+    try check(
         settingsViewSource.contains("CategoryHierarchySelectionState")
             && settingsViewSource.contains("selectionState:")
             && !settingsViewSource.contains("selected ? Color.accentColor.opacity(0.10)"),
