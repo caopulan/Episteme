@@ -1845,24 +1845,32 @@ private struct LibraryInlineControlRow: View {
         .accessibilityLabel(includeSubfolders ? "Show Current Folder Only" : "Show Current Folder And Subfolders")
     }
 
+    private var readButtonTitle: String {
+        paperCount == 1 ? "Read" : "Read All"
+    }
+
+    private var chatButtonTitle: String {
+        paperCount == 1 ? "Chat" : "Chat All"
+    }
+
     private var readButton: some View {
         Button(action: onRead) {
-            Label("Read", systemImage: "book")
+            Label(readButtonTitle, systemImage: "book")
         }
         .buttonStyle(.bordered)
         .fixedSize()
         .disabled(!canRead)
-        .help("Read visible papers")
+        .help(paperCount == 1 ? "Read visible paper" : "Read all visible papers together")
     }
 
     private var chatButton: some View {
         Button(action: onChat) {
-            Label("Chat", systemImage: "text.bubble")
+            Label(chatButtonTitle, systemImage: "text.bubble")
         }
         .buttonStyle(.borderedProminent)
         .fixedSize()
         .disabled(!canRead)
-        .help("Chat with visible papers")
+        .help(paperCount == 1 ? "Chat with visible paper" : "Chat with all visible papers")
     }
 
     private var sortPicker: some View {

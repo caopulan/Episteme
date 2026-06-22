@@ -972,6 +972,7 @@ func runUILayoutSourceChecks() throws {
     let appModelURL = root.appendingPathComponent("Sources/PaperCodexApp/AppModel.swift")
     let appModelSource = try String(contentsOf: appModelURL)
     let libraryFeatureStoreSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/LibraryFeatureStore.swift"))
+    let pdfKitViewSource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexApp/PDFKitView.swift"))
 
     try check(
         librarySource.contains("static let splitPaneTopInset: CGFloat"),
@@ -1283,6 +1284,14 @@ func runUILayoutSourceChecks() throws {
         "native paper drag previews should reflect the seeded multi-selection set"
     )
     try check(
+        librarySource.contains("private var readButtonTitle: String")
+            && librarySource.contains("paperCount == 1 ? \"Read\" : \"Read All\"")
+            && librarySource.contains("private var chatButtonTitle: String")
+            && librarySource.contains("paperCount == 1 ? \"Chat\" : \"Chat All\"")
+            && !librarySource.contains("Label(\"Read\", systemImage: \"book\")\n        }\n        .buttonStyle(.bordered)\n        .fixedSize()\n        .disabled(!canRead)\n        .help(\"Read visible papers\")"),
+        "library folder toolbar should label bulk read/chat actions explicitly instead of looking like a single-paper reader button"
+    )
+    try check(
         !librarySource.contains("DragGesture(minimumDistance: 8"),
         "library paper dragging should not rely on a parallel custom drag gesture"
     )
@@ -1298,6 +1307,21 @@ func runUILayoutSourceChecks() throws {
     try check(
         !librarySource.contains("ActiveLibraryPaperDrag"),
         "library paper dragging should avoid stale custom drag state when native drag/drop is used"
+    )
+    try check(
+        pdfKitViewSource.contains("scheduleReferenceResolverBuild")
+            && pdfKitViewSource.contains("Task.detached(priority: .utility)")
+            && pdfKitViewSource.contains("makeReferenceResolver(from: documentURL)")
+            && !pdfKitViewSource.contains("referenceResolver = Self.makeReferenceResolver(from: pdfView?.document)"),
+        "PDF opening should not synchronously extract every page string on the main actor"
+    )
+    try check(
+        appModelSource.contains("pendingReaderPositionSaveTask")
+            && appModelSource.contains("pendingReaderPosition")
+            && appModelSource.contains("scheduleReaderPositionSave")
+            && appModelSource.contains("readerPositionSaveDelayNanoseconds")
+            && !appModelSource.contains("try repository.upsertReaderPosition(position)\n            readerPosition = position"),
+        "reader viewport updates should be coalesced instead of writing SQLite and publishing state on every scroll tick"
     )
 
     let repositorySource = try String(contentsOf: root.appendingPathComponent("Sources/PaperCodexCore/PaperRepository.swift"))

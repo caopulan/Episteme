@@ -376,6 +376,7 @@ private let chatMessageFontSizeDefaultsKey = "PaperCodexChatMessageFontSize"
 private let chatComposerFontSizeDefaultsKey = "PaperCodexChatComposerFontSize"
 private let chatFontFamilyDefaultsKey = "PaperCodexChatFontFamily"
 private let readerTabContentLoadDelayNanoseconds: UInt64 = 60_000_000
+private let readerPositionSaveDelayNanoseconds: UInt64 = 750_000_000
 private let discoverScrollPositionPaperIDDefaultsKey = "PaperCodexDiscoverScrollPositionPaperID"
 private let arxivSearchRequiredCategoriesDefaultsKey = "PaperCodexArxivSearchRequiredCategories"
 private let arxivSearchFromYearDefaultsKey = "PaperCodexArxivSearchFromYear"
@@ -976,6 +977,8 @@ final class AppModel: ObservableObject {
     private var libraryThumbnailRefreshTask: Task<Void, Never>?
     private var routeDeferredWorkTask: Task<Void, Never>?
     private var readerTabSelectionTask: Task<Void, Never>?
+    private var pendingReaderPositionSaveTask: Task<Void, Never>?
+    private var pendingReaderPosition: PaperReaderPosition?
     private var paperNotesLoadTasks: [String: Task<Void, Never>] = [:]
     private var mcpService: PaperCodexMCPService?
     private var mcpServer: PaperCodexMCPServer?
@@ -1300,6 +1303,7 @@ final class AppModel: ObservableObject {
         libraryThumbnailRefreshTask?.cancel()
         routeDeferredWorkTask?.cancel()
         readerTabSelectionTask?.cancel()
+        pendingReaderPositionSaveTask?.cancel()
         paperNotesLoadTasks.values.forEach { $0.cancel() }
         mcpCommandPollingTask?.cancel()
         mcpServer?.stop()
@@ -4002,6 +4006,7 @@ final class AppModel: ObservableObject {
     }
 
     private func loadReaderPositionForSelectedContext(repository: PaperRepository) throws {
+        try flushPendingReaderPositionSave(repository: repository)
         guard let session = selectedSession, let paper = selectedPaper else {
             readerPosition = nil
             return
@@ -4011,7 +4016,7 @@ final class AppModel: ObservableObject {
 
     func updateReaderPosition(_ viewportPosition: PDFViewportPosition) {
         do {
-            guard let repository else {
+            guard repository != nil else {
                 throw AppModelError.repositoryUnavailable
             }
             guard let session = selectedSession, let paper = selectedPaper else {
@@ -4034,11 +4039,57 @@ final class AppModel: ObservableObject {
                 scaleFactor: viewportPosition.scaleFactor,
                 updatedAt: Date()
             )
-            try repository.upsertReaderPosition(position)
-            readerPosition = position
+            scheduleReaderPositionSave(position)
         } catch {
             errorMessage = String(describing: error)
         }
+    }
+
+    private func scheduleReaderPositionSave(_ position: PaperReaderPosition) {
+        pendingReaderPosition = position
+        pendingReaderPositionSaveTask?.cancel()
+        let databasePath = supportRoot.appendingPathComponent("store.sqlite").path
+        pendingReaderPositionSaveTask = Task { [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: readerPositionSaveDelayNanoseconds)
+                try await Self.persistReaderPosition(position, databasePath: databasePath)
+                guard let self, !Task.isCancelled else {
+                    return
+                }
+                if self.pendingReaderPosition == position {
+                    self.readerPosition = position
+                    self.pendingReaderPosition = nil
+                }
+                self.pendingReaderPositionSaveTask = nil
+            } catch {
+                guard let self, !Task.isCancelled, !isCancellationError(error) else {
+                    return
+                }
+                self.pendingReaderPositionSaveTask = nil
+                self.errorMessage = String(describing: error)
+            }
+        }
+    }
+
+    private func flushPendingReaderPositionSave(repository: PaperRepository) throws {
+        guard let position = pendingReaderPosition else {
+            return
+        }
+        pendingReaderPositionSaveTask?.cancel()
+        pendingReaderPositionSaveTask = nil
+        try repository.upsertReaderPosition(position)
+        readerPosition = position
+        pendingReaderPosition = nil
+    }
+
+    private nonisolated static func persistReaderPosition(
+        _ position: PaperReaderPosition,
+        databasePath: String
+    ) async throws {
+        try await Task.detached(priority: .utility) {
+            let repository = try PaperRepository(databasePath: databasePath)
+            try repository.upsertReaderPosition(position)
+        }.value
     }
 
     func updatePDFDocumentStatus(_ status: PDFDocumentStatus) {
@@ -4885,7 +4936,7 @@ final class AppModel: ObservableObject {
             guard let repository else {
                 throw AppModelError.repositoryUnavailable
             }
-            if let selectedPaper, let readerPosition {
+            if let selectedPaper, let readerPosition = pendingReaderPosition ?? readerPosition {
                 citationReturnPoint = CitationReturnPoint(
                     paperID: selectedPaper.id,
                     paperTitle: selectedPaper.title,

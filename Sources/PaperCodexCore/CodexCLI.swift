@@ -607,11 +607,17 @@ public struct CodexCLI: Sendable {
         preferWorkspaceImageOutput: Bool = false
     ) throws -> String {
         let pathValue = environment["PATH"] ?? ""
+        let localUserPath = localUserCodexPath(environment: environment)
+        if !preferWorkspaceImageOutput,
+           isSystemOnlyPath(pathValue),
+           FileManager.default.isExecutableFile(atPath: localUserPath) {
+            return localUserPath
+        }
         let candidatePaths = pathValue
             .split(separator: ":")
             .map { String($0) + "/codex" }
             + [
-                localUserCodexPath(environment: environment),
+                localUserPath,
                 "/Applications/Codex.app/Contents/Resources/codex",
                 "/opt/homebrew/bin/codex",
                 "/usr/local/bin/codex"
@@ -644,6 +650,18 @@ public struct CodexCLI: Sendable {
         return URL(fileURLWithPath: home, isDirectory: true)
             .appendingPathComponent(".local/bin/codex")
             .path
+    }
+
+    private static func isSystemOnlyPath(_ pathValue: String) -> Bool {
+        let systemDirectories: Set<String> = ["/usr/bin", "/bin", "/usr/sbin", "/sbin"]
+        let directories = pathValue
+            .split(separator: ":")
+            .map(String.init)
+            .filter { !$0.isEmpty }
+        guard !directories.isEmpty else {
+            return false
+        }
+        return directories.allSatisfy { systemDirectories.contains($0) }
     }
 
     public static func selectBestExecutable(

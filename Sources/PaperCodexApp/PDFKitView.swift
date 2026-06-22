@@ -154,6 +154,8 @@ struct PDFKitView: NSViewRepresentable {
         private var isApplyingReadingPosition = false
         private var shouldFitWidthOnResize = true
         private var referenceResolver = PDFReferenceResolver(pageTexts: [:])
+        private var referenceResolverBuildTask: Task<Void, Never>?
+        private var referenceResolverBuildID = UUID()
         private var citationPopover: NSPopover?
         private static let manualZoomMinimumScale: CGFloat = 0.20
         private static let manualZoomMaximumScale: CGFloat = 5.0
@@ -173,6 +175,7 @@ struct PDFKitView: NSViewRepresentable {
         deinit {
             pendingViewportReport?.cancel()
             pendingWidthRefit?.cancel()
+            referenceResolverBuildTask?.cancel()
             NotificationCenter.default.removeObserver(self)
         }
 
@@ -190,11 +193,33 @@ struct PDFKitView: NSViewRepresentable {
             lastReportedPosition = nil
             pendingDocumentViewportReset = true
             shouldFitWidthOnResize = true
-            referenceResolver = Self.makeReferenceResolver(from: pdfView?.document)
+            referenceResolver = PDFReferenceResolver(pageTexts: [:])
+            referenceResolverBuildTask?.cancel()
+            if let documentURL = pdfView?.document?.documentURL {
+                scheduleReferenceResolverBuild(from: documentURL)
+            }
             citationPopover?.close()
             citationPopover = nil
             clearHighlights()
             detachScrollObservation()
+        }
+
+        @MainActor
+        private func scheduleReferenceResolverBuild(from documentURL: URL) {
+            let buildID = UUID()
+            referenceResolverBuildID = buildID
+            referenceResolverBuildTask = Task { [weak self] in
+                let resolver = await Task.detached(priority: .utility) {
+                    Self.makeReferenceResolver(from: documentURL)
+                }.value
+                guard let self,
+                      !Task.isCancelled,
+                      self.referenceResolverBuildID == buildID else {
+                    return
+                }
+                self.referenceResolver = resolver
+                self.referenceResolverBuildTask = nil
+            }
         }
 
         @MainActor
@@ -893,6 +918,10 @@ struct PDFKitView: NSViewRepresentable {
                 return trimmed
             }
             return "\(trimmed.prefix(147))..."
+        }
+
+        private static func makeReferenceResolver(from documentURL: URL) -> PDFReferenceResolver {
+            makeReferenceResolver(from: PDFDocument(url: documentURL))
         }
 
         private static func makeReferenceResolver(from document: PDFDocument?) -> PDFReferenceResolver {
