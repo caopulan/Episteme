@@ -2113,6 +2113,16 @@ func runUILayoutSourceChecks() throws {
         "Explore similarity source menu should show folder hierarchy with simple elbow prefixes instead of a flat folder list"
     )
     try check(
+        discoverSource.contains("private struct DiscoverSimilarityMenuRowLabel: View")
+            && discoverSource.contains("private struct DiscoverSimilarityMenuPlainLabel: View")
+            && discoverSource.contains("Image(systemName: \"checkmark\")")
+            && discoverSource.contains(".opacity(isSelected ? 1 : 0)")
+            && discoverSource.contains("Text(segment)")
+            && discoverSource.contains("design: .monospaced")
+            && discoverSource.contains(".frame(width: DiscoverSimilarityMenuLayout.branchSegmentWidth"),
+        "Explore similarity menu rows should reserve the checkmark column and render branch prefixes in fixed-width monospaced segments"
+    )
+    try check(
         settingsViewSource.contains("Similarity categories")
             && settingsViewSource.contains("draftSimilarityCategoryIDs")
             && settingsViewSource.contains("SettingsSimilarityCategoryTreeSnapshot")
