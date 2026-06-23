@@ -2211,10 +2211,6 @@ private struct SimilaritySourceMenu: View {
     }
 }
 
-private enum DiscoverSimilarityMenuLayout {
-    static let branchSegmentWidth: CGFloat = 18
-}
-
 private struct DiscoverSimilarityMenuPlainLabel: View {
     var title: String
     var isSelected: Bool
@@ -2235,15 +2231,8 @@ private struct DiscoverSimilarityMenuRowLabel: View {
 
     var body: some View {
         Label {
-            HStack(spacing: 0) {
-                ForEach(Array(item.branchSegments.enumerated()), id: \.offset) { _, segment in
-                    Text(segment)
-                        .font(.paperCodexSystem(size: 13, weight: .regular, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .frame(width: DiscoverSimilarityMenuLayout.branchSegmentWidth, alignment: .leading)
-                }
-                Text(item.category.name)
-            }
+            Text(item.menuTitle)
+                .font(.paperCodexSystem(size: 13, weight: .regular, design: .monospaced))
         } icon: {
             Image(systemName: "checkmark")
                 .opacity(isSelected ? 1 : 0)
@@ -2324,19 +2313,15 @@ private struct DiscoverSimilarityMenuItem: Identifiable {
         "\(branchPrefix)\(category.name)"
     }
 
-    var branchSegments: [String] {
-        guard depth > 0 else {
-            return []
-        }
-        let ancestorSegments = (0..<(depth - 1)).map { level in
-            connectorContinuations.indices.contains(level) && connectorContinuations[level] ? "│  " : "   "
-        }
-        let branch = connectorContinuations.indices.contains(depth - 1) && connectorContinuations[depth - 1] ? "├─ " : "└─ "
-        return ancestorSegments + [branch]
-    }
-
     private var branchPrefix: String {
-        branchSegments.joined()
+        guard depth > 0 else {
+            return ""
+        }
+        let ancestorPrefix = (0..<(depth - 1)).map { level in
+            connectorContinuations.indices.contains(level) && connectorContinuations[level] ? "│  " : "   "
+        }.joined()
+        let branch = connectorContinuations.indices.contains(depth - 1) && connectorContinuations[depth - 1] ? "├─ " : "└─ "
+        return ancestorPrefix + branch
     }
 }
 

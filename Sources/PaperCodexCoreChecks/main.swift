@@ -2117,10 +2117,11 @@ func runUILayoutSourceChecks() throws {
             && discoverSource.contains("private struct DiscoverSimilarityMenuPlainLabel: View")
             && discoverSource.contains("Image(systemName: \"checkmark\")")
             && discoverSource.contains(".opacity(isSelected ? 1 : 0)")
-            && discoverSource.contains("Text(segment)")
+            && discoverSource.contains("Text(item.menuTitle)")
             && discoverSource.contains("design: .monospaced")
-            && discoverSource.contains(".frame(width: DiscoverSimilarityMenuLayout.branchSegmentWidth"),
-        "Explore similarity menu rows should reserve the checkmark column and render branch prefixes in fixed-width monospaced segments"
+            && !discoverSource.contains("Text(segment)")
+            && !discoverSource.contains("branchSegmentWidth"),
+        "Explore similarity menu rows should reserve the checkmark column while keeping the menu title as one visible monospaced text string"
     )
     try check(
         settingsViewSource.contains("Similarity categories")
