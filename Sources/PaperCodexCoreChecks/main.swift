@@ -5199,6 +5199,15 @@ func runAgentCommandBuilderChecks() throws {
         discoveredPiExecutable == piExecutable,
         "pi adapter should discover pi from PATH"
     )
+    let finderStyleRuntimeEnvironment = AgentRuntimeEnvironment.sanitizedProcessEnvironment(
+        workingDirectoryURL: URL(fileURLWithPath: "/tmp/session-a", isDirectory: true),
+        executablePath: "/opt/homebrew/bin/kimi",
+        baseEnvironment: ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "HOME": executableRoot.path]
+    )
+    let finderStylePath = finderStyleRuntimeEnvironment["PATH"]?.split(separator: ":").map(String.init) ?? []
+    try check(finderStylePath.first == "/opt/homebrew/bin", "runtime process environment should prepend the executable directory so env-based wrappers can find node")
+    try check(finderStylePath.contains("/usr/local/bin"), "runtime process environment should include common Homebrew Intel binary paths for GUI-launched apps")
+    try check(finderStylePath.contains(executableRoot.appendingPathComponent(".local/bin").path), "runtime process environment should include user-local binaries for GUI-launched apps")
 
     let codexStart = CodexRuntimeAdapter(executablePath: "/usr/local/bin/codex").startCommand(
         prompt: "Summarize",
@@ -5542,14 +5551,23 @@ func runAgentRuntimeSourceChecks() throws {
     try check(outputText.contains("GOT:paper-terminal"), "local PTY process should forward user input")
 
     let sourceRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+    let commandRuntimeSource = try String(contentsOf: sourceRoot.appendingPathComponent("Sources/PaperCodexCore/CommandAgentRuntime.swift"))
     let ptySource = try String(contentsOf: sourceRoot.appendingPathComponent("Sources/PaperCodexCore/LocalPTYProcess.swift"))
     let terminalViewSource = try String(contentsOf: sourceRoot.appendingPathComponent("Sources/PaperCodexApp/AgentTerminalView.swift"))
     let chatViewSource = try String(contentsOf: sourceRoot.appendingPathComponent("Sources/PaperCodexApp/ChatView.swift"))
     let appModelSource = try String(contentsOf: sourceRoot.appendingPathComponent("Sources/PaperCodexApp/AppModel.swift"))
+    let agentRuntimeStoreSource = try String(contentsOf: sourceRoot.appendingPathComponent("Sources/PaperCodexApp/AgentRuntimeStore.swift"))
 
+    try check(
+        commandRuntimeSource.contains("AgentRuntimeEnvironment.sanitizedProcessEnvironment")
+            && commandRuntimeSource.contains("executablePath: command.executablePath"),
+        "CommandAgentRuntime should enrich PATH for GUI-launched env-based runtime wrappers"
+    )
     try check(
         ptySource.contains("final class LocalPTYProcess")
             && ptySource.contains("openpty")
+            && ptySource.contains("AgentRuntimeEnvironment.sanitizedProcessEnvironment")
+            && ptySource.contains("executablePath: configuration.executablePath")
             && ptySource.contains("write(_ text")
             && ptySource.contains("resize(columns:")
             && ptySource.contains("rows:")
@@ -5589,6 +5607,11 @@ func runAgentRuntimeSourceChecks() throws {
             && appModelSource.contains("OpenClawRuntimeAdapter")
             && appModelSource.contains("PiRuntimeAdapter"),
         "AppModel should own Terminal state, log output under turns, and launch every PTY-capable runtime"
+    )
+    try check(
+        agentRuntimeStoreSource.contains("AgentRuntimeEnvironment.sanitizedProcessEnvironment")
+            && agentRuntimeStoreSource.contains("executablePath: executablePath"),
+        "AgentRuntimeStore diagnostics should use the same GUI-safe PATH enrichment as launched runtimes"
     )
 }
 

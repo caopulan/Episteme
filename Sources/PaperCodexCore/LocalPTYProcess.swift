@@ -75,13 +75,13 @@ public final class LocalPTYProcess: @unchecked Sendable {
 
     public func start(onOutput: @escaping @Sendable (Data) -> Void) throws {
         let argvStrings = [configuration.executablePath] + configuration.arguments
-        var environment = ProcessInfo.processInfo.environment
-        for (key, value) in configuration.environment {
-            environment[key] = value
-        }
-        if let workingDirectoryPath = normalized(configuration.workingDirectoryPath) {
-            environment["PWD"] = workingDirectoryPath
-        }
+        let workingDirectoryURL = normalized(configuration.workingDirectoryPath)
+            .map { URL(fileURLWithPath: $0, isDirectory: true) }
+        var environment = AgentRuntimeEnvironment.sanitizedProcessEnvironment(
+            workingDirectoryURL: workingDirectoryURL,
+            executablePath: configuration.executablePath,
+            environmentOverrides: configuration.environment
+        )
         if environment["TERM"]?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false {
             environment["TERM"] = "xterm-256color"
         }

@@ -302,6 +302,10 @@ private func runSafeCommand(executablePath: String, arguments: [String], timeout
     process.executableURL = URL(fileURLWithPath: executablePath)
     process.arguments = arguments
     process.currentDirectoryURL = FileManager.default.temporaryDirectory
+    process.environment = AgentRuntimeEnvironment.sanitizedProcessEnvironment(
+        workingDirectoryURL: FileManager.default.temporaryDirectory,
+        executablePath: executablePath
+    )
 
     let output = Pipe()
     let error = Pipe()

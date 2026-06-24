@@ -6,15 +6,15 @@ public struct CommandAgentRuntime: Sendable {
     public static func sanitizedProcessEnvironment(
         workingDirectoryURL: URL,
         baseEnvironment: [String: String] = ProcessInfo.processInfo.environment,
+        executablePath: String? = nil,
         environmentOverrides: [String: String] = [:]
     ) -> [String: String] {
-        var environment = baseEnvironment
-        environment["PWD"] = workingDirectoryURL.standardizedFileURL.path
-        environment.removeValue(forKey: "OLDPWD")
-        for (key, value) in environmentOverrides {
-            environment[key] = value
-        }
-        return environment
+        AgentRuntimeEnvironment.sanitizedProcessEnvironment(
+            workingDirectoryURL: workingDirectoryURL,
+            executablePath: executablePath,
+            baseEnvironment: baseEnvironment,
+            environmentOverrides: environmentOverrides
+        )
     }
 
     public func runStreaming(
@@ -99,6 +99,7 @@ public struct CommandAgentRuntime: Sendable {
         process.currentDirectoryURL = standardizedWorkingDirectoryURL
         process.environment = Self.sanitizedProcessEnvironment(
             workingDirectoryURL: standardizedWorkingDirectoryURL,
+            executablePath: command.executablePath,
             environmentOverrides: command.environmentOverrides
         )
     }
