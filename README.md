@@ -227,14 +227,15 @@ swift run PaperCodexCoreChecks arxiv-feed
 Run local agent runtime smoke checks against a safe fixture workspace:
 
 ```bash
-scripts/agent-runtime-smoke.sh --codex --claude --kimi-openclaw
+scripts/agent-runtime-smoke.sh --codex --claude --kimi-cli --kimi-openclaw
 ```
 
-The smoke script verifies that Codex, Claude Code, and the OpenClaw Kimi route can see `workspace_manifest.json`, the Episteme citation contract, and the live MCP endpoint when the app is running. It is read-only by default and does not mutate library papers, folders, tags, or notes.
+The smoke script verifies that Codex, Claude Code, native Kimi CLI, and the OpenClaw Kimi route can see `workspace_manifest.json`, the Episteme citation contract, and the live MCP endpoint when the app is running. It is read-only by default and does not mutate library papers, folders, tags, or notes.
 
-If OpenClaw Kimi is blocked by local account or membership state, use the configured Hermes Kimi route:
+If OpenClaw Kimi is blocked by local account or membership state, use the native Kimi CLI route or the configured Hermes Kimi route:
 
 ```bash
+scripts/agent-runtime-smoke.sh --kimi-cli
 scripts/agent-runtime-smoke.sh --hermes-kimi
 ```
 

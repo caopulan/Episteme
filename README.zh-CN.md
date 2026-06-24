@@ -227,14 +227,15 @@ swift run PaperCodexCoreChecks arxiv-feed
 针对安全 fixture 工作区运行本地 Agent runtime smoke 检查：
 
 ```bash
-scripts/agent-runtime-smoke.sh --codex --claude --kimi-openclaw
+scripts/agent-runtime-smoke.sh --codex --claude --kimi-cli --kimi-openclaw
 ```
 
-该脚本会验证 Codex、Claude Code 和 OpenClaw Kimi 路由是否能看到 `workspace_manifest.json`、Episteme 引用契约，以及 app 正在运行时的 live MCP endpoint。默认只读，不会修改文库论文、文件夹、标签或笔记。
+该脚本会验证 Codex、Claude Code、原生 Kimi CLI 和 OpenClaw Kimi 路由是否能看到 `workspace_manifest.json`、Episteme 引用契约，以及 app 正在运行时的 live MCP endpoint。默认只读，不会修改文库论文、文件夹、标签或笔记。
 
-如果 OpenClaw Kimi 被当前本地账号或会员状态挡住，可以使用已配置的 Hermes Kimi 路由：
+如果 OpenClaw Kimi 被当前本地账号或会员状态挡住，可以使用原生 Kimi CLI 路由或已配置的 Hermes Kimi 路由：
 
 ```bash
+scripts/agent-runtime-smoke.sh --kimi-cli
 scripts/agent-runtime-smoke.sh --hermes-kimi
 ```
 

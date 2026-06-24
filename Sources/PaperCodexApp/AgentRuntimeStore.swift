@@ -260,6 +260,8 @@ private func findExecutable(for profile: AgentRuntimeProfile) throws -> String {
         return try ClaudeCodeRuntimeAdapter.findExecutable()
     case .hermes:
         return try HermesRuntimeAdapter.findExecutable()
+    case .kimiCLI:
+        return try KimiRuntimeAdapter.findExecutable()
     case .openClawKimi:
         return try OpenClawRuntimeAdapter.findExecutable()
     case .pi:
@@ -269,6 +271,8 @@ private func findExecutable(for profile: AgentRuntimeProfile) throws -> String {
 
 private func versionArguments(for profile: AgentRuntimeProfile) -> [String] {
     switch profile.backend {
+    case .kimiCLI:
+        return ["--version"]
     case .openClawKimi:
         return ["--version"]
     default:
@@ -284,6 +288,8 @@ private func safeAuthStatusArguments(for profile: AgentRuntimeProfile) -> [Strin
         return ["auth", "status"]
     case .hermes:
         return ["status"]
+    case .kimiCLI:
+        return ["doctor"]
     case .openClawKimi:
         return ["models", "status", "--json"]
     case .pi:

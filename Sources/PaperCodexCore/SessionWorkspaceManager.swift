@@ -166,6 +166,9 @@ public final class SessionWorkspaceManager {
         ]
         let data = try JSONSerialization.data(withJSONObject: config, options: [.prettyPrinted, .sortedKeys])
         try data.write(to: configURL, options: [.atomic])
+        let kimiConfigRoot = root.appendingPathComponent(".kimi-code", isDirectory: true)
+        try FileManager.default.createDirectory(at: kimiConfigRoot, withIntermediateDirectories: true)
+        try data.write(to: kimiConfigRoot.appendingPathComponent("mcp.json"), options: [.atomic])
         return configURL
     }
 

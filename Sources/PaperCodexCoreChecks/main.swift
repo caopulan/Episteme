@@ -4570,6 +4570,7 @@ func runWorkspaceChecks() throws {
     try check(FileManager.default.fileExists(atPath: workspaceRoot.appendingPathComponent("CLAUDE.md").path), "workspace should contain CLAUDE.md for Claude Code")
     try check(FileManager.default.fileExists(atPath: workspaceRoot.appendingPathComponent("skills/papercodex-agent-workspace/SKILL.md").path), "workspace should contain the Paper Codex agent workspace skill")
     try check(FileManager.default.fileExists(atPath: workspaceRoot.appendingPathComponent("mcp.json").path), "workspace should contain an MCP config when endpoint metadata is available")
+    try check(FileManager.default.fileExists(atPath: workspaceRoot.appendingPathComponent(".kimi-code/mcp.json").path), "workspace should contain project-level Kimi MCP config when endpoint metadata is available")
     try check(FileManager.default.fileExists(atPath: workspaceRoot.appendingPathComponent("workspace_manifest.json").path), "workspace should contain an agent workspace manifest")
     try check(FileManager.default.fileExists(atPath: workspaceRoot.appendingPathComponent("turns", isDirectory: true).path), "workspace should contain turns directory")
     try check(FileManager.default.fileExists(atPath: paperDir.appendingPathComponent("metadata.json").path), "workspace should contain paper metadata")
@@ -4611,6 +4612,13 @@ func runWorkspaceChecks() throws {
     }
     try check(paperCodexServer["url"] as? String == mcpEndpoint.url, "workspace MCP config should include the local endpoint URL")
     try check(headers["Authorization"] as? String == mcpEndpoint.authorizationHeader, "workspace MCP config should include the authorization header")
+    let kimiMCPConfigData = try Data(contentsOf: workspaceRoot.appendingPathComponent(".kimi-code/mcp.json"))
+    guard let kimiMCPConfig = try JSONSerialization.jsonObject(with: kimiMCPConfigData) as? [String: Any],
+          let kimiMCPServers = kimiMCPConfig["mcpServers"] as? [String: Any],
+          let kimiPaperCodexServer = kimiMCPServers["paper-codex"] as? [String: Any] else {
+        throw CheckFailure(description: "Kimi project MCP config should include a Paper Codex server object")
+    }
+    try check(kimiPaperCodexServer["url"] as? String == mcpEndpoint.url, "Kimi project MCP config should include the local endpoint URL")
 }
 
 func runCodexPluginInstallerChecks() throws {
@@ -4906,6 +4914,12 @@ func runCodexCLIChecks() throws {
     let hermesAnswer = try HermesBridgeEventParser.parseLine(#"{"type":"answer","text":"最终回答"}"#)
     try check(hermesAnswer?.kind == .answer, "Hermes bridge answer events should mark the final result")
     try check(hermesAnswer?.detail == "最终回答", "Hermes bridge answer events should preserve final answer text")
+    let kimiAnswer = try KimiStreamEventParser.parseResultLine(#"{"role":"assistant","content":"Kimi final answer"}"#)
+    try check(kimiAnswer.event?.kind == .answer, "Kimi stream assistant messages should become answer events")
+    try check(kimiAnswer.finalAnswer == "Kimi final answer", "Kimi stream assistant messages should be captured as final answers")
+    let kimiResumeHint = try KimiStreamEventParser.parseResultLine(#"{"role":"meta","type":"session.resume_hint","session_id":"session_kimi","content":"To resume this session: kimi -r session_kimi"}"#)
+    try check(kimiResumeHint.sessionID == "session_kimi", "Kimi stream resume hints should expose the runtime session id")
+    try check(kimiResumeHint.event?.kind == .status, "Kimi stream resume hints should become status events")
     let imageGenerationEvent = try CodexJSONEventParser.parseLine(#"{"type":"image_generation_call","id":"ig_test","status":"completed","result":"base64-payload"}"#)
     try check(imageGenerationEvent?.kind == .tool, "image generation events should be classified as compact tool events")
     try check(imageGenerationEvent?.title == "Image generation", "image generation events should have a readable title")
@@ -5043,7 +5057,7 @@ func runCodexCLIChecks() throws {
 func runAgentRuntimeProfileChecks() throws {
     let profiles = AgentRuntimeProfile.defaultProfiles
     let profilesByID = Dictionary(uniqueKeysWithValues: profiles.map { ($0.id, $0) })
-    try check(Set(profilesByID.keys) == ["codex", "claude-code", "hermes", "openclaw-kimi", "pi"], "default agent runtime profiles should cover Codex, Claude Code, Hermes, OpenClaw Kimi, and pi")
+    try check(Set(profilesByID.keys) == ["codex", "claude-code", "hermes", "kimi-cli", "openclaw-kimi", "pi"], "default agent runtime profiles should cover Codex, Claude Code, Hermes, Kimi CLI, OpenClaw Kimi, and pi")
 
     let codex = try requiredProfile("codex", in: profilesByID)
     try check(codex.backend == .codex, "Codex profile should use the codex backend")
@@ -5069,6 +5083,15 @@ func runAgentRuntimeProfileChecks() throws {
     try check(hermes.executableName == "hermes", "Hermes profile should launch hermes")
     try check(hermes.supportsPTY, "Hermes profile should support TUI launches")
     try check(hermes.promptInjectionModes.contains(.skill), "Hermes profile should support skill-based Paper Codex instructions")
+
+    let kimi = try requiredProfile("kimi-cli", in: profilesByID)
+    try check(kimi.backend == .kimiCLI, "Kimi CLI profile should use the Kimi CLI backend")
+    try check(kimi.executableName == "kimi", "Kimi CLI profile should launch kimi")
+    try check(kimi.supportsNonInteractiveRuns, "Kimi CLI profile should support prompt mode")
+    try check(kimi.supportsPTY, "Kimi CLI profile should support interactive terminal launches")
+    try check(kimi.supportsStructuredOutput, "Kimi CLI profile should support stream-json output")
+    try check(kimi.supportsMCPConfig, "Kimi CLI profile should use project-level MCP config")
+    try check(kimi.promptInjectionModes.contains(.skill), "Kimi CLI profile should support skills-dir prompt context")
 
     let openClaw = try requiredProfile("openclaw-kimi", in: profilesByID)
     try check(openClaw.backend == .openClawKimi, "OpenClaw Kimi profile should use the OpenClaw Kimi backend")
@@ -5147,11 +5170,13 @@ func runAgentCommandBuilderChecks() throws {
     }
     let claudeExecutable = try makeExecutable("claude")
     let hermesExecutable = try makeExecutable("hermes")
+    let kimiExecutable = try makeExecutable("kimi")
     let openClawExecutable = try makeExecutable("openclaw")
     let piExecutable = try makeExecutable("pi")
     let pathEnvironment = ["PATH": executableRoot.path, "HOME": executableRoot.path]
     let discoveredClaudeExecutable = try ClaudeCodeRuntimeAdapter.findExecutable(environment: pathEnvironment)
     let discoveredHermesExecutable = try HermesRuntimeAdapter.findExecutable(environment: pathEnvironment)
+    let discoveredKimiExecutable = try KimiRuntimeAdapter.findExecutable(environment: pathEnvironment)
     let discoveredOpenClawExecutable = try OpenClawRuntimeAdapter.findExecutable(environment: pathEnvironment)
     let discoveredPiExecutable = try PiRuntimeAdapter.findExecutable(environment: pathEnvironment)
     try check(
@@ -5161,6 +5186,10 @@ func runAgentCommandBuilderChecks() throws {
     try check(
         discoveredHermesExecutable == hermesExecutable,
         "Hermes adapter should discover hermes from PATH"
+    )
+    try check(
+        discoveredKimiExecutable == kimiExecutable,
+        "Kimi CLI adapter should discover kimi from PATH"
     )
     try check(
         discoveredOpenClawExecutable == openClawExecutable,
@@ -5269,6 +5298,25 @@ func runAgentCommandBuilderChecks() throws {
     try check(hermesBridge.arguments.contains("--query") && hermesBridge.arguments.contains("Summarize"), "Hermes bridge should pass the Paper Codex prompt through unchanged")
     try check(hermesBridge.environmentOverrides["PAPER_CODEX_HERMES_ROOT"] == hermesInstallRoot.path, "Hermes bridge should import Hermes from its existing install root")
 
+    let kimi = KimiRuntimeAdapter(executablePath: "/opt/homebrew/bin/kimi").nonInteractiveCommand(
+        prompt: "Summarize",
+        workspacePath: "/tmp/session-a",
+        sessionID: "session-kimi",
+        modelID: "kimi-code/kimi-for-coding",
+        skillsPath: "/tmp/session-a/skills/papercodex-agent-workspace"
+    )
+    try check(
+        kimi.arguments == [
+            "--session", "session-kimi",
+            "--model", "kimi-code/kimi-for-coding",
+            "--prompt", "Summarize",
+            "--output-format", "stream-json",
+            "--skills-dir", "/tmp/session-a/skills/papercodex-agent-workspace"
+        ],
+        "Kimi CLI adapter should build a stream-json prompt command with resume, model, and skills"
+    )
+    try check(kimi.currentDirectoryPath == "/tmp/session-a", "Kimi CLI adapter should run from the session workspace so project MCP config is discovered")
+
     let openClaw = OpenClawRuntimeAdapter(executablePath: "/opt/homebrew/bin/openclaw").nonInteractiveCommand(
         prompt: "Summarize",
         workspacePath: "/tmp/session-a",
@@ -5330,6 +5378,19 @@ func runAgentCommandBuilderChecks() throws {
     )
     try check(hermesTerminal.launchMode == .pty, "Hermes terminal command should launch in PTY mode")
     try check(hermesTerminal.arguments.contains("--tui") && hermesTerminal.arguments.contains("--skills"), "Hermes terminal command should use TUI mode with Paper Codex skills")
+
+    let kimiTerminal = KimiRuntimeAdapter(executablePath: "/opt/homebrew/bin/kimi").terminalCommand(
+        workspacePath: "/tmp/session-a",
+        sessionID: "session-kimi",
+        modelID: "kimi-code/kimi-for-coding",
+        skillsPath: "/tmp/session-a/skills/papercodex-agent-workspace"
+    )
+    try check(kimiTerminal.launchMode == .pty, "Kimi CLI terminal command should launch in PTY mode")
+    try check(kimiTerminal.arguments == [
+        "--session", "session-kimi",
+        "--model", "kimi-code/kimi-for-coding",
+        "--skills-dir", "/tmp/session-a/skills/papercodex-agent-workspace"
+    ], "Kimi CLI terminal command should preserve session, model, and skills")
 
     let openClawTerminal = OpenClawRuntimeAdapter(executablePath: "/opt/homebrew/bin/openclaw").terminalCommand(
         workspacePath: "/tmp/session-a",
@@ -5524,6 +5585,7 @@ func runAgentRuntimeSourceChecks() throws {
             && appModelSource.contains("CodexRuntimeAdapter")
             && appModelSource.contains("ClaudeCodeRuntimeAdapter")
             && appModelSource.contains("HermesRuntimeAdapter")
+            && appModelSource.contains("KimiRuntimeAdapter")
             && appModelSource.contains("OpenClawRuntimeAdapter")
             && appModelSource.contains("PiRuntimeAdapter"),
         "AppModel should own Terminal state, log output under turns, and launch every PTY-capable runtime"
@@ -5537,6 +5599,7 @@ func runAgentRuntimeSmokeScriptChecks() throws {
     try check(FileManager.default.isExecutableFile(atPath: scriptURL.path), "agent runtime smoke script should be executable")
     try check(script.contains("--codex") && script.contains("codex exec"), "smoke script should support Codex exec")
     try check(script.contains("--claude") && script.contains("claude --print"), "smoke script should support Claude Code print mode")
+    try check(script.contains("--kimi-cli") && script.contains("kimi -p") && script.contains("--output-format stream-json"), "smoke script should support Kimi CLI prompt mode")
     try check(script.contains("--kimi-openclaw") && script.contains("openclaw agent"), "smoke script should support OpenClaw Kimi route")
     try check(script.contains("--hermes-kimi") && script.contains("hermes chat"), "smoke script should support Hermes Kimi fallback route")
     try check(script.contains("workspace_manifest.json"), "smoke script should create or inspect a Paper Codex workspace manifest")
@@ -5546,9 +5609,11 @@ func runAgentRuntimeSmokeScriptChecks() throws {
 
     let readme = try String(contentsOf: sourceRoot.appendingPathComponent("README.md"))
     let readmeZH = try String(contentsOf: sourceRoot.appendingPathComponent("README.zh-CN.md"))
-    try check(readme.contains("scripts/agent-runtime-smoke.sh --codex --claude --kimi-openclaw"), "English README should document multi-runtime smoke checks")
+    try check(readme.contains("scripts/agent-runtime-smoke.sh --codex --claude --kimi-cli --kimi-openclaw"), "English README should document multi-runtime smoke checks")
+    try check(readme.contains("Kimi CLI"), "English README should document the native Kimi CLI runtime route")
     try check(readme.contains("OpenClaw Kimi"), "English README should document the Kimi runtime route")
-    try check(readmeZH.contains("scripts/agent-runtime-smoke.sh --codex --claude --kimi-openclaw"), "Chinese README should document multi-runtime smoke checks")
+    try check(readmeZH.contains("scripts/agent-runtime-smoke.sh --codex --claude --kimi-cli --kimi-openclaw"), "Chinese README should document multi-runtime smoke checks")
+    try check(readmeZH.contains("Kimi CLI"), "Chinese README should document the native Kimi CLI runtime route")
     try check(readmeZH.contains("OpenClaw Kimi"), "Chinese README should document the Kimi runtime route")
 }
 

@@ -6613,6 +6613,14 @@ final class AppModel: ObservableObject {
                 model: modelID.isEmpty ? runtimeProfile.defaultModelID : modelID,
                 skillsPath: FileManager.default.fileExists(atPath: skillsPath) ? skillsPath : nil
             )
+        case .kimiCLI:
+            let executable = try KimiRuntimeAdapter.findExecutable()
+            return KimiRuntimeAdapter(executablePath: executable).terminalCommand(
+                workspacePath: session.workspacePath,
+                sessionID: session.runtimeSessionID(for: runtimeProfile.id),
+                modelID: modelID.isEmpty ? runtimeProfile.defaultModelID : modelID,
+                skillsPath: FileManager.default.fileExists(atPath: skillsPath) ? skillsPath : nil
+            )
         case .openClawKimi:
             let executable = try OpenClawRuntimeAdapter.findExecutable()
             return OpenClawRuntimeAdapter(executablePath: executable).terminalCommand(

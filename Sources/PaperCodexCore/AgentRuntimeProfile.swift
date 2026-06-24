@@ -4,6 +4,7 @@ public enum AgentRuntimeBackend: String, Codable, CaseIterable, Sendable {
     case codex
     case claudeCode = "claude-code"
     case hermes
+    case kimiCLI = "kimi-cli"
     case openClawKimi = "openclaw-kimi"
     case pi
 }
@@ -111,6 +112,24 @@ public struct AgentRuntimeProfile: Codable, Equatable, Identifiable, Sendable {
             supportsStructuredOutput: false,
             supportsMCPConfig: true,
             mcpMode: .configuredExternally,
+            promptInjectionModes: [.argumentPrompt, .skill, .workspaceInstructions]
+        ),
+        AgentRuntimeProfile(
+            id: "kimi-cli",
+            displayName: "Kimi CLI",
+            backend: .kimiCLI,
+            executableName: "kimi",
+            knownExecutablePaths: [
+                "/opt/homebrew/bin/kimi",
+                "/usr/local/bin/kimi",
+                "/Users/chunqiu/.local/bin/kimi"
+            ],
+            supportsNonInteractiveRuns: true,
+            supportsPTY: true,
+            supportsResume: true,
+            supportsStructuredOutput: true,
+            supportsMCPConfig: true,
+            mcpMode: .mcpConfigFile,
             promptInjectionModes: [.argumentPrompt, .skill, .workspaceInstructions]
         ),
         AgentRuntimeProfile(

@@ -3,12 +3,13 @@ set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-Usage: scripts/agent-runtime-smoke.sh [--codex] [--claude] [--kimi-openclaw] [--hermes-kimi] [--pi]
+Usage: scripts/agent-runtime-smoke.sh [--codex] [--claude] [--kimi-cli] [--kimi-openclaw] [--hermes-kimi] [--pi]
 
 Options:
-  --all              Run Codex, Claude Code, OpenClaw Kimi, Hermes Kimi, and pi routes.
+  --all              Run Codex, Claude Code, Kimi CLI, OpenClaw Kimi, Hermes Kimi, and pi routes.
   --codex            Run codex exec in a fixture Episteme workspace.
   --claude           Run claude --print in a fixture Episteme workspace.
+  --kimi-cli         Run kimi -p with stream-json output in a fixture Episteme workspace.
   --kimi-openclaw    Run openclaw agent --local --json with OPENCLAW_MODEL.
   --hermes-kimi      Run hermes chat through the Kimi provider.
   --pi               Run pi print mode in the fixture workspace.
@@ -21,6 +22,7 @@ USAGE
 
 run_codex=0
 run_claude=0
+run_kimi_cli=0
 run_kimi_openclaw=0
 run_hermes_kimi=0
 run_pi=0
@@ -33,6 +35,7 @@ while [ "$#" -gt 0 ]; do
     --all)
       run_codex=1
       run_claude=1
+      run_kimi_cli=1
       run_kimi_openclaw=1
       run_hermes_kimi=1
       run_pi=1
@@ -42,6 +45,9 @@ while [ "$#" -gt 0 ]; do
       ;;
     --claude)
       run_claude=1
+      ;;
+    --kimi-cli)
+      run_kimi_cli=1
       ;;
     --kimi-openclaw)
       run_kimi_openclaw=1
@@ -79,7 +85,7 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 
-if [ "$run_codex$run_claude$run_kimi_openclaw$run_hermes_kimi$run_pi" = "00000" ]; then
+if [ "$run_codex$run_claude$run_kimi_cli$run_kimi_openclaw$run_hermes_kimi$run_pi" = "000000" ]; then
   usage >&2
   exit 2
 fi
@@ -212,7 +218,9 @@ JSONL
 mcp_config_path=""
 if [ "$mcp_endpoint" != "" ]; then
   mcp_config_path="$workspace/mcp.json"
-  ruby -rjson -e 'path, url, token = ARGV; File.write(path, JSON.pretty_generate({"mcpServers" => {"paper-codex" => {"url" => url, "headers" => {"Authorization" => "Bearer #{token}"}}}}))' "$mcp_config_path" "$mcp_endpoint" "$mcp_token"
+  ruby -rjson -e 'path, url, token = ARGV; File.write(path, JSON.pretty_generate({"mcpServers" => {"paper-codex" => {"type" => "http", "url" => url, "headers" => {"Authorization" => "Bearer #{token}"}}}}))' "$mcp_config_path" "$mcp_endpoint" "$mcp_token"
+  mkdir -p "$workspace/.kimi-code"
+  cp "$mcp_config_path" "$workspace/.kimi-code/mcp.json"
 fi
 
 ruby -rjson -e '
@@ -330,6 +338,18 @@ if [ "$run_claude" -eq 1 ]; then
   fi
   claude_args+=("$prompt")
   run_and_verify "claude-code" "$workspace/turns/claude-output.log" claude "${claude_args[@]}"
+fi
+
+if [ "$run_kimi_cli" -eq 1 ]; then
+  require_executable kimi
+  prompt=$(make_prompt "kimi-cli")
+  if [ "${KIMI_CLI_MODEL:-}" != "" ]; then
+    run_and_verify "kimi-cli" "$workspace/turns/kimi-cli-output.log" \
+      kimi -m "$KIMI_CLI_MODEL" -p "$prompt" --output-format stream-json
+  else
+    run_and_verify "kimi-cli" "$workspace/turns/kimi-cli-output.log" \
+      kimi -p "$prompt" --output-format stream-json
+  fi
 fi
 
 if [ "$run_kimi_openclaw" -eq 1 ]; then
