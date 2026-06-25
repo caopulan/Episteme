@@ -704,6 +704,18 @@ struct SettingsView: View {
                 }
             }
 
+            if let warning = model.agentRuntimeProfileLoadWarning {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                    Text(warning)
+                        .font(.paperCodexSystem(size: 13))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+                .help(model.agentRuntimeProfileConfigPath)
+            }
+
             VStack(alignment: .leading, spacing: 10) {
                 ForEach(model.agentRuntimeProfiles) { profile in
                     agentRuntimeRow(profile)
@@ -1735,6 +1747,8 @@ private extension AgentRuntimeMCPMode {
             "Codex config"
         case .mcpConfigFile:
             "MCP file"
+        case .acpSession:
+            "ACP session"
         case .configuredExternally:
             "External"
         case .workspaceOnly:

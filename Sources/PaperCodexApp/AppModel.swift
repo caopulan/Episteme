@@ -959,7 +959,7 @@ final class AppModel: ObservableObject {
     private let libraryStore = LibraryFeatureStore()
     private let readerStore = ReaderFeatureStore()
     private let discoverStore: DiscoverFeatureStore
-    private let agentRuntimeStore = AgentRuntimeStore()
+    private let agentRuntimeStore: AgentRuntimeStore
     private let agentRunCoordinator = AgentRunCoordinator()
     private var repository: PaperRepository?
     private let supportRoot: URL
@@ -1148,6 +1148,14 @@ final class AppModel: ObservableObject {
         agentRuntimeStore.profiles
     }
 
+    var agentRuntimeProfileConfigPath: String {
+        agentRuntimeStore.profileConfigURL?.path ?? ""
+    }
+
+    var agentRuntimeProfileLoadWarning: String? {
+        agentRuntimeStore.profileLoadWarning
+    }
+
     var selectedChatRuntimeID: String {
         agentRuntimeStore.selectedChatRuntimeID
     }
@@ -1250,7 +1258,13 @@ final class AppModel: ObservableObject {
         )
 
         let root = PaperCodexPaths.supportRoot()
+        let runtimeProfileLoad = AgentRuntimeProfile.loadProfiles(supportRoot: root)
         supportRoot = root
+        agentRuntimeStore = AgentRuntimeStore(
+            profiles: runtimeProfileLoad.profiles,
+            profileConfigURL: runtimeProfileLoad.configURL,
+            profileLoadWarning: runtimeProfileLoad.warning
+        )
         arxivCache = ArxivFeedCache(root: root.appendingPathComponent("arxiv-cache", isDirectory: true))
         localDiscoverCache = LocalDiscoverCache(root: root.appendingPathComponent("discover-cache", isDirectory: true))
         thumbnailCache = PDFThumbnailCache(root: root.appendingPathComponent("thumbnails", isDirectory: true))
@@ -6605,6 +6619,8 @@ final class AppModel: ObservableObject {
                 workspacePath: session.workspacePath,
                 mcpConfigPath: FileManager.default.fileExists(atPath: mcpConfigPath) ? mcpConfigPath : nil
             )
+        case .acp:
+            throw AppModelError.runtimeDoesNotSupportTerminal(runtimeProfile.displayName)
         case .hermes:
             let executable = try HermesRuntimeAdapter.findExecutable()
             return HermesRuntimeAdapter(executablePath: executable).terminalCommand(

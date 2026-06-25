@@ -115,7 +115,7 @@ final class AgentRunCoordinator {
             providerOverride: request.providerOverride,
             reasoningEffort: request.reasoningEffort,
             prefersWorkspaceImageOutput: request.prefersWorkspaceImageOutput,
-            mcpServers: effectiveRuntimeProfile.id == "codex" ? request.mcpServers : [],
+            mcpServers: (effectiveRuntimeProfile.backend == .codex || effectiveRuntimeProfile.backend == .acp) ? request.mcpServers : [],
             runHandle: runHandle,
             onEvent: onEvent
         )
@@ -206,6 +206,30 @@ final class AgentRunCoordinator {
                 runHandle: request.runHandle
             ) { _ in }
             runResult = run
+        } else if request.runtimeProfile.backend == .acp {
+            let workspaceSession = PaperSession(
+                id: "discover-\(request.arxivID)",
+                title: "Discover Processing",
+                paperIDs: [],
+                codexSessionID: nil,
+                defaultRuntimeID: request.runtimeProfile.id,
+                workspacePath: request.workspaceURL.path,
+                createdAt: Date(),
+                updatedAt: Date()
+            )
+            let command = try acpServerCommand(
+                session: workspaceSession,
+                runtimeProfile: request.runtimeProfile
+            )
+            let run = try await runACPCommand(
+                command,
+                prompt: request.prompt,
+                workspaceURL: request.workspaceURL,
+                eventLogURL: request.eventLogURL,
+                mcpServers: [],
+                runHandle: request.runHandle
+            ) { _ in }
+            runResult = run
         } else {
             let command = try nonCodexCommand(
                 prompt: request.prompt,
@@ -276,6 +300,25 @@ final class AgentRunCoordinator {
                     ),
                     mcpServers: mcpServers
                 ),
+                runHandle: runHandle,
+                onEvent: onEvent
+            )
+        }
+
+        if runtimeProfile.backend == .acp {
+            let command = try acpServerCommand(
+                session: session,
+                runtimeProfile: runtimeProfile
+            )
+            let eventLogURL = URL(fileURLWithPath: session.workspacePath, isDirectory: true)
+                .appendingPathComponent("turns", isDirectory: true)
+                .appendingPathComponent("\(UUID().uuidString.lowercased())-\(runtimeProfile.id)-acp.jsonl")
+            return try await runACPCommand(
+                command,
+                prompt: prompt,
+                workspaceURL: URL(fileURLWithPath: session.workspacePath, isDirectory: true),
+                eventLogURL: eventLogURL,
+                mcpServers: mcpServers,
                 runHandle: runHandle,
                 onEvent: onEvent
             )
@@ -415,6 +458,11 @@ final class AgentRunCoordinator {
                 systemPrompt: "Use the Episteme citation contract and workspace files.",
                 mcpConfigPath: FileManager.default.fileExists(atPath: mcpConfigPath) ? mcpConfigPath : nil
             )
+        case .acp:
+            return try acpServerCommand(
+                session: session,
+                runtimeProfile: runtimeProfile
+            )
         case .hermes:
             let executable = try HermesRuntimeAdapter.findExecutable()
             return HermesRuntimeAdapter(executablePath: executable).nonInteractiveCommand(
@@ -450,6 +498,17 @@ final class AgentRunCoordinator {
                 agentInstructionsPath: FileManager.default.fileExists(atPath: agentInstructionsPath) ? agentInstructionsPath : nil
             )
         }
+    }
+
+    private func acpServerCommand(
+        session: PaperSession,
+        runtimeProfile: AgentRuntimeProfile
+    ) throws -> AgentRuntimeCommand {
+        let executable = try ACPAgentRuntimeAdapter.findExecutable(for: runtimeProfile)
+        return ACPAgentRuntimeAdapter(
+            executablePath: executable,
+            profile: runtimeProfile
+        ).serverCommand(workspacePath: session.workspacePath)
     }
 
     private func runHermesBridgeCommand(
@@ -501,6 +560,35 @@ final class AgentRunCoordinator {
             stdout: stdout,
             lastMessage: buffer.finalAnswer ?? "",
             threadID: buffer.sessionID,
+            generatedImages: [],
+            tokenUsage: nil
+        )
+    }
+
+    private func runACPCommand(
+        _ command: AgentRuntimeCommand,
+        prompt: String,
+        workspaceURL: URL,
+        eventLogURL: URL,
+        mcpServers: [CodexMCPServerConfig],
+        runHandle: AgentRunHandle,
+        onEvent: @escaping @Sendable (AgentRunEvent) -> Void
+    ) async throws -> AgentRunResult {
+        let result = try await Task.detached(priority: .userInitiated) {
+            let client = ACPAgentClient(
+                command: command,
+                workspaceURL: workspaceURL,
+                mcpServers: mcpServers,
+                timeoutSeconds: 300,
+                runHandle: runHandle
+            )
+            return try client.runPrompt(prompt, onEvent: onEvent)
+        }.value
+        try result.transcript.write(to: eventLogURL, atomically: true, encoding: .utf8)
+        return AgentRunResult(
+            stdout: result.transcript,
+            lastMessage: result.finalText,
+            threadID: nil,
             generatedImages: [],
             tokenUsage: nil
         )

@@ -1638,9 +1638,12 @@ func runUILayoutSourceChecks() throws {
             && agentRuntimeStoreSource.contains("authSummariesByRuntimeID")
             && agentRuntimeStoreSource.contains("func refreshDiagnostics() async")
             && agentRuntimeStoreSource.contains("safeAuthStatusArguments")
-            && appModelSource.contains("private let agentRuntimeStore = AgentRuntimeStore()")
+            && agentRuntimeStoreSource.contains("profileLoadWarning")
+            && appModelSource.contains("AgentRuntimeProfile.loadProfiles(supportRoot: root)")
+            && appModelSource.contains("private let agentRuntimeStore: AgentRuntimeStore")
             && appModelSource.contains("agentRuntimeStore.objectWillChange")
             && appModelSource.contains("var agentRuntimeProfiles: [AgentRuntimeProfile]")
+            && appModelSource.contains("var agentRuntimeProfileLoadWarning: String?")
             && appModelSource.contains("var selectedChatRuntimeDisplayName: String")
             && appModelSource.contains("func setSelectedChatRuntimeID")
             && appModelSource.contains("func setAgentRuntimeEnabled")
@@ -5060,7 +5063,7 @@ func runCodexCLIChecks() throws {
 func runAgentRuntimeProfileChecks() throws {
     let profiles = AgentRuntimeProfile.defaultProfiles
     let profilesByID = Dictionary(uniqueKeysWithValues: profiles.map { ($0.id, $0) })
-    try check(Set(profilesByID.keys) == ["codex", "claude-code", "hermes", "kimi-cli", "openclaw-kimi", "pi"], "default agent runtime profiles should cover Codex, Claude Code, Hermes, Kimi CLI, OpenClaw Kimi, and pi")
+    try check(Set(profilesByID.keys) == ["codex", "claude-code", "hermes", "kimi-cli", "kimi-acp", "gemini-acp", "openclaw-kimi", "pi"], "default agent runtime profiles should cover Codex, Claude Code, Hermes, Kimi CLI, Kimi ACP, Gemini ACP, OpenClaw Kimi, and pi")
 
     let codex = try requiredProfile("codex", in: profilesByID)
     try check(codex.backend == .codex, "Codex profile should use the codex backend")
@@ -5096,6 +5099,22 @@ func runAgentRuntimeProfileChecks() throws {
     try check(kimi.supportsMCPConfig, "Kimi CLI profile should use project-level MCP config")
     try check(kimi.promptInjectionModes.contains(.skill), "Kimi CLI profile should support skills-dir prompt context")
 
+    let kimiACP = try requiredProfile("kimi-acp", in: profilesByID)
+    try check(kimiACP.backend == .acp, "Kimi ACP profile should use the generic ACP backend")
+    try check(kimiACP.executableName == "kimi", "Kimi ACP profile should launch kimi")
+    try check(kimiACP.acpServerArguments == ["acp"], "Kimi ACP profile should start the kimi ACP stdio server")
+    try check(kimiACP.supportsNonInteractiveRuns, "Kimi ACP profile should support non-interactive chat turns")
+    try check(!kimiACP.supportsPTY, "Kimi ACP profile should not expose the ACP stdio server as an interactive terminal")
+    try check(kimiACP.supportsStructuredOutput, "Kimi ACP profile should expose streamed structured updates")
+
+    let geminiACP = try requiredProfile("gemini-acp", in: profilesByID)
+    try check(geminiACP.backend == .acp, "Gemini ACP profile should use the generic ACP backend")
+    try check(geminiACP.executableName == "gemini", "Gemini ACP profile should launch gemini")
+    try check(geminiACP.acpServerArguments == ["--experimental-acp"], "Gemini ACP profile should start Gemini's ACP stdio mode")
+    try check(geminiACP.supportsNonInteractiveRuns, "Gemini ACP profile should support non-interactive chat turns")
+    try check(!geminiACP.supportsPTY, "Gemini ACP profile should not expose the ACP stdio server as an interactive terminal")
+    try check(geminiACP.supportsStructuredOutput, "Gemini ACP profile should expose streamed structured updates")
+
     let openClaw = try requiredProfile("openclaw-kimi", in: profilesByID)
     try check(openClaw.backend == .openClawKimi, "OpenClaw Kimi profile should use the OpenClaw Kimi backend")
     try check(openClaw.executableName == "openclaw", "OpenClaw Kimi profile should launch openclaw")
@@ -5113,6 +5132,63 @@ func runAgentRuntimeProfileChecks() throws {
     let decoder = JSONDecoder()
     let decoded = try decoder.decode([AgentRuntimeProfile].self, from: encoder.encode(profiles))
     try check(decoded == profiles, "agent runtime profiles should JSON round-trip")
+
+    let supportRoot = FileManager.default.temporaryDirectory
+        .appendingPathComponent("paper-codex-runtime-profiles-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: supportRoot, withIntermediateDirectories: true)
+    defer {
+        try? FileManager.default.removeItem(at: supportRoot)
+    }
+    let configURL = AgentRuntimeProfile.externalProfilesURL(supportRoot: supportRoot)
+    let customProfileJSON = """
+    {
+      "profiles": [
+        {
+          "id": "local-acp-test",
+          "displayName": "Local ACP Test",
+          "backend": "acp",
+          "executableName": "local-acp",
+          "knownExecutablePaths": ["/opt/local/bin/local-acp"],
+          "supportsNonInteractiveRuns": true,
+          "supportsPTY": false,
+          "supportsResume": false,
+          "supportsStructuredOutput": true,
+          "supportsMCPConfig": true,
+          "mcpMode": "acp-session",
+          "promptInjectionModes": ["argument-prompt", "workspace-instructions"],
+          "acpServerArguments": ["serve", "--acp"]
+        },
+        {
+          "id": "gemini-acp",
+          "displayName": "Gemini ACP Custom",
+          "backend": "acp",
+          "executableName": "gemini-custom",
+          "knownExecutablePaths": ["/opt/local/bin/gemini-custom"],
+          "supportsNonInteractiveRuns": true,
+          "supportsPTY": false,
+          "supportsResume": false,
+          "supportsStructuredOutput": true,
+          "supportsMCPConfig": true,
+          "mcpMode": "acp-session",
+          "promptInjectionModes": ["argument-prompt", "workspace-instructions"],
+          "acpServerArguments": ["--experimental-acp", "--profile", "custom"]
+        }
+      ]
+    }
+    """
+    try customProfileJSON.write(to: configURL, atomically: true, encoding: .utf8)
+    let loadedResult = AgentRuntimeProfile.loadProfiles(supportRoot: supportRoot)
+    let loadedByID = Dictionary(uniqueKeysWithValues: loadedResult.profiles.map { ($0.id, $0) })
+    try check(loadedResult.warning == nil, "valid external runtime profile config should not produce a warning")
+    let localACP = try requiredProfile("local-acp-test", in: loadedByID)
+    try check(localACP.backend == .acp && localACP.acpServerArguments == ["serve", "--acp"], "external ACP profiles should be loaded from agent-runtimes.json")
+    let overriddenGemini = try requiredProfile("gemini-acp", in: loadedByID)
+    try check(overriddenGemini.displayName == "Gemini ACP Custom" && overriddenGemini.executableName == "gemini-custom", "external profiles should override defaults by id while preserving the list")
+
+    try #"{ "profiles": [ { "id": "broken" } ] }"#.write(to: configURL, atomically: true, encoding: .utf8)
+    let brokenResult = AgentRuntimeProfile.loadProfiles(supportRoot: supportRoot)
+    try check(brokenResult.profiles == AgentRuntimeProfile.defaultProfiles, "broken external runtime profile config should fall back to defaults")
+    try check(brokenResult.warning?.contains("agent-runtimes.json") == true, "broken external runtime profile config should surface a warning")
 }
 
 func runAgentWorkspaceManifestChecks() throws {
@@ -5174,6 +5250,7 @@ func runAgentCommandBuilderChecks() throws {
     let claudeExecutable = try makeExecutable("claude")
     let hermesExecutable = try makeExecutable("hermes")
     let kimiExecutable = try makeExecutable("kimi")
+    let geminiExecutable = try makeExecutable("gemini")
     let openClawExecutable = try makeExecutable("openclaw")
     let piExecutable = try makeExecutable("pi")
     let pathEnvironment = ["PATH": executableRoot.path, "HOME": executableRoot.path]
@@ -5194,6 +5271,18 @@ func runAgentCommandBuilderChecks() throws {
         discoveredKimiExecutable == kimiExecutable,
         "Kimi CLI adapter should discover kimi from PATH"
     )
+    let kimiACPProfile = try require(AgentRuntimeProfile.defaultProfile(id: "kimi-acp"), "Kimi ACP profile should exist")
+    let geminiACPProfile = try require(AgentRuntimeProfile.defaultProfile(id: "gemini-acp"), "Gemini ACP profile should exist")
+    let discoveredKimiACPExecutable = try ACPAgentRuntimeAdapter.findExecutable(
+        for: kimiACPProfile,
+        environment: pathEnvironment
+    )
+    let discoveredGeminiACPExecutable = try ACPAgentRuntimeAdapter.findExecutable(
+        for: geminiACPProfile,
+        environment: pathEnvironment
+    )
+    try check(discoveredKimiACPExecutable == kimiExecutable, "ACP adapter should discover Kimi from PATH")
+    try check(discoveredGeminiACPExecutable == geminiExecutable, "ACP adapter should discover Gemini from PATH")
     try check(
         discoveredOpenClawExecutable == openClawExecutable,
         "OpenClaw adapter should discover openclaw from PATH"
@@ -5329,6 +5418,20 @@ func runAgentCommandBuilderChecks() throws {
     )
     try check(kimi.currentDirectoryPath == "/tmp/session-a", "Kimi CLI adapter should run from the session workspace so project MCP config is discovered")
 
+    let kimiACP = ACPAgentRuntimeAdapter(
+        executablePath: "/opt/homebrew/bin/kimi",
+        profile: kimiACPProfile
+    ).serverCommand(workspacePath: "/tmp/session-a")
+    try check(kimiACP.arguments == ["acp"], "Kimi ACP adapter should build the kimi acp stdio server command")
+    try check(kimiACP.currentDirectoryPath == "/tmp/session-a", "Kimi ACP adapter should start from the session workspace")
+
+    let geminiACP = ACPAgentRuntimeAdapter(
+        executablePath: "/opt/homebrew/bin/gemini",
+        profile: geminiACPProfile
+    ).serverCommand(workspacePath: "/tmp/session-a")
+    try check(geminiACP.arguments == ["--experimental-acp"], "Gemini ACP adapter should build the Gemini ACP stdio server command")
+    try check(geminiACP.currentDirectoryPath == "/tmp/session-a", "Gemini ACP adapter should start from the session workspace")
+
     let openClaw = OpenClawRuntimeAdapter(executablePath: "/opt/homebrew/bin/openclaw").nonInteractiveCommand(
         prompt: "Summarize",
         workspacePath: "/tmp/session-a",
@@ -5421,6 +5524,129 @@ func runAgentCommandBuilderChecks() throws {
     try check(piTerminal.launchMode == .pty, "pi terminal command should launch in PTY mode")
     try check(piTerminal.arguments.contains("--session-dir") && piTerminal.arguments.contains("--append-system-prompt"), "pi terminal command should keep session storage and prompt files")
 }
+
+func runACPAgentClientChecks() throws {
+    let tempRoot = FileManager.default.temporaryDirectory
+        .appendingPathComponent("paper-codex-acp-client-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+    defer {
+        try? FileManager.default.removeItem(at: tempRoot)
+    }
+
+    let manifestURL = tempRoot.appendingPathComponent("workspace_manifest.json")
+    try #"{"session_id":"acp-check","papers":[]}"#.write(to: manifestURL, atomically: true, encoding: .utf8)
+    let outputURL = tempRoot.appendingPathComponent("acp-output.txt")
+    let logURL = tempRoot.appendingPathComponent("fake-acp.jsonl")
+    let fakeServerURL = tempRoot.appendingPathComponent("fake_acp_server.rb")
+    try fakeACPServerScript.write(to: fakeServerURL, atomically: true, encoding: .utf8)
+
+    let rubyExecutable = try AgentRuntimeExecutableResolver.executablePath(
+        named: "ruby",
+        additionalPaths: ["/usr/bin/ruby", "/opt/homebrew/bin/ruby", "/usr/local/bin/ruby"]
+    )
+    let command = AgentRuntimeCommand(
+        executablePath: rubyExecutable,
+        arguments: [fakeServerURL.path, logURL.path, outputURL.path],
+        currentDirectoryPath: tempRoot.path
+    )
+    let client = ACPAgentClient(
+        command: command,
+        workspaceURL: tempRoot,
+        timeoutSeconds: 5
+    )
+    let result = try client.runPrompt("Read workspace_manifest.json and write the requested output.")
+
+    try check(result.sessionID == "sess_fake", "ACP client should retain the returned session id")
+    try check(result.stopReason == "end_turn", "ACP client should surface the final stop reason")
+    try check(result.finalText == "workspace ok\n", "ACP client should collect agent_message_chunk text")
+    let writtenText = try String(contentsOf: outputURL, encoding: .utf8)
+    try check(writtenText == "written through client fs\n", "ACP client should service fs/write_text_file inside the workspace")
+
+    let loggedMethods = try String(contentsOf: logURL, encoding: .utf8)
+        .split(whereSeparator: \.isNewline)
+        .compactMap { line -> String? in
+            let data = Data(String(line).utf8)
+            let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+            let message = object?["from_client"] as? [String: Any]
+            return message?["method"] as? String
+        }
+    try check(loggedMethods.prefix(3) == ["initialize", "session/new", "session/prompt"], "ACP client should initialize, create a session, then send the prompt")
+}
+
+let fakeACPServerScript = #"""
+#!/usr/bin/env ruby
+require "json"
+
+log_path = ARGV.fetch(0)
+output_path = ARGV.fetch(1)
+
+def emit(payload)
+  STDOUT.write(JSON.generate(payload))
+  STDOUT.write("\n")
+  STDOUT.flush
+end
+
+def read_message(log_path)
+  line = STDIN.gets
+  exit(1) if line.nil?
+  message = JSON.parse(line)
+  File.open(log_path, "a") do |file|
+    file.puts(JSON.generate({ "from_client" => message }))
+  end
+  message
+end
+
+loop do
+  message = read_message(log_path)
+  request_id = message["id"]
+  case message["method"]
+  when "initialize"
+    emit({
+      "jsonrpc" => "2.0",
+      "id" => request_id,
+      "result" => {
+        "protocolVersion" => 1,
+        "agentCapabilities" => {
+          "promptCapabilities" => { "image" => false },
+          "sessionCapabilities" => { "close" => true }
+        },
+        "authMethods" => []
+      }
+    })
+  when "session/new"
+    emit({ "jsonrpc" => "2.0", "id" => request_id, "result" => { "sessionId" => "sess_fake" } })
+  when "session/prompt"
+    emit({
+      "jsonrpc" => "2.0",
+      "method" => "session/update",
+      "params" => {
+        "sessionId" => "sess_fake",
+        "update" => {
+          "sessionUpdate" => "agent_message_chunk",
+          "content" => { "type" => "text", "text" => "workspace ok\n" }
+        }
+      }
+    })
+    emit({
+      "jsonrpc" => "2.0",
+      "id" => "server-write",
+      "method" => "fs/write_text_file",
+      "params" => {
+        "sessionId" => "sess_fake",
+        "path" => output_path,
+        "content" => "written through client fs\n"
+      }
+    })
+    read_message(log_path)
+    emit({ "jsonrpc" => "2.0", "id" => request_id, "result" => { "stopReason" => "end_turn" } })
+  when "session/close"
+    emit({ "jsonrpc" => "2.0", "id" => request_id, "result" => {} })
+    exit(0)
+  else
+    emit({ "jsonrpc" => "2.0", "id" => request_id, "result" => {} }) unless request_id.nil?
+  end
+end
+"""#
 
 func runAgentSessionMigrationChecks() throws {
     let root = FileManager.default.temporaryDirectory
@@ -5626,6 +5852,8 @@ func runAgentRuntimeSmokeScriptChecks() throws {
     try check(script.contains("--codex") && script.contains("codex exec"), "smoke script should support Codex exec")
     try check(script.contains("--claude") && script.contains("claude --print"), "smoke script should support Claude Code print mode")
     try check(script.contains("--kimi-cli") && script.contains("kimi -p") && script.contains("--output-format stream-json"), "smoke script should support Kimi CLI prompt mode")
+    try check(script.contains("--kimi-acp") && script.contains("kimi acp"), "smoke script should support Kimi ACP mode")
+    try check(script.contains("--gemini-acp") && script.contains("gemini --experimental-acp"), "smoke script should support Gemini ACP mode")
     try check(script.contains("--kimi-openclaw") && script.contains("openclaw agent"), "smoke script should support OpenClaw Kimi route")
     try check(script.contains("--hermes-kimi") && script.contains("hermes chat"), "smoke script should support Hermes Kimi fallback route")
     try check(script.contains("workspace_manifest.json"), "smoke script should create or inspect a Paper Codex workspace manifest")
@@ -5635,11 +5863,13 @@ func runAgentRuntimeSmokeScriptChecks() throws {
 
     let readme = try String(contentsOf: sourceRoot.appendingPathComponent("README.md"))
     let readmeZH = try String(contentsOf: sourceRoot.appendingPathComponent("README.zh-CN.md"))
-    try check(readme.contains("scripts/agent-runtime-smoke.sh --codex --claude --kimi-cli --kimi-openclaw"), "English README should document multi-runtime smoke checks")
+    try check(readme.contains("scripts/agent-runtime-smoke.sh --codex --claude --kimi-cli --kimi-acp --gemini-acp --kimi-openclaw"), "English README should document multi-runtime smoke checks")
     try check(readme.contains("Kimi CLI"), "English README should document the native Kimi CLI runtime route")
+    try check(readme.contains("Kimi ACP") && readme.contains("Gemini ACP"), "English README should document ACP runtime routes")
     try check(readme.contains("OpenClaw Kimi"), "English README should document the Kimi runtime route")
-    try check(readmeZH.contains("scripts/agent-runtime-smoke.sh --codex --claude --kimi-cli --kimi-openclaw"), "Chinese README should document multi-runtime smoke checks")
+    try check(readmeZH.contains("scripts/agent-runtime-smoke.sh --codex --claude --kimi-cli --kimi-acp --gemini-acp --kimi-openclaw"), "Chinese README should document multi-runtime smoke checks")
     try check(readmeZH.contains("Kimi CLI"), "Chinese README should document the native Kimi CLI runtime route")
+    try check(readmeZH.contains("Kimi ACP") && readmeZH.contains("Gemini ACP"), "Chinese README should document ACP runtime routes")
     try check(readmeZH.contains("OpenClaw Kimi"), "Chinese README should document the Kimi runtime route")
 }
 
@@ -7016,6 +7246,10 @@ do {
     if selectedChecks.isEmpty || selectedChecks.contains("agent-command-builders") {
         try runAgentCommandBuilderChecks()
         print("agent-command-builders: pass")
+    }
+    if selectedChecks.isEmpty || selectedChecks.contains("acp-agent-client") {
+        try runACPAgentClientChecks()
+        print("acp-agent-client: pass")
     }
     if selectedChecks.isEmpty || selectedChecks.contains("agent-session-migration") {
         try runAgentSessionMigrationChecks()

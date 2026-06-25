@@ -66,11 +66,11 @@ See the full visual tour in [docs/showcase.md](docs/showcase.md).
 
 - 📚 **Local paper library** - import PDFs, organize them into nested folders, add tags, and keep durable metadata in SQLite.
 - 📖 **Native PDF reader** - read with PDFKit, switch paper tabs, zoom smoothly, and preserve reader context.
-- 🔎 **Source-grounded chat** - select text in the PDF, ask Codex, and keep citations tied to original page regions.
-- 🧰 **Codex session workspaces** - each chat session writes a local workspace with PDFs, metadata, anchors, extracted text, and turn logs.
+- 🔎 **Source-grounded chat** - select text in the PDF, ask a local agent runtime, and keep citations tied to original page regions.
+- 🧰 **Agent session workspaces** - each chat session writes a local workspace with PDFs, metadata, anchors, extracted text, and turn logs.
 - 🎨 **Generated image support** - image-generation requests can surface directly in the chat, with in-app zoomable previews.
 - 🔭 **Local arXiv Explore** - browse arXiv metadata directly, cache feeds/PDFs/thumbnails, and save papers into the local library.
-- ✨ **Codex enrichment** - process Explore results for Chinese titles, summaries, contribution notes, tags, and useful links.
+- ✨ **Agent enrichment** - process Explore results for Chinese titles, summaries, contribution notes, tags, and useful links.
 - 🧭 **Similarity ranking** - optionally rank arXiv results against local folders or tags using an OpenAI-compatible embedding provider.
 - 🔒 **Local-first storage** - no Episteme account, cloud sync, or product API is required for the current version.
 
@@ -81,7 +81,8 @@ See the full visual tour in [docs/showcase.md](docs/showcase.md).
 - macOS 14 or newer
 - Swift 6.2 toolchain
 - Xcode command line tools
-- [Codex CLI](https://github.com/openai/codex) for chat, enrichment, and image-generation workflows
+- [Codex CLI](https://github.com/openai/codex) for Codex chat, enrichment, and image-generation workflows
+- Local agent CLIs for optional runtime routes, including Kimi ACP (`kimi acp`) and Gemini ACP (`gemini --experimental-acp`)
 
 Check the basic toolchain:
 
@@ -183,6 +184,7 @@ Typical contents:
 ```text
 Episteme/
 ├── store.sqlite
+├── agent-runtimes.json
 ├── papers/
 ├── sessions/
 ├── arxiv-cache/
@@ -227,15 +229,16 @@ swift run PaperCodexCoreChecks arxiv-feed
 Run local agent runtime smoke checks against a safe fixture workspace:
 
 ```bash
-scripts/agent-runtime-smoke.sh --codex --claude --kimi-cli --kimi-openclaw
+scripts/agent-runtime-smoke.sh --codex --claude --kimi-cli --kimi-acp --gemini-acp --kimi-openclaw
 ```
 
-The smoke script verifies that Codex, Claude Code, native Kimi CLI, and the OpenClaw Kimi route can see `workspace_manifest.json`, the Episteme citation contract, and the live MCP endpoint when the app is running. It is read-only by default and does not mutate library papers, folders, tags, or notes.
+The smoke script verifies that Codex, Claude Code, native Kimi CLI, Kimi ACP, Gemini ACP, and the OpenClaw Kimi route can see `workspace_manifest.json`, the Episteme citation contract, and the live MCP endpoint when the app is running. It is read-only by default and does not mutate library papers, folders, tags, or notes.
 
-If OpenClaw Kimi is blocked by local account or membership state, use the native Kimi CLI route or the configured Hermes Kimi route:
+If OpenClaw Kimi is blocked by local account or membership state, use the native Kimi CLI route, an ACP route, or the configured Hermes Kimi route:
 
 ```bash
 scripts/agent-runtime-smoke.sh --kimi-cli
+scripts/agent-runtime-smoke.sh --kimi-acp --gemini-acp
 scripts/agent-runtime-smoke.sh --hermes-kimi
 ```
 
@@ -265,7 +268,7 @@ Core runtime pieces:
 - `PDFIndexExtractor` extracts page text, spans, and anchors from text-layer PDFs.
 - `SessionWorkspaceManager` writes per-session paper workspaces.
 - `CodexAgentRuntime` invokes `codex exec` and `codex exec resume`.
-- Agent runtime adapters launch Codex, Claude Code, Hermes, OpenClaw Kimi, and pi against the same session workspace contract.
+- Agent runtime adapters launch Codex, Claude Code, ACP agents such as Kimi ACP and Gemini ACP, Hermes, OpenClaw Kimi, and pi against the same session workspace contract.
 - `LocalArxivClient` and `ArxivFeedCache` power local arXiv discovery.
 - `SimilarityRanker` computes optional local similarity ordering.
 
@@ -284,10 +287,35 @@ The app also respects:
 
 ```bash
 EPISTEME_SUPPORT_ROOT=/custom/support/root
+EPISTEME_AGENT_RUNTIMES_PATH=/custom/agent-runtimes.json
 EPISTEME_APP_PATH=/custom/Episteme.app
 EPISTEME_BUILD_CONFIGURATION=release
 EPISTEME_BUNDLE_IDENTIFIER=local.episteme.app
 EPISTEME_CODESIGN_IDENTITY=-
+```
+
+Additional ACP runtimes can be added without rebuilding by writing `agent-runtimes.json` in the support directory, or by pointing `EPISTEME_AGENT_RUNTIMES_PATH` at another JSON file:
+
+```json
+{
+  "profiles": [
+    {
+      "id": "local-acp-agent",
+      "displayName": "Local ACP Agent",
+      "backend": "acp",
+      "executableName": "local-agent",
+      "knownExecutablePaths": ["/opt/homebrew/bin/local-agent"],
+      "supportsNonInteractiveRuns": true,
+      "supportsPTY": false,
+      "supportsResume": false,
+      "supportsStructuredOutput": true,
+      "supportsMCPConfig": true,
+      "mcpMode": "acp-session",
+      "promptInjectionModes": ["argument-prompt", "workspace-instructions"],
+      "acpServerArguments": ["acp"]
+    }
+  ]
+}
 ```
 
 The legacy `PAPER_CODEX_*` environment variables are still accepted for existing development scripts and local setups.

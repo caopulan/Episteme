@@ -3,13 +3,15 @@ set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-Usage: scripts/agent-runtime-smoke.sh [--codex] [--claude] [--kimi-cli] [--kimi-openclaw] [--hermes-kimi] [--pi]
+Usage: scripts/agent-runtime-smoke.sh [--codex] [--claude] [--kimi-cli] [--kimi-acp] [--gemini-acp] [--kimi-openclaw] [--hermes-kimi] [--pi]
 
 Options:
-  --all              Run Codex, Claude Code, Kimi CLI, OpenClaw Kimi, Hermes Kimi, and pi routes.
+  --all              Run Codex, Claude Code, Kimi CLI, Kimi ACP, Gemini ACP, OpenClaw Kimi, Hermes Kimi, and pi routes.
   --codex            Run codex exec in a fixture Episteme workspace.
   --claude           Run claude --print in a fixture Episteme workspace.
   --kimi-cli         Run kimi -p with stream-json output in a fixture Episteme workspace.
+  --kimi-acp         Run kimi acp through a fixture Episteme ACP client.
+  --gemini-acp       Run gemini --experimental-acp through a fixture Episteme ACP client.
   --kimi-openclaw    Run openclaw agent --local --json with OPENCLAW_MODEL.
   --hermes-kimi      Run hermes chat through the Kimi provider.
   --pi               Run pi print mode in the fixture workspace.
@@ -23,6 +25,8 @@ USAGE
 run_codex=0
 run_claude=0
 run_kimi_cli=0
+run_kimi_acp=0
+run_gemini_acp=0
 run_kimi_openclaw=0
 run_hermes_kimi=0
 run_pi=0
@@ -36,6 +40,8 @@ while [ "$#" -gt 0 ]; do
       run_codex=1
       run_claude=1
       run_kimi_cli=1
+      run_kimi_acp=1
+      run_gemini_acp=1
       run_kimi_openclaw=1
       run_hermes_kimi=1
       run_pi=1
@@ -48,6 +54,12 @@ while [ "$#" -gt 0 ]; do
       ;;
     --kimi-cli)
       run_kimi_cli=1
+      ;;
+    --kimi-acp)
+      run_kimi_acp=1
+      ;;
+    --gemini-acp)
+      run_gemini_acp=1
       ;;
     --kimi-openclaw)
       run_kimi_openclaw=1
@@ -85,7 +97,7 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 
-if [ "$run_codex$run_claude$run_kimi_cli$run_kimi_openclaw$run_hermes_kimi$run_pi" = "000000" ]; then
+if [ "$run_codex$run_claude$run_kimi_cli$run_kimi_acp$run_gemini_acp$run_kimi_openclaw$run_hermes_kimi$run_pi" = "00000000" ]; then
   usage >&2
   exit 2
 fi
@@ -318,6 +330,170 @@ run_and_verify() {
   echo "ok: $runtime"
 }
 
+run_acp_and_verify() {
+  local runtime="$1"
+  local output_file="$2"
+  shift 2
+  local prompt
+  prompt=$(make_prompt "$runtime")
+  echo "==> $runtime"
+  ruby -rjson -ropen3 -rthread -rfileutils -e '
+workspace = ARGV.shift
+prompt = ARGV.shift
+output_file = ARGV.shift
+cmd = ARGV
+raise "missing ACP command" if cmd.empty?
+
+def inside_workspace(path, workspace)
+  expanded = File.expand_path(path, workspace)
+  root = File.expand_path(workspace)
+  expanded == root || expanded.start_with?(root + File::SEPARATOR)
+end
+
+def resolve_path(raw, workspace)
+  raise "path must be a string" unless raw.is_a?(String) && !raw.empty?
+  path = raw.start_with?("/") ? File.expand_path(raw) : File.expand_path(raw, workspace)
+  raise "path outside workspace: #{path}" unless inside_workspace(path, workspace)
+  path
+end
+
+stdin, stdout, stderr, wait_thr = Open3.popen3(*cmd, chdir: workspace)
+queue = Queue.new
+stderr_tail = +""
+final_text = +""
+session_id = nil
+request_id = 0
+
+stdout_thread = Thread.new do
+  stdout.each_line do |line|
+    next if line.strip.empty?
+    begin
+      queue << JSON.parse(line)
+    rescue JSON::ParserError => e
+      queue << { "__reader_error" => "#{e}: #{line[0, 500]}" }
+    end
+  end
+  queue << { "__eof" => true }
+end
+
+stderr_thread = Thread.new do
+  stderr.each_line do |line|
+    stderr_tail << line
+    stderr_tail = stderr_tail[-4000, 4000] || stderr_tail
+  end
+end
+
+send_json = lambda do |payload|
+  stdin.write(JSON.generate(payload))
+  stdin.write("\n")
+  stdin.flush
+end
+
+handle_agent_request = lambda do |message|
+  method = message["method"].to_s
+  id = message["id"]
+  params = message["params"] || {}
+  begin
+    result =
+      case method
+      when "fs/read_text_file"
+        path = resolve_path(params["path"], workspace)
+        content = File.read(path, encoding: "UTF-8")
+        if params.key?("line") || params.key?("limit")
+          lines = content.lines
+          start = [(params["line"] || 1).to_i - 1, 0].max
+          limit = params["limit"]&.to_i
+          content = limit ? lines[start, limit].join : lines[start..]&.join.to_s
+        end
+        { "content" => content }
+      when "fs/write_text_file"
+        path = resolve_path(params["path"], workspace)
+        FileUtils.mkdir_p(File.dirname(path))
+        File.write(path, params.fetch("content").to_s, encoding: "UTF-8")
+        {}
+      when "session/request_permission"
+        options = params["options"].is_a?(Array) ? params["options"] : []
+        selected = options.find { |option| option["kind"].to_s.start_with?("allow") } || options.first
+        selected ? { "outcome" => { "outcome" => "selected", "optionId" => selected["optionId"] } } : { "outcome" => { "outcome" => "cancelled" } }
+      else
+        raise "unsupported ACP client method: #{method}"
+      end
+    send_json.call({ "jsonrpc" => "2.0", "id" => id, "result" => result })
+  rescue => e
+    send_json.call({ "jsonrpc" => "2.0", "id" => id, "error" => { "code" => -32603, "message" => e.message } })
+  end
+end
+
+request = lambda do |method, params, timeout|
+  request_id += 1
+  id = request_id
+  send_json.call({ "jsonrpc" => "2.0", "id" => id, "method" => method, "params" => params })
+  deadline = Time.now + timeout
+  loop do
+    raise "ACP #{method} timed out; stderr tail: #{stderr_tail}" if Time.now >= deadline
+    begin
+      message = queue.pop(true)
+    rescue ThreadError
+      sleep 0.05
+      raise "ACP subprocess exited; stderr tail: #{stderr_tail}" unless wait_thr.alive?
+      next
+    end
+    raise message["__reader_error"] if message["__reader_error"]
+    raise "ACP subprocess closed stdout; stderr tail: #{stderr_tail}" if message["__eof"]
+    if message["method"] && message.key?("id")
+      handle_agent_request.call(message)
+      next
+    end
+    if message["method"] == "session/update"
+      update = message.dig("params", "update") || {}
+      if update["sessionUpdate"] == "agent_message_chunk"
+        content = update["content"] || {}
+        final_text << content["text"].to_s if content["type"] == "text"
+      end
+      next
+    end
+    next unless message["id"].to_s == id.to_s
+    raise "ACP #{method} failed: #{message["error"].inspect}; stderr tail: #{stderr_tail}" if message["error"]
+    return message["result"] || {}
+  end
+end
+
+begin
+  initialize = request.call(
+    "initialize",
+    {
+      "protocolVersion" => 1,
+      "clientCapabilities" => { "fs" => { "readTextFile" => true, "writeTextFile" => true }, "terminal" => false },
+      "clientInfo" => { "name" => "episteme-smoke", "title" => "Episteme Smoke", "version" => "0" }
+    },
+    20
+  )
+  raise "ACP protocol mismatch: #{initialize["protocolVersion"].inspect}" unless initialize["protocolVersion"].to_i == 1
+  session = request.call("session/new", { "cwd" => workspace, "mcpServers" => [] }, 60)
+  session_id = session.fetch("sessionId")
+  result = request.call(
+    "session/prompt",
+    { "sessionId" => session_id, "prompt" => [{ "type" => "text", "text" => prompt }] },
+    Integer(ENV.fetch("ACP_SMOKE_TIMEOUT_SECONDS", "180"))
+  )
+  raise "ACP stopped with #{result["stopReason"].inspect}" unless result["stopReason"] == "end_turn"
+  File.write(output_file, final_text, encoding: "UTF-8")
+ensure
+  begin
+    request.call("session/close", { "sessionId" => session_id }, 5) if session_id
+  rescue
+  end
+  stdin.close unless stdin.closed?
+  Process.kill("TERM", wait_thr.pid) if wait_thr.alive?
+  stdout_thread.kill
+  stderr_thread.kill
+end
+' "$workspace" "$prompt" "$output_file" "$@"
+  cat "$output_file"
+  verify_output "$runtime" "$output_file"
+  echo "ok: $runtime"
+}
+
 if [ "$run_codex" -eq 1 ]; then
   require_executable codex
   last_message="$workspace/turns/codex-last-message.json"
@@ -350,6 +526,16 @@ if [ "$run_kimi_cli" -eq 1 ]; then
     run_and_verify "kimi-cli" "$workspace/turns/kimi-cli-output.log" \
       kimi -p "$prompt" --output-format stream-json
   fi
+fi
+
+if [ "$run_kimi_acp" -eq 1 ]; then
+  require_executable kimi
+  run_acp_and_verify "kimi-acp" "$workspace/turns/kimi-acp-output.log" kimi acp
+fi
+
+if [ "$run_gemini_acp" -eq 1 ]; then
+  require_executable gemini
+  run_acp_and_verify "gemini-acp" "$workspace/turns/gemini-acp-output.log" gemini --experimental-acp
 fi
 
 if [ "$run_kimi_openclaw" -eq 1 ]; then

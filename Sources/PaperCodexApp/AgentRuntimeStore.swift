@@ -48,14 +48,20 @@ final class AgentRuntimeStore: ObservableObject {
     @Published private(set) var diagnosticsByRuntimeID: [String: AgentRuntimeDiagnostic] = [:]
     @Published private(set) var authSummariesByRuntimeID: [String: String] = [:]
     @Published private(set) var isRefreshingDiagnostics = false
+    let profileConfigURL: URL?
+    let profileLoadWarning: String?
 
     private let userDefaults: UserDefaults
 
     init(
         profiles: [AgentRuntimeProfile] = AgentRuntimeProfile.defaultProfiles,
+        profileConfigURL: URL? = nil,
+        profileLoadWarning: String? = nil,
         userDefaults: UserDefaults = .standard
     ) {
         self.profiles = profiles
+        self.profileConfigURL = profileConfigURL
+        self.profileLoadWarning = profileLoadWarning
         self.userDefaults = userDefaults
         let validIDs = Set(profiles.map(\.id))
         selectedChatRuntimeID = Self.validRuntimeID(
@@ -258,6 +264,8 @@ private func findExecutable(for profile: AgentRuntimeProfile) throws -> String {
         return try CodexRuntimeAdapter.findExecutable()
     case .claudeCode:
         return try ClaudeCodeRuntimeAdapter.findExecutable()
+    case .acp:
+        return try ACPAgentRuntimeAdapter.findExecutable(for: profile)
     case .hermes:
         return try HermesRuntimeAdapter.findExecutable()
     case .kimiCLI:
@@ -273,6 +281,8 @@ private func versionArguments(for profile: AgentRuntimeProfile) -> [String] {
     switch profile.backend {
     case .kimiCLI:
         return ["--version"]
+    case .acp:
+        return ["--version"]
     case .openClawKimi:
         return ["--version"]
     default:
@@ -286,6 +296,8 @@ private func safeAuthStatusArguments(for profile: AgentRuntimeProfile) -> [Strin
         return ["mcp", "list"]
     case .claudeCode:
         return ["auth", "status"]
+    case .acp:
+        return profile.id == "kimi-acp" ? ["doctor"] : ["--version"]
     case .hermes:
         return ["status"]
     case .kimiCLI:
