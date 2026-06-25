@@ -262,6 +262,35 @@ public struct CodexRunEvent: Codable, Equatable, Identifiable, Sendable {
     }
 }
 
+public extension Array where Element == CodexRunEvent {
+    mutating func appendCoalescingStreamingChunk(_ event: CodexRunEvent, maxCount: Int? = nil) {
+        if let lastIndex = indices.last, self[lastIndex].canCoalesceStreamingChunk(with: event) {
+            self[lastIndex].detail += event.detail
+            self[lastIndex].createdAt = event.createdAt
+            if let usage = event.tokenUsage {
+                self[lastIndex].tokenUsage = self[lastIndex].tokenUsage.map { $0.adding(usage) } ?? usage
+            }
+        } else {
+            append(event)
+        }
+        if let maxCount, count > maxCount {
+            removeFirst(count - maxCount)
+        }
+    }
+}
+
+private extension CodexRunEvent {
+    func canCoalesceStreamingChunk(with next: CodexRunEvent) -> Bool {
+        guard title == "ACP",
+              next.title == title,
+              kind == next.kind,
+              kind == .answer || kind == .thinking else {
+            return false
+        }
+        return tokenUsage == nil || next.tokenUsage == nil
+    }
+}
+
 public enum CodexJSONEventParser {
     public static func parseLine(_ line: String) throws -> CodexRunEvent? {
         let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)

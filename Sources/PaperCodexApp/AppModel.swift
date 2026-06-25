@@ -6542,10 +6542,7 @@ final class AppModel: ObservableObject {
         guard let sessionID = activeCodexRunsBySessionID.first(where: { $0.value.id == runID })?.key else {
             return
         }
-        activeCodexRunsBySessionID[sessionID]?.events.append(event)
-        if let count = activeCodexRunsBySessionID[sessionID]?.events.count, count > 80 {
-            activeCodexRunsBySessionID[sessionID]?.events.removeFirst(count - 80)
-        }
+        activeCodexRunsBySessionID[sessionID]?.events.appendCoalescingStreamingChunk(event, maxCount: 80)
     }
 
     private func finishCodexRun(sessionID: String) {

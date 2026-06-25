@@ -4907,6 +4907,20 @@ func runCodexCLIChecks() throws {
     let longOutputEvent = CodexRunEvent(kind: .terminal, title: "Command output", detail: String(repeating: "a", count: 180) + "\nsecond line")
     try check(longOutputEvent.previewDetail.count <= 96, "terminal preview should be truncated")
     try check(!longOutputEvent.previewDetail.contains("second line"), "terminal preview should only show the first line")
+    var streamingEvents = [
+        CodexRunEvent(id: "acp-1", kind: .answer, title: "ACP", detail: "你", createdAt: Date(timeIntervalSince1970: 1))
+    ]
+    streamingEvents.appendCoalescingStreamingChunk(
+        CodexRunEvent(id: "acp-2", kind: .answer, title: "ACP", detail: "好", createdAt: Date(timeIntervalSince1970: 2)),
+        maxCount: 80
+    )
+    try check(streamingEvents.count == 1, "ACP answer chunks should be coalesced into one visible event")
+    try check(streamingEvents[0].id == "acp-1", "coalescing ACP chunks should preserve the first visible event identity")
+    try check(streamingEvents[0].detail == "你好", "coalescing ACP chunks should append text in arrival order")
+    try check(streamingEvents[0].createdAt == Date(timeIntervalSince1970: 2), "coalesced ACP event should keep the latest update timestamp")
+    streamingEvents.appendCoalescingStreamingChunk(CodexRunEvent(kind: .tool, title: "read_file", detail: "workspace_manifest.json"), maxCount: 80)
+    streamingEvents.appendCoalescingStreamingChunk(CodexRunEvent(kind: .answer, title: "ACP", detail: "新"), maxCount: 80)
+    try check(streamingEvents.count == 3, "non-streaming events should break ACP chunk coalescing")
     let toolEvent = try CodexJSONEventParser.parseLine(#"{"type":"tool_call","name":"web.search","arguments":{"query":"paper"}}"#)
     try check(toolEvent?.kind == .tool, "non-terminal tool calls should be classified as tool events")
     try check(toolEvent?.title == "web.search", "tool events should show the tool name")

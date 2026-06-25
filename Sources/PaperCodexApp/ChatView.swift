@@ -1477,8 +1477,19 @@ private struct CodexRunEventRow: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
-                    .lineLimit(event.kind == .tool ? 3 : 2)
+                    .lineLimit(detailLineLimit)
             }
+        }
+    }
+
+    private var detailLineLimit: Int? {
+        switch event.kind {
+        case .answer:
+            nil
+        case .tool:
+            3
+        default:
+            2
         }
     }
 
