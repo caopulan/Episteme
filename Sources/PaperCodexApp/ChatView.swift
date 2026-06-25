@@ -1409,7 +1409,7 @@ private struct CodexRunBubble: View {
     }
 
     var body: some View {
-        HStack {
+        HStack(alignment: .top, spacing: 0) {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 8) {
                     ProgressView()
@@ -1433,6 +1433,7 @@ private struct CodexRunBubble: View {
                     }
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(12)
             .background(Color(nsColor: .textBackgroundColor))
             .overlay(
@@ -1440,8 +1441,10 @@ private struct CodexRunBubble: View {
                     .stroke(Color.accentColor.opacity(0.22), lineWidth: 1)
             )
             .clipShape(RoundedRectangle(cornerRadius: 8))
-            Spacer(minLength: 32)
+            .paperCodexReadableLineLimit()
+            Spacer(minLength: 0)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var statusText: String {
@@ -1478,7 +1481,10 @@ private struct CodexRunEventRow: View {
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
                     .lineLimit(detailLineLimit)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 

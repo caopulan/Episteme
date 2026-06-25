@@ -3424,6 +3424,29 @@ func runUIDesignSourceChecks() throws {
     } else {
         throw CheckFailure(description: "message bubble source should remain inspectable")
     }
+    if let codexRunBubbleRange = chatSource.range(of: "private struct CodexRunBubble: View"),
+       let codexRunBubbleEndRange = chatSource.range(of: "private struct CodexRunEventRow: View", range: codexRunBubbleRange.upperBound..<chatSource.endIndex) {
+        let codexRunBubbleSource = String(chatSource[codexRunBubbleRange.lowerBound..<codexRunBubbleEndRange.lowerBound])
+        try check(
+            codexRunBubbleSource.contains(".paperCodexReadableLineLimit()")
+                && codexRunBubbleSource.contains(".frame(maxWidth: .infinity, alignment: .leading)")
+                && codexRunBubbleSource.contains("Spacer(minLength: 0)"),
+            "running Agent bubble should have explicit readable-width constraints instead of expanding horizontally with streamed ACP text"
+        )
+    } else {
+        throw CheckFailure(description: "CodexRunBubble source should remain inspectable")
+    }
+    if let codexRunEventRowRange = chatSource.range(of: "private struct CodexRunEventRow: View"),
+       let codexRunEventRowEndRange = chatSource.range(of: "private struct MessageBubble: View", range: codexRunEventRowRange.upperBound..<chatSource.endIndex) {
+        let codexRunEventRowSource = String(chatSource[codexRunEventRowRange.lowerBound..<codexRunEventRowEndRange.lowerBound])
+        try check(
+            codexRunEventRowSource.contains(".frame(maxWidth: .infinity, alignment: .leading)")
+                && codexRunEventRowSource.contains(".fixedSize(horizontal: false, vertical: true)"),
+            "running Agent event rows should wrap long streamed ACP answer text inside the available width"
+        )
+    } else {
+        throw CheckFailure(description: "CodexRunEventRow source should remain inspectable")
+    }
     try check(
         chatSource.contains(".padding(16)\n                    .frame(maxWidth: .infinity, alignment: .leading)")
             && chatSource.contains("expandsHorizontally")
