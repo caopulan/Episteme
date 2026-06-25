@@ -74,64 +74,70 @@ struct ChatView: View {
     }
 
     private var chatPanel: some View {
-        VStack(spacing: 0) {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 12) {
-                        if model.messages.isEmpty && visibleActiveCodexRun == nil {
-                            ContentUnavailableView(
-                                "No Messages",
-                                systemImage: "text.bubble",
-                                description: Text("Select text in the PDF, then ask \(model.selectedChatRuntimeDisplayName) in this session. The selected source appears as a quoted reply.")
-                            )
-                            .padding(.top, 80)
-                        } else {
-                            ForEach(model.messages) { message in
-                                MessageBubble(
-                                    message: message,
-                                    isBusy: isCurrentSessionSending,
-                                    messageFontSize: model.chatMessageFontSize,
-                                    fontFamily: model.chatFontFamily,
-                                    onCitation: { citationID in
-                                        model.jumpToCitation(citationID)
-                                    },
-                                    onRetryFailure: { messageID in
-                                        Task {
-                                            await model.retryCodexFailure(messageID: messageID)
-                                        }
-                                    },
-                                    onNewSession: {
-                                        model.startFreshSessionFromCurrentPaperSet()
-                                    },
-                                    onGeneratedImagePreview: { url in
-                                        selectedGeneratedImageURL = url
-                                    }
+        GeometryReader { geometry in
+            let paneWidth = geometry.size.width
+            let messageMaxContentWidth = max(1, paneWidth - 32)
+            VStack(spacing: 0) {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 12) {
+                            if model.messages.isEmpty && visibleActiveCodexRun == nil {
+                                ContentUnavailableView(
+                                    "No Messages",
+                                    systemImage: "text.bubble",
+                                    description: Text("Select text in the PDF, then ask \(model.selectedChatRuntimeDisplayName) in this session. The selected source appears as a quoted reply.")
                                 )
-                                .id(message.id)
+                                .padding(.top, 80)
+                            } else {
+                                ForEach(model.messages) { message in
+                                    MessageBubble(
+                                        message: message,
+                                        isBusy: isCurrentSessionSending,
+                                        messageFontSize: model.chatMessageFontSize,
+                                        fontFamily: model.chatFontFamily,
+                                        maxContentWidth: messageMaxContentWidth,
+                                        onCitation: { citationID in
+                                            model.jumpToCitation(citationID)
+                                        },
+                                        onRetryFailure: { messageID in
+                                            Task {
+                                                await model.retryCodexFailure(messageID: messageID)
+                                            }
+                                        },
+                                        onNewSession: {
+                                            model.startFreshSessionFromCurrentPaperSet()
+                                        },
+                                        onGeneratedImagePreview: { url in
+                                            selectedGeneratedImageURL = url
+                                        }
+                                    )
+                                    .id(message.id)
+                                }
+                                if let activeCodexRun = visibleActiveCodexRun {
+                                    CodexRunBubble(run: activeCodexRun, maxContentWidth: messageMaxContentWidth)
+                                        .id("active-run")
+                                }
+                                Color.clear
+                                    .frame(height: 1)
+                                    .id("chat-bottom")
                             }
-                            if let activeCodexRun = visibleActiveCodexRun {
-                                CodexRunBubble(run: activeCodexRun)
-                                    .id("active-run")
-                            }
-                            Color.clear
-                                .frame(height: 1)
-                                .id("chat-bottom")
                         }
+                        .padding(16)
+                        .frame(width: paneWidth, alignment: .leading)
                     }
-                    .padding(16)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .onChange(of: model.messages.count) { _, _ in
+                        scrollToBottom(proxy)
+                    }
+                    .onChange(of: visibleActiveCodexRun?.events.count ?? 0) { _, _ in
+                        scrollToBottom(proxy)
+                    }
+                    .onAppear {
+                        scrollToBottom(proxy)
+                    }
                 }
-                .onChange(of: model.messages.count) { _, _ in
-                    scrollToBottom(proxy)
-                }
-                .onChange(of: visibleActiveCodexRun?.events.count ?? 0) { _, _ in
-                    scrollToBottom(proxy)
-                }
-                .onAppear {
-                    scrollToBottom(proxy)
-                }
+                composer
             }
-            composer
+            .frame(width: paneWidth, height: geometry.size.height)
         }
         .overlay {
             if let selectedGeneratedImageURL {
@@ -1393,6 +1399,11 @@ private struct AgentStatusLine: View {
 
 private struct CodexRunBubble: View {
     var run: ActiveCodexRun
+    var maxContentWidth: CGFloat
+
+    private var constrainedMaxContentWidth: CGFloat {
+        max(1, min(maxContentWidth, PaperCodexTypography.readableLineWidth))
+    }
 
     private var visibleEvents: [CodexRunEvent] {
         Array(run.events.filter { $0.kind == .thinking || $0.kind == .tool || $0.kind == .answer || $0.kind == .usage }.suffix(8))
@@ -1441,7 +1452,7 @@ private struct CodexRunBubble: View {
                     .stroke(Color.accentColor.opacity(0.22), lineWidth: 1)
             )
             .clipShape(RoundedRectangle(cornerRadius: 8))
-            .paperCodexReadableLineLimit()
+            .frame(width: constrainedMaxContentWidth, alignment: .leading)
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1574,6 +1585,7 @@ private struct MessageBubble: View {
     var isBusy: Bool
     var messageFontSize: Double
     var fontFamily: ChatFontFamily
+    var maxContentWidth: CGFloat
     var onCitation: (String) -> Void
     var onRetryFailure: (String) -> Void
     var onNewSession: () -> Void
@@ -1597,6 +1609,10 @@ private struct MessageBubble: View {
 
     private var failureNotice: CodexFailureNotice? {
         CodexFailureNotice.parse(message.content)
+    }
+
+    private var constrainedMaxContentWidth: CGFloat {
+        max(1, min(maxContentWidth, PaperCodexTypography.readableLineWidth))
     }
 
     private var renderedMarkdown: String {
@@ -1646,7 +1662,7 @@ private struct MessageBubble: View {
     }
 
     private var chatBubbleMaximumContentWidth: CGFloat {
-        PaperCodexTypography.readableLineWidth - 26
+        max(44, constrainedMaxContentWidth - 26)
     }
 
     private var copyMarkdownButtonForeground: Color {
@@ -1671,11 +1687,14 @@ private struct MessageBubble: View {
     }
 
     var body: some View {
-        if isUser {
-            userMessageRow
-        } else {
-            agentMessageRow
+        Group {
+            if isUser {
+                userMessageRow
+            } else {
+                agentMessageRow
+            }
         }
+        .frame(width: constrainedMaxContentWidth, alignment: .leading)
     }
 
     private var userMessageRow: some View {

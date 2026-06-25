@@ -3411,6 +3411,8 @@ func runUIDesignSourceChecks() throws {
         let messageBubbleSource = String(chatSource[messageBubbleRange.lowerBound..<messageBubbleEndRange.lowerBound])
         try check(
             messageBubbleSource.contains("private var chatBubbleContentWidth: CGFloat?")
+                && messageBubbleSource.contains("var maxContentWidth: CGFloat")
+                && messageBubbleSource.contains(".frame(width: constrainedMaxContentWidth")
                 && messageBubbleSource.contains(".frame(width: chatBubbleContentWidth, alignment: .leading)")
                 && messageBubbleSource.contains("expandsHorizontally: true")
                 && messageBubbleSource.contains(".frame(maxWidth: .infinity, alignment: .leading)")
@@ -3428,10 +3430,12 @@ func runUIDesignSourceChecks() throws {
        let codexRunBubbleEndRange = chatSource.range(of: "private struct CodexRunEventRow: View", range: codexRunBubbleRange.upperBound..<chatSource.endIndex) {
         let codexRunBubbleSource = String(chatSource[codexRunBubbleRange.lowerBound..<codexRunBubbleEndRange.lowerBound])
         try check(
-            codexRunBubbleSource.contains(".paperCodexReadableLineLimit()")
+            codexRunBubbleSource.contains("var maxContentWidth: CGFloat")
+                && codexRunBubbleSource.contains("constrainedMaxContentWidth")
+                && codexRunBubbleSource.contains(".frame(width: constrainedMaxContentWidth")
                 && codexRunBubbleSource.contains(".frame(maxWidth: .infinity, alignment: .leading)")
                 && codexRunBubbleSource.contains("Spacer(minLength: 0)"),
-            "running Agent bubble should have explicit readable-width constraints instead of expanding horizontally with streamed ACP text"
+            "running Agent bubble should use the current split-pane width instead of expanding horizontally with streamed ACP text"
         )
     } else {
         throw CheckFailure(description: "CodexRunBubble source should remain inspectable")
@@ -3448,11 +3452,15 @@ func runUIDesignSourceChecks() throws {
         throw CheckFailure(description: "CodexRunEventRow source should remain inspectable")
     }
     try check(
-        chatSource.contains(".padding(16)\n                    .frame(maxWidth: .infinity, alignment: .leading)")
+        chatSource.contains("GeometryReader { geometry in")
+            && chatSource.contains("let paneWidth = geometry.size.width")
+            && chatSource.contains("let messageMaxContentWidth = max(1, paneWidth - 32)")
+            && chatSource.contains("maxContentWidth: messageMaxContentWidth")
+            && chatSource.contains(".frame(width: paneWidth, alignment: .leading)")
             && chatSource.contains("expandsHorizontally")
             && chatSource.contains("setContentHuggingPriority(.defaultLow, for: .horizontal)")
             && chatSource.contains("setContentCompressionResistancePriority(.defaultLow, for: .horizontal)"),
-        "chat scroll content and Markdown WebViews should carry full-width Agent layout constraints through to WKWebView"
+        "chat scroll content should derive message widths from the current split-pane geometry and carry width constraints through to WKWebView"
     )
     try check(
         chatSource.contains("private struct UserMessageBubbleBackground: View")
