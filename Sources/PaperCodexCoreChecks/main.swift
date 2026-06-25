@@ -2800,11 +2800,14 @@ func runUILayoutSourceChecks() throws {
             && pdfKitSource.contains("resolvedScaleFactor()")
             && pdfKitSource.contains("clampedManualScale")
             && pdfKitSource.contains("restoreViewportCenter")
+            && pdfKitSource.contains("override func magnify")
+            && pdfKitSource.contains("handlePDFMagnify")
+            && pdfKitSource.contains("restoreViewportAfterManualResize")
             && pdfKitSource.contains("manualZoomMinimumScale")
             && pdfKitSource.contains("manualZoomMaximumScale")
             && !pdfKitSource.contains("pdfView.scaleFactor = min(pdfView.scaleFactor * 1.18")
             && !pdfKitSource.contains("pdfView.scaleFactor = max(pdfView.scaleFactor / 1.18"),
-        "PDF zoom commands should leave auto-fit through a stable captured scale and preserve the visible center"
+        "PDF zoom commands and trackpad magnification should leave auto-fit through a stable captured scale and preserve the visible center"
     )
     try check(
         pdfKitSource.contains("ResponsivePDFView") && pdfKitSource.contains("refitForCurrentWidth"),

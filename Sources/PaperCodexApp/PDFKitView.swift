@@ -4,7 +4,9 @@ import SwiftUI
 
 fileprivate final class ResponsivePDFView: PDFView {
     var onMouseDown: ((ResponsivePDFView, NSEvent) -> Bool)?
-    var onBoundsChanged: (() -> Void)?
+    var onMagnify: ((ResponsivePDFView, NSEvent) -> Bool)?
+    var onFrameWillChange: (() -> PDFViewportPosition?)?
+    var onBoundsChanged: ((PDFViewportPosition?) -> Void)?
 
     override var mouseDownCanMoveWindow: Bool {
         false
@@ -21,11 +23,20 @@ fileprivate final class ResponsivePDFView: PDFView {
         super.mouseDown(with: event)
     }
 
+    override func magnify(with event: NSEvent) {
+        if onMagnify?(self, event) == true {
+            return
+        }
+        super.magnify(with: event)
+    }
+
     override func setFrameSize(_ newSize: NSSize) {
         let oldSize = frame.size
+        let didChangeSize = abs(oldSize.width - newSize.width) > 0.5 || abs(oldSize.height - newSize.height) > 0.5
+        let previousViewportCenter = didChangeSize ? onFrameWillChange?() : nil
         super.setFrameSize(newSize)
-        if abs(oldSize.width - newSize.width) > 0.5 || abs(oldSize.height - newSize.height) > 0.5 {
-            onBoundsChanged?()
+        if didChangeSize {
+            onBoundsChanged?(previousViewportCenter)
         }
     }
 }
@@ -78,8 +89,14 @@ struct PDFKitView: NSViewRepresentable {
         view.onMouseDown = { [weak coordinator] pdfView, event in
             coordinator?.handlePDFMouseDown(in: pdfView, event: event) ?? false
         }
-        view.onBoundsChanged = { [weak coordinator] in
-            coordinator?.pdfViewBoundsChanged()
+        view.onMagnify = { [weak coordinator] pdfView, event in
+            coordinator?.handlePDFMagnify(in: pdfView, event: event) ?? false
+        }
+        view.onFrameWillChange = { [weak coordinator] in
+            coordinator?.currentViewportPosition()
+        }
+        view.onBoundsChanged = { [weak coordinator] previousViewportCenter in
+            coordinator?.pdfViewBoundsChanged(previousViewportCenter: previousViewportCenter)
         }
         context.coordinator.pdfView = view
         NotificationCenter.default.addObserver(
@@ -474,8 +491,27 @@ struct PDFKitView: NSViewRepresentable {
         }
 
         @MainActor
-        func pdfViewBoundsChanged() {
-            scheduleWidthRefit()
+        func pdfViewBoundsChanged(previousViewportCenter: PDFViewportPosition?) {
+            if shouldFitWidthOnResize {
+                scheduleWidthRefit()
+                return
+            }
+            restoreViewportAfterManualResize(previousViewportCenter)
+        }
+
+        @MainActor
+        private func restoreViewportAfterManualResize(_ previousViewportCenter: PDFViewportPosition?) {
+            guard let previousViewportCenter else {
+                scheduleViewportReport()
+                reportDocumentStatus()
+                return
+            }
+            restoreViewportCenter(previousViewportCenter)
+            DispatchQueue.main.async { [weak self] in
+                self?.restoreViewportCenter(previousViewportCenter)
+                self?.scheduleViewportReport()
+                self?.reportDocumentStatus()
+            }
         }
 
         @MainActor
@@ -651,6 +687,19 @@ struct PDFKitView: NSViewRepresentable {
         }
 
         @MainActor
+        fileprivate func handlePDFMagnify(in pdfView: ResponsivePDFView, event: NSEvent) -> Bool {
+            let magnification = event.magnification
+            guard magnification.isFinite else {
+                return true
+            }
+            let multiplier = max(0.05, 1 + magnification)
+            applyManualZoom(multiplier: multiplier)
+            scheduleViewportReport()
+            reportDocumentStatus()
+            return true
+        }
+
+        @MainActor
         private func showCitationPreviewPopover(_ preview: PDFCitationPreview, at point: NSPoint, in pdfView: PDFView) {
             showPopover(
                 at: point,
@@ -808,7 +857,7 @@ struct PDFKitView: NSViewRepresentable {
         }
 
         @MainActor
-        private func currentViewportPosition() -> PDFViewportPosition? {
+        fileprivate func currentViewportPosition() -> PDFViewportPosition? {
             guard let pdfView,
                   let document = pdfView.document,
                   let page = pdfView.currentPage else {
